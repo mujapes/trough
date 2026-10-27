@@ -4,8 +4,8 @@
 # `dpkg -L` lists, so no download and nothing unverified. Then: GCC specs, glibc link names,
 # tfix (PT_INTERP -> texec, re-rooted symlinks, refuse dangling links).
 #   tools/root.sh <out.zip> [stage=/data/data/t.t/d]
-# The zip holds regular files; symlinks and exec bits travel as links.txt / exec.txt because
-# Android's ZipInputStream can create neither.
+# The zip holds regular files; empty dirs, symlinks and exec bits travel as dirs.txt / links.txt /
+# exec.txt because Android's ZipInputStream creates none of them.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$(realpath -m "${1:?usage: root.sh <out.zip> [stage]}")"
@@ -130,7 +130,8 @@ SRC
 
 python3 "$ROOT/tools/tfix.py" "$D" >&2   # l/ exists here (tests/run.sh) and on the phone (Root)
 
-(cd "$D" && find . -type l -printf '%P\t%l\n' > links.txt \
+(cd "$D" && find . -type d -empty -printf '%P\n' > dirs.txt \
+    && find . -type l -printf '%P\t%l\n' > links.txt \
     && find . -type f -perm -u+x ! -name '*.so*' -printf '%P\n' > exec.txt)
 rm -f "$OUT"; (cd "$D" && find . -type f -print0 | xargs -0 zip -q -X "$OUT")
 echo "root.sh: $(du -sh "$D" | cut -f1) -> $(du -h "$OUT" | cut -f1) ($(wc -l < "$D/links.txt") links, $(wc -l < "$D/exec.txt") executables)" >&2

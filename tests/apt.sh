@@ -3,11 +3,15 @@
 # simulated app seccomp filter, ordinary uid): Debian's signatures verified by the root's gpgv
 # via APT::Key::GPGVCommand, packages with maintainer scripts installed (#!/bin/sh -> execmap),
 # tfix after dpkg, the installed programs run. Plus the negative control: a wrong keyring must
-# make apt refuse the index. Run after tools/root.sh. Network: deb.debian.org.
+# make apt refuse the index. Tests the shipped root.zip, unpacked as DebRoot does (replaces d/).
+# Network: deb.debian.org.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 D=/data/data/t.t/d; P="$ROOT/tests/phonefs.sh"; F=0
 ok() { if [ "$1" = 0 ]; then echo "ok    $2"; else echo "FAIL  $2"; F=$((F+1)); fi; }
+# What ships: the root zip unpacked the way the phone does it, not the VM's build tree.
+ZIP="${ROOT_ZIP:-$HOME/.trough/root.zip}"
+"$ROOT/tools/unpack_root.sh" "$ZIP" "$D"
 [ -f /data/data/t.t/l/libexecmap.so ] || gcc -O2 -shared -fPIC -o /data/data/t.t/l/libexecmap.so "$ROOT/native/execmap/execmap.c" -ldl
 SRC=$D/etc/apt/sources.list.d/debian.sources
 cp "$SRC" "$SRC.good"

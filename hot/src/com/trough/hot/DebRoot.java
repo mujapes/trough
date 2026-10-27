@@ -12,8 +12,8 @@ import java.util.zip.ZipInputStream;
 
 /**
  * Installs Trough's Debian root (tools/root.sh: the self-hosting toolchain) at
- * /data/data/t.t/d. Regular files come from the zip; symlinks and exec bits from links.txt and
- * exec.txt, since ZipInputStream can create neither. Installed once per payload sha; a new
+ * /data/data/t.t/d. Regular files come from the zip; empty dirs, symlinks and exec bits from
+ * dirs.txt, links.txt and exec.txt, since ZipInputStream creates none of them. Installed once per payload sha; a new
  * payload is unpacked beside the old root and swapped in by rename.
  */
 final class DebRoot {
@@ -40,6 +40,7 @@ final class DebRoot {
                 files++;
             }
         }
+        for (String rel : lines(new File(fresh, "dirs.txt"))) new File(fresh, rel).mkdirs();   // apt needs its empty dirs
         int links = 0;
         for (String line : lines(new File(fresh, "links.txt"))) {
             int tab = line.indexOf('\t');
