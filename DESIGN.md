@@ -175,3 +175,16 @@ VM simulation (tests/seccomp_sim + hidden nsswitch.conf, exact /data/data/t.t la
 exec'd directly: threadtest; dnstest via python subprocess with env cleared and fds closed;
 claude --version; claude -p with a fake key -> DNS to 1.1.1.1:53, HTTPS to
 api.anthropic.com, server rejects the key. Everything but real credentials works.
+
+## trough-apt progress (2026-10-27, VM simulation under the phone's filter)
+- Stock apt-get resolved and downloaded into the isolated root d/ (libc6 pre-seeded as
+  installed, since Trough ships its own glibc). Stock dpkg installed as a normal user with
+  --admindir/--instdir/--force-not-root/--force-script-chrootless/--force-bad-path.
+- tools/tfix.py points every installed ELF at texec. jq installed this way ran under the
+  filter, loading only Trough's patched glibc (l/) and dpkg's libs (d/usr/lib).
+- apt and dpkg installed into d/ themselves (30 packages). Trough's own apt-get then fetched
+  InRelease over HTTPS under the filter.
+- Blocker: apt's sqv method runs /usr/bin/sqv by a fixed path with no config key, so
+  signature checks fail. Never work around this with trusted=yes. Options to try next: the
+  gpgv verification path, whose command is configurable; or run just the verifier through
+  the layer-3 proot fallback.

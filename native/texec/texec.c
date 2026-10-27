@@ -170,7 +170,8 @@ __attribute__((noreturn)) static void jump(u64 sp, u64 entry) {
 #define TROUGH_LD "/data/data/t.t/l/ld-linux-aarch64.so.1"
 #endif
 #ifndef TROUGH_LIB
-#define TROUGH_LIB "/data/data/t.t/l"
+/* Patched glibc first, then libraries dpkg installed under the Debian root d/. */
+#define TROUGH_LIB "/data/data/t.t/l:/data/data/t.t/d/usr/lib/aarch64-linux-gnu:/data/data/t.t/d/lib/aarch64-linux-gnu"
 #endif
 
 static int prefix(const char *s, const char *p) { while (*p) if (*s++ != *p++) return 0; return 1; }
