@@ -23,8 +23,13 @@ final class Root {
 
     static File install(Context ctx, File bundleDir) throws Exception {
         File root = ctx.getDataDir();  // /data/user/0/t.t, which /data/data/t.t reaches
-        if (!new File(DIR).getCanonicalPath().equals(root.getCanonicalPath()))
-            throw new IllegalStateException("data dir " + root + " is not " + DIR + " (package must be t.t)");
+        // /data/data is a bind mount of /data/user/0, not a symlink, so canonical paths differ
+        // for the same directory (phone, 10-27). Prove identity with a marker file instead.
+        String token = Long.toString(System.nanoTime());
+        writeText(new File(root, ".same"), token);
+        File via = new File(DIR, ".same");
+        if (!via.exists() || !token.equals(new String(Payloads.readSmall(via), "UTF-8")))
+            throw new IllegalStateException("data dir " + root + " is not reachable as " + DIR + " (package must be t.t)");
         replace(new File(bundleDir, "bin/texec"), new File(root, "x"), true);
         File lib = new File(root, "l");
         lib.mkdirs();
