@@ -14,11 +14,10 @@ jobs:
           sudo apt-get update -qq && sudo apt-get install -y -qq gcc-aarch64-linux-gnu
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0" >/dev/null
       - name: Build
-        env:
-          ANDROID_JAR: ${{ env.ANDROID_HOME }}/platforms/android-35/android.jar
-          D8_JAR: ${{ env.ANDROID_HOME }}/build-tools/35.0.0/lib/d8.jar
+        # ANDROID_HOME is set in the runner's shell, not the workflow env context.
         run: |
           BT="$ANDROID_HOME/build-tools/35.0.0"
+          export ANDROID_JAR="$ANDROID_HOME/platforms/android-35/android.jar" D8_JAR="$BT/lib/d8.jar"
           AAPT2="$BT/aapt2" ZIPALIGN="$BT/zipalign" APKSIGNER="$BT/apksigner" \
           KEYSTORE="$RUNNER_TEMP/ci.keystore" tools/build.sh
       - uses: actions/upload-artifact@v4
