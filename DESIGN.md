@@ -188,3 +188,15 @@ api.anthropic.com, server rejects the key. Everything but real credentials works
   signature checks fail. Never work around this with trusted=yes. Options to try next: the
   gpgv verification path, whose command is configurable; or run just the verifier through
   the layer-3 proot fallback.
+
+## MILESTONE 2026-10-27 12:55 -- claude runs natively inside Trough on the phone
+Pixel 7a, Android 17, package t.t, no VM, no proot, no root:
+- probe: set_robust_list, rseq, futex_waitv trapped (unchanged); stock static glibc 159.
+- exec'd directly via PT_INTERP /data/data/t.t/x: threadtest ok (145 ms); dnstest ok via
+  /data/data/t.t/r; claude --version 323 ms; claude -p with a fake key reached
+  api.anthropic.com and was refused.
+- Login moved encrypted (tools/send_creds.py -> hot/Creds.java), shared copy deleted.
+  `claude -p "Reply with exactly: trough-ok" --model haiku` -> "trough-ok" in 8.3 s.
+Next: Trough's own chat UI over claude's stream-json; a separate long-lived token for
+Trough (claude setup-token) so the VM and phone stop sharing one refresh token; trough-apt
+signature verification.
