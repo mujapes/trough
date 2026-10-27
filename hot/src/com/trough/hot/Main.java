@@ -178,6 +178,8 @@ public final class Main {
                         try { boot.put("probe", SelfTest.probe(activity, dir)); } catch (Throwable e) { boot.put("probe_error", String.valueOf(e)); }
                         step(boot, "providers");
                         try { boot.put("providers", SelfTest.providers()); } catch (Throwable e) { boot.put("providers_error", String.valueOf(e)); }
+                        step(boot, "apt");
+                        try { boot.put("apt", SelfTest.apt(activity)); } catch (Throwable e) { boot.put("apt_error", String.valueOf(e)); }
                         step(boot, "seed_merge");
                         try { boot.put("seed_merge", SelfTest.seedMerge(activity)); } catch (Throwable e) { boot.put("seed_merge_error", String.valueOf(e)); }
                         step(boot, "namespaces");

@@ -38,6 +38,22 @@ final class SelfTest {
         return r;
     }
 
+    /**
+     * trough-apt on the phone itself: the root's apt-get (wrapper: tfix after) fetches Debian's
+     * indexes, verifies them with the root's gpgv, installs jq and its library, and jq runs.
+     */
+    static JSONObject apt(Context ctx) throws Exception {
+        File w = new File(ctx.getCacheDir(), "apttest");
+        w.mkdirs();
+        String d = new File(ctx.getDataDir(), "d").getPath();
+        JSONObject r = new JSONObject();
+        r.put("update", exec(w, ctx, null, 600, d + "/usr/local/bin/apt-get", "update"));
+        r.put("install", exec(w, ctx, null, 600, d + "/usr/local/bin/apt-get", "install", "-y", "jq"));
+        r.put("jq", exec(w, ctx, null, 60, d + "/usr/bin/sh", "-c", "echo '{\"a\":[1,2]}' | jq -c .a"));
+        r.put("ok", r.getJSONObject("jq").getString("out").trim().equals("[1,2]"));
+        return r;
+    }
+
     /** native/probe: which syscalls the app filter traps, including the agent-sandbox ones. */
     static JSONObject probe(Context ctx, File bundle) throws Exception {
         JSONObject r = exec(ctx.getCacheDir(), ctx, new File(bundle, "bin/probe").getPath());
@@ -189,6 +205,10 @@ final class SelfTest {
     }
 
     private static JSONObject exec(File cwd, Context ctx, Map<String, String> extra, String... cmd) throws Exception {
+        return exec(cwd, ctx, extra, EXEC_TIMEOUT_S, cmd);
+    }
+
+    private static JSONObject exec(File cwd, Context ctx, Map<String, String> extra, long timeoutS, String... cmd) throws Exception {
         ProcessBuilder pb = new ProcessBuilder(cmd).directory(cwd).redirectErrorStream(true)
             .redirectInput(new File("/dev/null"));
         Map<String, String> env = pb.environment();
@@ -208,7 +228,7 @@ final class SelfTest {
         } }, "selftest-read");
         reader.setDaemon(true);
         reader.start();
-        boolean done = p.waitFor(EXEC_TIMEOUT_S, java.util.concurrent.TimeUnit.SECONDS);
+        boolean done = p.waitFor(timeoutS, java.util.concurrent.TimeUnit.SECONDS);
         if (!done) p.destroyForcibly();
         reader.join(2000);
         int exit = done ? p.exitValue() : -1;

@@ -392,3 +392,6 @@ dpkg's own configuration only; signatures fully verified.
   + jq with maintainer scripts; alternatives; programs run; dpkg db; remove), tests/execmap.sh
   17/17 (with a without-preload negative control), tests/tfix.sh 7/7, tests/run.sh 10/10 with
   execmap preloaded.
+- OPEN: a new root payload replaces d/ wholesale (DebRoot), which would drop packages agents
+  installed with apt. Next: root updates go through apt/dpkg on the device (the payload seeds
+  only a fresh install), so d/ is owned by dpkg from then on.
