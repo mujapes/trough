@@ -84,7 +84,7 @@ final class Chat implements Agent.Listener {
         input = new EditText(a);
         input.setTextColor(FG);
         input.setHintTextColor(DIM);
-        input.setHint("Message Claude");
+        input.setHint("Message (/help for commands)");
         input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
         input.setMaxLines(6);
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
@@ -230,6 +230,15 @@ final class Chat implements Agent.Listener {
             input.setText("");   // the sign-in code goes to claude's login only, never the feed or a model
             login.code(text);
             note("code sent, finishing sign-in");
+            return;
+        }
+        if (text.equals("/help")) {
+            input.setText("");
+            note("Tap the status line to pick the agent (" + android.text.TextUtils.join(", ", agents.keySet()) + ").\n"
+                + "/login  sign claude in on this phone (its own login, not the VM's)\n"
+                + "/key <secret>  API key for a model Trough runs itself (home/.trough/models.json)\n"
+                + "/reload  rebuild Trough from files/src now (it also does this after every turn)\n"
+                + "/help  this list");
             return;
         }
         if (text.equals("/login")) {
