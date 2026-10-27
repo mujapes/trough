@@ -39,6 +39,25 @@ final class Root {
         return root;
     }
 
+    /**
+     * The userland environment every process Trough starts gets: the Debian root d/ first on
+     * PATH, and the knobs its stock tools offer for their compiled-in /usr and /etc paths
+     * (git's exec path, templates and CA bundle). Clean: nothing inherited from the app process.
+     */
+    static java.util.Map<String, String> env(Context ctx, File tmp) {
+        java.util.Map<String, String> e = new java.util.HashMap<>();
+        String d = new File(ctx.getDataDir(), "d").getPath();
+        e.put("HOME", new File(ctx.getFilesDir(), "home").getPath());
+        e.put("TMPDIR", tmp.getPath());   // Android has no /tmp
+        e.put("SHELL", "/system/bin/sh");
+        e.put("PATH", d + "/usr/bin:" + new File(ctx.getDataDir(), "bin").getPath() + ":/system/bin");
+        e.put("GIT_EXEC_PATH", d + "/usr/lib/git-core");
+        e.put("GIT_TEMPLATE_DIR", d + "/usr/share/git-core/templates");
+        e.put("GIT_CONFIG_NOSYSTEM", "1");
+        e.put("GIT_SSL_CAINFO", d + "/etc/ssl/certs/ca-certificates.crt");
+        return e;
+    }
+
     private static void replace(File from, File to, boolean exec) throws Exception {
         File tmp = new File(to.getPath() + ".new");
         try (InputStream in = new FileInputStream(from); OutputStream o = new FileOutputStream(tmp)) {

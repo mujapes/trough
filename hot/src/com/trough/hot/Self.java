@@ -7,9 +7,7 @@ import org.json.JSONObject;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -34,29 +32,105 @@ final class Self {
     static File src(Context ctx) { return new File(ctx.getFilesDir(), "src"); }
 
     /**
-     * Makes files/src the bundle's source if the bundle's differs from what was last seeded.
-     * Local edits made since the last seed are moved aside to src.<time>, never deleted.
+     * files/src is a git repo. The bundle's source is committed on branch "bundle" (straight
+     * from the bundle dir, through a separate index, never touching the work tree) and merged
+     * into "main", where the agent's edits live, so both kinds of change survive. If the merge
+     * conflicts, main is saved as agent-<time> and reset to the bundle: nothing is ever lost.
      */
     static String seed(Context ctx, File bundle) throws Exception {
-        File from = new File(bundle, "src"), to = src(ctx), mark = new File(ctx.getFilesDir(), "src.seed");
+        File from = new File(bundle, "src"), repo = src(ctx);
         if (!from.isDirectory()) return "bundle has no src";
-        String want = treeSha(from);
-        String had = mark.exists() ? new String(Payloads.readSmall(mark), "UTF-8").trim() : "";
-        if (want.equals(had) && to.isDirectory()) return "current";
-        String note = "seeded " + want.substring(0, 8);
-        if (to.isDirectory()) {
-            if (!treeSha(to).equals(had)) {
-                File aside = new File(ctx.getFilesDir(), "src." + System.currentTimeMillis());
-                if (!to.renameTo(aside)) throw new IllegalStateException("rename " + to);
-                note += ", local edits kept in " + aside.getName();
-            } else Main.deleteTree(to);
+        // Before files/src was a repo, src.seed held the hash of the last seeded tree.
+        File mark = new File(ctx.getFilesDir(), "src.seed");
+        if (mark.exists() && !new File(repo, ".git").isDirectory()
+                && treeSha(repo).equals(new String(Payloads.readSmall(mark), "UTF-8").trim())) Main.deleteTree(repo);
+        mark.delete();
+        return seed(ctx, from, repo);
+    }
+
+    static String seed(Context ctx, File from, File repo) throws Exception {
+        repo.mkdirs();
+        if (!new File(repo, ".git").isDirectory()) {
+            git(ctx, repo, null, "init", "-q", "-b", "main");
+            if (!git(ctx, repo, null, "status", "--porcelain").isEmpty()) {   // a pre-git files/src
+                git(ctx, repo, null, "add", "-A");
+                git(ctx, repo, null, "commit", "-q", "-m", "agent edits from before files/src was a repo");
+            }
         }
-        File tmp = new File(ctx.getFilesDir(), "src.new");
-        Main.deleteTree(tmp);
-        copyTree(from, tmp);
-        if (!tmp.renameTo(to)) throw new IllegalStateException("rename " + to);
-        Payloads.writeSmall(mark, want);
-        return note;
+        File index = new File(repo.getParentFile(), repo.getName() + ".bundle-index");
+        index.delete();
+        String tree;
+        try {
+            git(ctx, from, index, "--git-dir=" + new File(repo, ".git"), "add", "-A", ".");
+            tree = git(ctx, from, index, "--git-dir=" + new File(repo, ".git"), "write-tree");
+        } finally { index.delete(); }
+        String old = gitOr(ctx, repo, "rev-parse", "-q", "--verify", "bundle^{tree}");
+        String head = gitOr(ctx, repo, "rev-parse", "-q", "--verify", "main");
+        if (tree.equals(old) && !head.isEmpty()) return "current";
+        String parent = gitOr(ctx, repo, "rev-parse", "-q", "--verify", "bundle");
+        String commit = parent.isEmpty()
+            ? git(ctx, repo, null, "commit-tree", tree, "-m", "bundle")
+            : git(ctx, repo, null, "commit-tree", tree, "-p", parent, "-m", "bundle");
+        git(ctx, repo, null, "update-ref", "refs/heads/bundle", commit);
+        if (head.isEmpty()) {
+            git(ctx, repo, null, "reset", "-q", "--hard", "bundle");
+            return "seeded " + commit.substring(0, 8);
+        }
+        commitEdits(ctx, repo, "agent edits");
+        try {
+            git(ctx, repo, null, "merge", "-q", "--no-edit", "--allow-unrelated-histories", "-m", "merge bundle", "bundle");
+            return "merged bundle " + commit.substring(0, 8);
+        } catch (IllegalStateException conflict) {
+            gitOr(ctx, repo, "merge", "--abort");
+            String keep = "agent-" + System.currentTimeMillis();
+            git(ctx, repo, null, "branch", keep, "main");
+            git(ctx, repo, null, "reset", "-q", "--hard", "bundle");
+            return "bundle " + commit.substring(0, 8) + " conflicted with local edits; they are on branch " + keep;
+        }
+    }
+
+    /** Commits whatever the agent changed in files/src; no-op when clean. */
+    static void commitEdits(Context ctx, File repo, String message) throws Exception {
+        if (!new File(repo, ".git").isDirectory() || git(ctx, repo, null, "status", "--porcelain").isEmpty()) return;
+        git(ctx, repo, null, "add", "-A");
+        git(ctx, repo, null, "commit", "-q", "-m", message);
+    }
+
+    /** Runs the root's git; returns trimmed stdout, throws IllegalStateException on failure. */
+    static String git(Context ctx, File cwd, File index, String... args) throws Exception {
+        String[] cmd = new String[args.length + 1];
+        cmd[0] = new File(ctx.getDataDir(), "d/usr/bin/git").getPath();
+        System.arraycopy(args, 0, cmd, 1, args.length);
+        ProcessBuilder pb = new ProcessBuilder(cmd).directory(cwd).redirectInput(new File("/dev/null"));
+        Map<String, String> env = pb.environment();
+        env.clear();
+        env.putAll(Root.env(ctx, ctx.getCacheDir()));
+        env.put("GIT_AUTHOR_NAME", "Trough");
+        env.put("GIT_AUTHOR_EMAIL", "trough@t.t");
+        env.put("GIT_COMMITTER_NAME", "Trough");
+        env.put("GIT_COMMITTER_EMAIL", "trough@t.t");
+        if (index != null) { env.put("GIT_INDEX_FILE", index.getPath()); env.put("GIT_WORK_TREE", cwd.getPath()); }
+        Process p = pb.start();
+        final ByteArrayOutputStream err = new ByteArrayOutputStream();
+        final InputStream es = p.getErrorStream();
+        Thread drain = new Thread(new Runnable() { @Override public void run() {
+            byte[] b = new byte[4096];
+            try { for (int n; (n = es.read(b)) > 0; ) err.write(b, 0, n); } catch (Exception ignored) {}
+        } });
+        drain.start();
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        try (InputStream in = p.getInputStream()) {
+            byte[] b = new byte[8192];
+            for (int n; (n = in.read(b)) > 0; ) out.write(b, 0, n);
+        }
+        int exit = p.waitFor();
+        drain.join();
+        if (exit != 0) throw new IllegalStateException("git " + args[0] + " (" + exit + "): " + err.toString("UTF-8").trim());
+        return out.toString("UTF-8").trim();
+    }
+
+    private static String gitOr(Context ctx, File cwd, String... args) {
+        try { return git(ctx, cwd, null, args); } catch (Exception e) { return ""; }
     }
 
     static File builds(Context ctx) { return new File(ctx.getFilesDir(), "self"); }
@@ -79,9 +153,7 @@ final class Self {
             .redirectErrorStream(true).redirectInput(new File("/dev/null"));
         Map<String, String> env = pb.environment();
         env.clear();
-        env.put("HOME", new File(ctx.getFilesDir(), "home").getPath());
-        env.put("TMPDIR", cache.getPath());
-        env.put("PATH", new File(ctx.getDataDir(), "d/usr/bin").getPath() + ":/system/bin");
+        env.putAll(Root.env(ctx, cache));
         long t0 = System.nanoTime();
         Process p = pb.start();
         ByteArrayOutputStream log = new ByteArrayOutputStream();
@@ -138,20 +210,7 @@ final class Self {
     private static void list(File f, String rel, List<String> out) {
         if (!f.isDirectory()) { out.add(rel); return; }
         File[] kids = f.listFiles();
-        if (kids != null) for (File k : kids) list(k, rel.isEmpty() ? k.getName() : rel + "/" + k.getName(), out);
-    }
-
-    private static void copyTree(File from, File to) throws Exception {
-        if (from.isDirectory()) {
-            to.mkdirs();
-            File[] kids = from.listFiles();
-            if (kids != null) for (File k : kids) copyTree(k, new File(to, k.getName()));
-            return;
-        }
-        byte[] b = new byte[1 << 16];
-        try (InputStream in = new FileInputStream(from); OutputStream o = new FileOutputStream(to)) {
-            for (int n; (n = in.read(b)) > 0; ) o.write(b, 0, n);
-        }
+        if (kids != null) for (File k : kids) if (!(rel.isEmpty() && k.getName().equals(".git"))) list(k, rel.isEmpty() ? k.getName() : rel + "/" + k.getName(), out);
     }
 
     private static String sha(byte[] b) throws Exception { return hex(MessageDigest.getInstance("SHA-256").digest(b)); }

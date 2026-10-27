@@ -120,7 +120,7 @@ final class Chat implements Session.Listener {
         String text = input.getText().toString().trim();
         if (text.equals("/reload")) {
             input.setText("");
-            note("rebuilding Trough from files/src");
+            note("rebuilding Trough from files/src (swaps in only if it changed)");
             reload.run();
             return;
         }
@@ -248,6 +248,7 @@ final class Chat implements Session.Listener {
             if (!ok) note("turn ended with an error");
             report("result", (ok ? "ok" : "error") + String.format(" $%.4f %d ms", c, ms));
             paint();
+            reload.run();   // the agent may have edited Trough's source: rebuild, swap if changed
         } });
     }
 

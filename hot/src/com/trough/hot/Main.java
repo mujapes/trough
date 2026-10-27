@@ -9,7 +9,6 @@ import org.json.JSONObject;
 
 import java.io.File;
 import java.lang.reflect.Method;
-import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -55,6 +54,7 @@ public final class Main {
                     boot.put("self_build", b);
                     File built = Self.build(activity, Self.src(activity), dir, bootPayloads, Self.builds(activity), b);
                     self = Self.load(activity, built, dir, Main.class.getName());
+                    runningKey = built.getName();
                     boot.put("running", "self " + built.getName().substring(0, 12));
                 } catch (Throwable e) {
                     put(boot, "self_error", String.valueOf(e));
@@ -69,28 +69,47 @@ public final class Main {
         }, "trough-boot").start();
     }
 
-    /** Boot side of /reload: rebuild files/src and swap in the result, or keep what runs. */
+    /**
+     * Boot side of reload: called when the running agent's turn ends and by /reload. Rebuilds
+     * files/src; swaps only if the build differs from what runs. On failure the old build keeps
+     * running and the build log lands in work/.trough/build.log, where the agent can read it.
+     */
+    private static final java.util.concurrent.atomic.AtomicBoolean reloading = new java.util.concurrent.atomic.AtomicBoolean();
+    private static volatile String runningKey = "";
+
     private static final Runnable RELOAD = new Runnable() {
         @Override public void run() {
+            if (bootPayloads == null || !reloading.compareAndSet(false, true)) return;
             new Thread(new Runnable() {
                 @Override public void run() {
                     final JSONObject boot = new JSONObject();
+                    final JSONObject b = new JSONObject();
+                    File log = new File(work(bootActivity), ".trough/build.log");
                     try {
-                        JSONObject b = new JSONObject();
                         boot.put("self_build", b).put("reload", true);
-                        File built = Self.build(bootActivity, Self.src(bootActivity), bootDir, bootPayloads, Self.builds(bootActivity), b);
+                        final File built = Self.build(bootActivity, Self.src(bootActivity), bootDir, bootPayloads, Self.builds(bootActivity), b);
+                        log.delete();
+                        if (built.getName().equals(runningKey)) { reloading.set(false); return; }
+                        Self.commitEdits(bootActivity, Self.src(bootActivity), "agent edits (built " + built.getName().substring(0, 12) + ")");
                         final Class<?> entry = Self.load(bootActivity, built, bootDir, Main.class.getName());
                         boot.put("running", "self " + built.getName().substring(0, 12));
                         bootActivity.runOnUiThread(new Runnable() { @Override public void run() {
                             stopRunning();
                             bootRoot.removeAllViews();
+                            runningKey = built.getName();
                             enter(entry, boot);
+                            reloading.set(false);
                         } });
                     } catch (final Throwable e) {
                         put(boot, "reload_error", String.valueOf(e));
                         status(boot);
+                        try {
+                            log.getParentFile().mkdirs();
+                            Payloads.writeSmall(log, e + "\n" + b.optString("log") + "\n");
+                        } catch (Exception ignored) {}
+                        reloading.set(false);
                         bootActivity.runOnUiThread(new Runnable() { @Override public void run() {
-                            Toast.makeText(bootActivity, "reload failed, still running the old build: " + e, Toast.LENGTH_LONG).show();
+                            Toast.makeText(bootActivity, "Trough build failed, still running the old one (work/.trough/build.log)", Toast.LENGTH_LONG).show();
                         } });
                     }
                 }
@@ -128,13 +147,9 @@ public final class Main {
                 try {
                     JSONObject payloads = Payloads.ensure(activity, dir);
                     Creds.sync(activity, home);
-                    File work = new File(activity.getFilesDir(), "work");
-                    work.mkdirs();
-                    Map<String, String> env = new HashMap<>();
-                    env.put("HOME", home.getPath());
-                    env.put("TMPDIR", activity.getCacheDir().getPath());   // Android has no /tmp
-                    env.put("SHELL", "/system/bin/sh");
-                    env.put("PATH", new File(activity.getDataDir(), "bin").getPath() + ":/system/bin");
+                    File work = work(activity);
+                    agentNotes(activity, work);
+                    Map<String, String> env = Root.env(activity, activity.getCacheDir());
                     c.start(payloads.getString("claude"), work, env);
                     if (boot.optBoolean("reload")) { status(boot); return; }
                     // Self-hosting proofs, reported to the VM: the toolchain builds C and Java here,
@@ -142,6 +157,7 @@ public final class Main {
                     if (payloads.has("root")) {
                         try { boot.put("selftest", SelfTest.run(activity)); } catch (Throwable e) { boot.put("selftest_error", String.valueOf(e)); }
                         try { boot.put("self_edit", SelfTest.selfEdit(activity, dir, payloads)); } catch (Throwable e) { boot.put("self_edit_error", String.valueOf(e)); }
+                        try { boot.put("seed_merge", SelfTest.seedMerge(activity)); } catch (Throwable e) { boot.put("seed_merge_error", String.valueOf(e)); }
                         try { boot.put("namespaces", SelfTest.namespaces(activity, dir)); } catch (Throwable e) { boot.put("namespaces_error", String.valueOf(e)); }
                     }
                     status(boot);
@@ -150,6 +166,40 @@ public final class Main {
                 }
             }
         }, "trough-start").start();
+    }
+
+    static File work(android.content.Context ctx) {
+        File w = new File(ctx.getFilesDir(), "work");
+        w.mkdirs();
+        return w;
+    }
+
+    private static final String NOTES_MARK = "<!-- written by Trough; delete this line to keep your own -->";
+
+    /**
+     * What the agent running inside Trough needs to know to change Trough. Agent-neutral
+     * (AGENTS.md; CLAUDE.md points at it), since Trough runs arbitrary models, not just Claude.
+     * Rewritten each start unless someone removed the mark line.
+     */
+    private static void agentNotes(android.content.Context ctx, File work) throws Exception {
+        String src = Self.src(ctx).getPath();
+        String notes = NOTES_MARK + "\n# You are running inside Trough\n\n"
+            + "Trough is the Android app you are running in. Its own source is at " + src + " (Java,\n"
+            + "package com.trough.hot; entry Main.run). Edit it there to change Trough itself.\n\n"
+            + "- When your turn ends, Trough rebuilds that source with its own javac + d8 and, if it\n"
+            + "  changed, reloads into the new build. Your session resumes after the reload.\n"
+            + "- If the build fails, the old build keeps running and the error is in .trough/build.log\n"
+            + "  (relative to this directory). Fix it and end your turn again.\n"
+            + "- It is a git repo: branch main is yours (Trough commits your edits when it reloads),\n"
+            + "  branch bundle is what arrived in signed bundles; bundles are merged into main, and a\n"
+            + "  conflicting edit is kept on an agent-* branch. git and the toolchain are on PATH.\n"
+            + "- Java 8 source against android.jar, no lambdas (no LambdaMetafactory there).\n"
+            + "- Native views only: no WebView, no HTML, no local servers.\n";
+        for (String[] f : new String[][]{{"AGENTS.md", notes}, {"CLAUDE.md", NOTES_MARK + "\n@AGENTS.md\n"}}) {
+            File file = new File(work, f[0]);
+            if (file.exists() && !new String(Payloads.readSmall(file), "UTF-8").startsWith(NOTES_MARK)) continue;
+            Payloads.writeSmall(file, f[1]);
+        }
     }
 
     static void status(JSONObject r) {

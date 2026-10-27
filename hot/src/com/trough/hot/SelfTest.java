@@ -71,11 +71,44 @@ final class SelfTest {
         return r;
     }
 
+    /**
+     * Self.seed's merge policy on a scratch repo: a bundle change and an agent edit to different
+     * files both survive; a conflicting pair leaves the bundle's tree and the agent's version
+     * on an agent-* branch.
+     */
+    static JSONObject seedMerge(Context ctx) throws Exception {
+        File w = new File(ctx.getCacheDir(), "seedmerge"), b = new File(w, "bundle"), repo = new File(w, "repo");
+        Main.deleteTree(w);
+        b.mkdirs();
+        JSONObject r = new JSONObject();
+        Payloads.writeSmall(new File(b, "a"), "base\n");
+        Payloads.writeSmall(new File(b, "b"), "base\n");
+        r.put("first", Self.seed(ctx, b, repo));
+        r.put("again", Self.seed(ctx, b, repo));
+        Payloads.writeSmall(new File(repo, "a"), "agent\n");      // agent edits a
+        Payloads.writeSmall(new File(b, "b"), "bundle\n");        // bundle changes b
+        r.put("clean", Self.seed(ctx, b, repo));
+        boolean both = text(new File(repo, "a")).equals("agent\n") && text(new File(repo, "b")).equals("bundle\n");
+        Payloads.writeSmall(new File(repo, "b"), "agent2\n");     // now both change b
+        Payloads.writeSmall(new File(b, "b"), "bundle2\n");
+        r.put("conflict", Self.seed(ctx, b, repo));
+        String branches = Self.git(ctx, repo, null, "branch", "--list", "agent-*");
+        String kept = branches.isEmpty() ? "" : Self.git(ctx, repo, null, "show", branches.trim() + ":b");
+        boolean safe = text(new File(repo, "b")).equals("bundle2\n") && kept.equals("agent2");
+        r.put("current_is_noop", "current".equals(r.getString("again")))
+         .put("clean_merge_keeps_both", both).put("conflict_keeps_agent_branch", safe)
+         .put("ok", "current".equals(r.getString("again")) && both && safe);
+        Main.deleteTree(w);
+        return r;
+    }
+
+    private static String text(File f) throws Exception { return new String(Payloads.readSmall(f), "UTF-8"); }
+
     private static void copy(File from, File to) throws Exception {
         if (from.isDirectory()) {
             to.mkdirs();
             File[] kids = from.listFiles();
-            if (kids != null) for (File k : kids) copy(k, new File(to, k.getName()));
+            if (kids != null) for (File k : kids) if (!k.getName().equals(".git")) copy(k, new File(to, k.getName()));
         } else Payloads.writeSmall(to, new String(Payloads.readSmall(from), "UTF-8"));
     }
 
@@ -104,9 +137,7 @@ final class SelfTest {
             .redirectInput(new File("/dev/null"));
         Map<String, String> env = pb.environment();
         env.clear();
-        env.put("HOME", new File(ctx.getFilesDir(), "home").getPath());
-        env.put("TMPDIR", cwd.getPath());
-        env.put("PATH", new File(ctx.getDataDir(), "d/usr/bin").getPath() + ":/system/bin");
+        env.putAll(Root.env(ctx, cwd));
         long t0 = System.nanoTime();
         Process p = pb.start();
         ByteArrayOutputStream buf = new ByteArrayOutputStream();
