@@ -409,3 +409,11 @@ dpkg's own configuration only; signatures fully verified.
   the feed or a model). Until then claude runs on the VM's copied login, whose refresh token
   rotates; Chat says so. Oracle: tests/jvm/ClaudeLoginTest (URL reaches Trough; bogus code ->
   failure, nothing written; throwaway HOME).
+
+## Native code, self-hosted (2026-10-27, step 1: reproducibility)
+native/build.sh is the one native build (tools/hot.sh uses it; the bundle ships it with the
+sources). Built by the root's gcc under the phone's conditions it is byte-identical to the VM's
+build for all 7 outputs (tests/native_repro.sh, phone-filesystem harness): dynamic ones link with
+the stock interpreter name and get texec by in-place rewrite on both sides (set_interp / tfix).
+Device check: SelfTest.nativeRepro. Next: Trough rebuilds its natives from source it holds, with
+the new texec smoke-tested as a launcher and the previous kept for rollback before it replaces x.

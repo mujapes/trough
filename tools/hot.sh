@@ -14,26 +14,20 @@ ENTRY="${ENTRY:-com.trough.hot.Main}"
 B="$(mktemp -d)"; trap 'rm -rf "$B"' EXIT
 mkdir -p "$B/z/bin"
 
-"$CC_ARM64" -O2 -static -o "$B/z/bin/bench" "$ROOT/native/bench/bench.c"
-FREESTANDING="-O2 -static -nostdlib -ffreestanding -fno-builtin -fno-stack-protector"
-"$CC_ARM64" $FREESTANDING -o "$B/z/bin/probe" "$ROOT/native/probe/probe.c"
-"$CC_ARM64" $FREESTANDING -Wl,-Ttext-segment=0x6f00000000 -o "$B/z/bin/texec" "$ROOT/native/texec/texec.c"
-# Stock-built glibc programs, pointed at texec in place (PT_INTERP -> /data/data/t.t/x).
-"$CC_ARM64" -O2 -o "$B/z/bin/threadtest" "$ROOT/native/threadtest/threadtest.c"
-"$CC_ARM64" -O2 -o "$B/z/bin/dnstest" "$ROOT/native/threadtest/dnstest.c"
-python3 "$ROOT/tools/set_interp.py" "$B/z/bin/threadtest" "$B/z/bin/dnstest"
-"$CC_ARM64" -O2 -Wall -Wextra -o "$B/z/bin/nsprobe" "$ROOT/native/nsprobe/nsprobe.c"
-python3 "$ROOT/tools/set_interp.py" "$B/z/bin/nsprobe"
+# Native code, by the same script Trough runs on the phone (native/build.sh). Sources ship too,
+# so the phone can rebuild and compare (SelfTest.native).
+CC="$CC_ARM64" sh "$ROOT/native/build.sh" "$ROOT/native" "$B/z"
+python3 "$ROOT/tools/set_interp.py" "$B/z/bin/threadtest" "$B/z/bin/dnstest" "$B/z/bin/nsprobe"
+mkdir -p "$B/z/native" && (cd "$ROOT/native" && cp --parents bench/bench.c probe/probe.c texec/texec.c \
+    threadtest/threadtest.c threadtest/dnstest.c nsprobe/nsprobe.c execmap/execmap.c "$B/z/native/") && cp "$ROOT/native/build.sh" "$B/z/native/"
 
 # Trough's own glibc: the VM's arm64 copy, with trapped syscalls rewritten to -ENOSYS.
 GLIBC_DIR="${GLIBC_DIR:-/lib/aarch64-linux-gnu}"
-mkdir -p "$B/z/lib"
 for l in ld-linux-aarch64.so.1 libc.so.6 libm.so.6 librt.so.1 libpthread.so.0 libdl.so.2; do
     cp "$GLIBC_DIR/$l" "$B/z/lib/"
 done
 python3 "$ROOT/tools/patch_svc.py" "$B/z/lib/"*
-# The exec mapper texec preloads (native/execmap): built against the same glibc.
-"$CC_ARM64" -O2 -Wall -Wextra -shared -fPIC -o "$B/z/lib/libexecmap.so" "$ROOT/native/execmap/execmap.c" -ldl
+# (lib/libexecmap.so, the exec mapper texec preloads, came from native/build.sh above.)
 python3 "$ROOT/tools/patch_paths.py" "$B/z/lib/libc.so.6"
 
 # Payloads: too big for the bundle. Content-addressed in shared storage; their hashes go in

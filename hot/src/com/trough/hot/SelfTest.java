@@ -62,6 +62,30 @@ final class SelfTest {
         return r;
     }
 
+    /**
+     * Trough's native code rebuilt on the phone by Trough's own gcc (native/build.sh, shipped with
+     * its sources) is byte-identical to what the VM built into this bundle.
+     */
+    static JSONObject nativeRepro(Context ctx, File bundle) throws Exception {
+        File out = new File(ctx.getCacheDir(), "native-repro");
+        Main.deleteTree(out);
+        String d = new File(ctx.getDataDir(), "d").getPath();
+        JSONObject r = new JSONObject();
+        r.put("build", exec(ctx.getCacheDir(), ctx, null, 600, "/system/bin/sh",
+            new File(bundle, "native/build.sh").getPath(), new File(bundle, "native").getPath(), out.getPath()));
+        r.put("tfix", exec(ctx.getCacheDir(), ctx, null, 60, d + "/usr/libexec/trough/tfix", out.getPath()));
+        JSONObject same = new JSONObject();
+        boolean all = true;
+        for (String f : new String[]{"bin/bench", "bin/probe", "bin/texec", "bin/threadtest", "bin/dnstest", "bin/nsprobe", "lib/libexecmap.so"}) {
+            File a = new File(bundle, f), b = new File(out, f);
+            boolean eq = a.isFile() && b.isFile() && java.util.Arrays.equals(Payloads.readSmall(a), Payloads.readSmall(b));
+            same.put(f, eq);
+            all &= eq;
+        }
+        Main.deleteTree(out);
+        return r.put("identical", same).put("ok", all);
+    }
+
     /** native/probe: which syscalls the app filter traps, including the agent-sandbox ones. */
     static JSONObject probe(Context ctx, File bundle) throws Exception {
         JSONObject r = exec(ctx.getCacheDir(), ctx, new File(bundle, "bin/probe").getPath());

@@ -176,6 +176,8 @@ public final class Main {
                         try { boot.put("root_packages", DebRoot.packages(activity, dir)); } catch (Throwable e) { boot.put("root_packages_error", String.valueOf(e)); }
                         step(boot, "selftest");
                         try { boot.put("selftest", SelfTest.run(activity)); } catch (Throwable e) { boot.put("selftest_error", String.valueOf(e)); }
+                        step(boot, "native_repro");
+                        try { boot.put("native_repro", SelfTest.nativeRepro(activity, dir)); } catch (Throwable e) { boot.put("native_repro_error", String.valueOf(e)); }
                         step(boot, "self_edit");
                         try { boot.put("self_edit", SelfTest.selfEdit(activity, dir, payloads)); } catch (Throwable e) { boot.put("self_edit_error", String.valueOf(e)); }
                         step(boot, "probe");
