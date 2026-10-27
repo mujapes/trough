@@ -28,8 +28,10 @@ Resolved by workaround (DESIGN.md "Workarounds before sacrifices"): maintainer s
 Debian's fakechroot (shipped in the bundle's lib/), injected by execmap only when dpkg sets
 DPKG_MAINTSCRIPT_NAME, with host paths (/data, /proc, /system, ...) excluded. Platform binaries
 exec'd from scripts use libc's own execve/realpath, since fakechroot's re-add loader variables
-(b7cfaf9). Oracles in tests/execmap.sh. Phone result of the openjdk configure: see the newest
-Download/trough/loop-*.log and status-*.json "root_packages".
+(b7cfaf9). Oracles in tests/execmap.sh. Phone result: the package list
+install (libsqlite3-dev + the openjdk 21.0.13 security update) exits 0; alternatives repaired;
+diagnostics bundle then ran javac/java OK and the phone's native rebuild was byte-identical for
+all 14 outputs including core-store (status-1793138827813.json).
 
 Next construction dependency (unchanged from below): durable meaning and effects
 (docs/CONSTRUCTION.md stage 2) on top of the stage-1 kernel, each with a phone scenario in the
