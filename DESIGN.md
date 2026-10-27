@@ -244,3 +244,7 @@ Trough must build itself, so the compilers live in the Debian root d/ and run vi
   opens nothing outside /data/data/t.t (only the test harness's own env/sim do).
 Next: ship d/ (toolchain) to the phone and build + run C and Java there; then Trough builds
 its own bundle from its own source and reloads it.
+- ON THE PHONE (10-27 13:58): root payload installed (3391 files, 1433 links, 11 s);
+  gcc built a threaded C program in 181 ms and it ran; javac 628 ms, java ran. Trough's own
+  toolchain works natively on the device. Next: Trough builds its own code from its own source
+  and reloads itself.

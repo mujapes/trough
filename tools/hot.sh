@@ -45,6 +45,14 @@ if [ -f "$CLAUDE_BIN" ]; then
     [ -f "$PAYLOAD_DIR/$sha" ] || { cp "$B/claude" "$PAYLOAD_DIR/.$sha.tmp" && mv "$PAYLOAD_DIR/.$sha.tmp" "$PAYLOAD_DIR/$sha"; }
     PAYLOADS="\"claude\":\"$sha\""
 fi
+# Trough's Debian root (self-hosting toolchain, tools/root.sh). Rebuilt with ROOTFS=1.
+ROOT_ZIP="${ROOT_ZIP:-$HOME/.trough/root.zip}"
+if [ "${ROOTFS:-0}" = 1 ]; then "$ROOT/tools/root.sh" "$ROOT_ZIP" >&2; fi
+if [ -f "$ROOT_ZIP" ]; then
+    sha=$(sha256sum "$ROOT_ZIP" | cut -d' ' -f1)
+    [ -f "$PAYLOAD_DIR/$sha" ] || { cp "$ROOT_ZIP" "$PAYLOAD_DIR/.$sha.tmp" && mv "$PAYLOAD_DIR/.$sha.tmp" "$PAYLOAD_DIR/$sha"; }
+    PAYLOADS="$PAYLOADS${PAYLOADS:+,}\"root\":\"$sha\""
+fi
 
 find "$ROOT/hot/src" -name '*.java' > "$B/sources.txt"
 if ! javac -nowarn -source 8 -target 8 -bootclasspath "$ANDROID_JAR" -classpath "$ANDROID_JAR" \
