@@ -59,6 +59,21 @@ verify -> widen coverage -> repeat within the authorised scope. The user supplie
 and initial constraints; their attention is not a dependency of ordinary construction.
 See [AUTONOMOUS_DEVELOPMENT.md](docs/AUTONOMOUS_DEVELOPMENT.md).
 
+### Workarounds before sacrifices
+
+User direction, 2026-10-27: when a platform limit blocks something, search hard for a workaround
+before accepting any sacrifice: dropping a capability, pinning or skipping updates, narrowing
+scope, or settling for a slower or less complete path. Search existing practice first (Debian,
+Termux, mmdebstrap, upstream tools and their documentation), then compose or build a mechanism.
+A sacrifice is a last resort, recorded with the workarounds tried and why each failed.
+
+Example: Android has no app mount namespace, so Debian maintainer scripts could not write their
+absolute /etc paths. Neither reverting the openjdk security update (its older version has the
+same script) nor holding updates was the answer. Debian's own fakechroot, which mmdebstrap uses
+for unprivileged installs, was the answer. It is scoped to maintainer scripts (native/execmap).
+Earlier narrow-scope notes in code are judgements to revisit when a workaround needs them, not
+prohibitions.
+
 ## The governing idea
 
 **One semantic model, specialised physical representations, explicit ownership and causality.**

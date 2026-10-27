@@ -25,6 +25,9 @@ Current cross-model handoff: read [HANDOFF.md](HANDOFF.md). The current construc
 - Forge's final UI is the interaction/layout reference; its architecture is not transplanted.
 - Preserve Opus's working hot-loader/self-build foundation. State/resource-preserving replacement
   is a founding contract: read [docs/HOT_RELOAD.md](docs/HOT_RELOAD.md), not a final UI feature.
+- Workarounds before sacrifices: when a platform limit blocks something, search existing
+  practice (Debian, Termux, upstream tools) and build a workaround before dropping capability,
+  skipping updates or narrowing scope. See DESIGN.md "Workarounds before sacrifices".
 - No WebView fallback. Do not claim the document engine or whole app is complete because a
   primitive, debug screen or self-hosted build works.
 
