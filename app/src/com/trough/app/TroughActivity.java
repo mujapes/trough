@@ -14,10 +14,12 @@ import android.widget.TextView;
 
 /**
  * Host only: a root view and a HotLoader. Every visible behaviour comes from the bundle.
- * While visible, it checks for a new bundle once a second (one stat when nothing changed).
+ * Checks for a new bundle for as long as the activity lives (one stat when nothing changed):
+ * every second while visible, every five seconds behind another app, so the development loop
+ * (docs/AUTONOMOUS_DEVELOPMENT.md) never depends on Trough having focus.
  */
 public class TroughActivity extends Activity {
-    private static final long POLL_MS = 1000;
+    private static final long POLL_MS = 1000, HIDDEN_POLL_MS = 5000;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private FrameLayout root;
     private HotLoader loader;
@@ -25,10 +27,10 @@ public class TroughActivity extends Activity {
 
     private final Runnable poll = new Runnable() {
         @Override public void run() {
-            if (!visible || loader == null) return;
-            if (!loader.check() && (root.getChildCount() == 0 || root.findViewWithTag("trough-status") != null))
-                showStatus(loader.status);
-            handler.postDelayed(this, POLL_MS);
+            if (loader == null) return;
+            if (loader.check()) settleLater();
+            else if (root.getChildCount() == 0 || root.findViewWithTag("trough-status") != null) showStatus(loader.status);
+            handler.postDelayed(this, visible ? POLL_MS : HIDDEN_POLL_MS);
         }
     };
 
@@ -38,10 +40,19 @@ public class TroughActivity extends Activity {
         root.setBackgroundColor(Color.BLACK);
         setContentView(root);
         startForegroundService(new Intent(this, TroughService.class));
-        try { loader = new HotLoader(this, root); } catch (Exception e) { showStatus("loader: " + e); }
+        try {
+            loader = new HotLoader(this, root);
+            if (loader.resume()) settleLater();
+        } catch (Exception e) { showStatus("loader: " + e); }
         if (checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED)
             requestPermissions(new String[]{Manifest.permission.READ_EXTERNAL_STORAGE,
                 Manifest.permission.WRITE_EXTERNAL_STORAGE}, 1);
+        handler.post(poll);
+    }
+
+    private void settleLater() {
+        final String sha = loader.currentSha();
+        handler.postDelayed(new Runnable() { @Override public void run() { loader.settle(sha); } }, HotLoader.SETTLE_MS);
     }
 
     @Override protected void onResume() {
@@ -53,11 +64,11 @@ public class TroughActivity extends Activity {
 
     @Override protected void onPause() {
         visible = false;
-        handler.removeCallbacks(poll);
         super.onPause();
     }
 
     @Override protected void onDestroy() {
+        handler.removeCallbacksAndMessages(null);
         if (loader != null) loader.stopCurrent();
         super.onDestroy();
     }

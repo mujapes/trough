@@ -27,6 +27,11 @@ wrong or disposable.
    exposes actual platform mechanisms, and can recover without the replaceable program being
    healthy. It changes by APK update when its ABI, platform components or recovery mechanism
    genuinely need to change. "Everything reloads" is not a ban on updating the loader itself.
+   Implemented (APK of 2026-10-27, `app/src/com/trough/app/HotLoader.java`): cold start runs
+   the last bundle that stayed up 15 s (`files/hot/good`) without reading shared storage; a
+   bundle that kills the process before settling is marked `files/hot/bad/<sha>` and never
+   reactivated; uncaught crashes are copied to `Download/trough/crash-<ms>.txt`; bundle checks
+   continue behind another app (1 s visible, 5 s hidden) so VM-driven scenarios need no focus.
 2. **Runtime ownership lifetime.** Stores, resource arenas, effect receipts, module registry and
    scheduling/lifetime bookkeeping have explicit owners independent of a UI feature's code.
    These owners can themselves be replaced through coordinated migration; they are not all

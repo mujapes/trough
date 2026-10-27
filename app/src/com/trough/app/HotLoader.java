@@ -2,7 +2,6 @@ package com.trough.app;
 
 import android.app.Activity;
 import android.os.Environment;
-import android.view.View;
 import android.widget.FrameLayout;
 
 import dalvik.system.DexClassLoader;
@@ -14,6 +13,8 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.lang.reflect.Method;
 import java.security.KeyFactory;
 import java.security.MessageDigest;
@@ -24,8 +25,9 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 /**
- * Everything Trough does arrives as a signed bundle and swaps in live (DESIGN.md "Hot reload").
- * This class is the only behaviour compiled into the APK, so it should never need to change.
+ * The bootstrap/recovery lifetime (docs/HOT_RELOAD.md "Three lifetimes"). Everything Trough
+ * does arrives as a signed bundle; this class verifies, activates and, when a bundle cannot
+ * stay up, recovers without the replaceable program being healthy.
  *
  * Bundle: Download/trough/hot/bundle.zip + bundle.sig (ECDSA P-256 over the zip, key held in
  * the VM, public half in assets/hot-pubkey.der -- shared storage is writable by other apps, so
@@ -33,12 +35,20 @@ import java.util.zip.ZipInputStream;
  * manifest.json {"entry": "<class>"}. The entry class exposes
  *     public static void start(Activity, FrameLayout root, File bundleDir)
  *     public static void stop()            (optional)
+ *
+ * Recovery state, app-private under files/hot/:
+ *   good      sha of the last bundle that stayed up for SETTLE_MS; cold start runs it directly
+ *   starting  sha being activated; still present at the next process start = it never settled
+ *   bad/<sha> bundles that died before settling; never activated again (a new publish has a new sha)
+ * Crashes are also copied to Download/trough/crash-<ms>.txt so the VM can observe them.
  * Knobs, never policy: the loader does not know what a bundle does.
  */
 final class HotLoader {
+    static final long SETTLE_MS = 15000;
     private final Activity activity;
     private final FrameLayout root;
     private final PublicKey key;
+    private final File state;
     private Class<?> current;
     private String currentSha = "";
     private long seenModified = -1;
@@ -49,10 +59,37 @@ final class HotLoader {
         this.root = root;
         byte[] der = readAll(activity.getAssets().open("hot-pubkey.der"));
         key = KeyFactory.getInstance("EC").generatePublic(new X509EncodedKeySpec(der));
+        state = new File(activity.getFilesDir(), "hot");
+        String unsettled = read(new File(state, "starting"));
+        if (!unsettled.isEmpty()) {
+            write(new File(new File(state, "bad"), unsettled), "died before settling");
+            new File(state, "starting").delete();
+        }
+        final Thread.UncaughtExceptionHandler next = Thread.getDefaultUncaughtExceptionHandler();
+        Thread.setDefaultUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler() {
+            @Override public void uncaughtException(Thread t, Throwable e) {
+                try {
+                    StringWriter s = new StringWriter();
+                    e.printStackTrace(new PrintWriter(s));
+                    write(new File(sharedDir().getParentFile(), "crash-" + System.currentTimeMillis() + ".txt"),
+                        "bundle " + currentSha + "\nthread " + t.getName() + "\n" + s);
+                } catch (Throwable ignored) {}
+                if (next != null) next.uncaughtException(t, e);
+            }
+        });
     }
 
     static File sharedDir() {
         return new File(new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "trough"), "hot");
+    }
+
+    /** Cold start: run the last settled bundle from app storage, before shared storage is read. */
+    boolean resume() {
+        String sha = read(new File(state, "good"));
+        File dir = new File(state, sha);
+        if (sha.isEmpty() || !new File(dir, "manifest.json").exists() || new File(new File(state, "bad"), sha).exists()) return false;
+        try { activate(sha, dir); return true; }
+        catch (Throwable t) { status = "last good bundle failed: " + cause(t); return false; }
     }
 
     /** Cheap when nothing changed: one stat. Returns true if a new bundle was started. */
@@ -64,6 +101,11 @@ final class HotLoader {
             byte[] bytes = readAll(new FileInputStream(zip));
             String sha = hex(MessageDigest.getInstance("SHA-256").digest(bytes));
             if (sha.equals(currentSha)) { seenModified = modified; return false; }
+            if (new File(new File(state, "bad"), sha).exists()) {
+                seenModified = modified;
+                status = "bundle " + sha.substring(0, 8) + " died before settling; waiting for a new one";
+                return false;
+            }
             Signature v = Signature.getInstance("SHA256withECDSA");
             v.initVerify(key);
             v.update(bytes);
@@ -72,31 +114,51 @@ final class HotLoader {
                 return false;
             }
             seenModified = modified;
-            File dir = new File(new File(activity.getFilesDir(), "hot"), sha);
+            File dir = new File(state, sha);
             if (!new File(dir, "manifest.json").exists()) extract(bytes, dir);
-            JSONObject manifest = new JSONObject(new String(readAll(new FileInputStream(new File(dir, "manifest.json"))), "UTF-8"));
-            DexClassLoader loader = new DexClassLoader(new File(dir, "classes.dex").getPath(),
-                activity.getCodeCacheDir().getPath(), new File(dir, "bin").getPath(), getClass().getClassLoader());
-            Class<?> entry = loader.loadClass(manifest.getString("entry"));
-            stopCurrent();
-            root.removeAllViews();
-            current = entry;
-            currentSha = sha;
-            entry.getMethod("start", Activity.class, FrameLayout.class, File.class).invoke(null, activity, root, dir);
-            status = "running bundle " + sha.substring(0, 8);
+            activate(sha, dir);
             return true;
         } catch (Throwable t) {
-            Throwable cause = t.getCause() != null ? t.getCause() : t;
-            status = "bundle failed: " + cause;
+            status = "bundle failed: " + cause(t);
             return false;
         }
     }
+
+    private void activate(String sha, File dir) throws Exception {
+        JSONObject manifest = new JSONObject(new String(readAll(new FileInputStream(new File(dir, "manifest.json"))), "UTF-8"));
+        DexClassLoader loader = new DexClassLoader(new File(dir, "classes.dex").getPath(),
+            activity.getCodeCacheDir().getPath(), new File(dir, "bin").getPath(), getClass().getClassLoader());
+        Class<?> entry = loader.loadClass(manifest.getString("entry"));
+        stopCurrent();
+        root.removeAllViews();
+        write(new File(state, "starting"), sha);
+        current = entry;
+        currentSha = sha;
+        entry.getMethod("start", Activity.class, FrameLayout.class, File.class).invoke(null, activity, root, dir);
+        status = "running bundle " + sha.substring(0, 8);
+    }
+
+    /** Called SETTLE_MS after an activation: the bundle stayed up, so it becomes last-known-good. */
+    void settle(String sha) {
+        if (!sha.equals(currentSha) || !sha.equals(read(new File(state, "starting")))) return;
+        try {
+            write(new File(state, "good"), sha);
+            new File(state, "starting").delete();
+            File[] old = state.listFiles();
+            if (old != null) for (File f : old)  // keep the running bundle and nothing else extracted
+                if (f.isDirectory() && f.getName().matches("[0-9a-f]{64}(\\.tmp)?") && !f.getName().equals(sha)) deleteTree(f);
+        } catch (Throwable ignored) {}
+    }
+
+    String currentSha() { return currentSha; }
 
     void stopCurrent() {
         if (current == null) return;
         try { Method stop = current.getMethod("stop"); stop.invoke(null); } catch (Throwable ignored) {}
         current = null;
     }
+
+    private static Throwable cause(Throwable t) { return t.getCause() != null ? t.getCause() : t; }
 
     private static void extract(byte[] zipBytes, File dir) throws Exception {
         File tmp = new File(dir.getPath() + ".tmp");
@@ -120,6 +182,19 @@ final class HotLoader {
         File[] kids = f.listFiles();
         if (kids != null) for (File k : kids) deleteTree(k);
         f.delete();
+    }
+
+    private static String read(File f) {
+        try { return f.isFile() ? new String(readAll(new FileInputStream(f)), "UTF-8").trim() : ""; }
+        catch (Throwable t) { return ""; }
+    }
+
+    /** Durable before return: the marker must survive the crash it exists to detect. */
+    private static void write(File f, String text) throws Exception {
+        f.getParentFile().mkdirs();
+        File tmp = new File(f.getPath() + ".new");
+        try (FileOutputStream o = new FileOutputStream(tmp)) { o.write(text.getBytes("UTF-8")); o.getFD().sync(); }
+        if (!tmp.renameTo(f)) throw new IllegalStateException("rename " + f);
     }
 
     static byte[] readAll(InputStream in) throws Exception { return readAll(in, true); }
