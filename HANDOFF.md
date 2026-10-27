@@ -24,14 +24,12 @@ Open blocker found by the store's build dependency: adding libsqlite3-dev to the
 list let apt take an openjdk-21 security update. Fixed on the way (bff51ca, latest execmap):
 Android's /bin is a symlink to /system/bin, so execmap now runs the root's copy first; bionic
 platform binaries exec'd from the root no longer inherit glibc's LD_LIBRARY_PATH/LD_PRELOAD.
-Still failing: openjdk-21-jre-headless postinst does `mkdir /etc/.java` (absolute, read-only on
-Android; no mount namespace). The JRE/JDK are unpacked but unconfigured; javac still works and
-libsqlite3-dev is configured, but DebRoot.packages retries apt on every boot until this passes.
-Decision needed: DESIGN.md says "No open/stat/chdir path rewriting". Recommended: path
-translation in execmap scoped to dpkg maintainer scripts (env DPKG_MAINTSCRIPT_PACKAGE, inherited
-by their children): absolute /etc /var /usr /opt paths that are absent or read-only on the device
-resolve under the root, for the open/stat/mkdir/rename/unlink/chmod/access/opendir families, with
-an oracle on the phone-filesystem harness. Revise DESIGN.md in the same commit.
+Resolved by workaround (DESIGN.md "Workarounds before sacrifices"): maintainer scripts run under
+Debian's fakechroot (shipped in the bundle's lib/), injected by execmap only when dpkg sets
+DPKG_MAINTSCRIPT_NAME, with host paths (/data, /proc, /system, ...) excluded. Platform binaries
+exec'd from scripts use libc's own execve/realpath, since fakechroot's re-add loader variables
+(b7cfaf9). Oracles in tests/execmap.sh. Phone result of the openjdk configure: see the newest
+Download/trough/loop-*.log and status-*.json "root_packages".
 
 Next construction dependency (unchanged from below): durable meaning and effects
 (docs/CONSTRUCTION.md stage 2) on top of the stage-1 kernel, each with a phone scenario in the
