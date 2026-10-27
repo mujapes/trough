@@ -124,3 +124,17 @@ Minimise what needs it instead:
   another phone's hotspot, public Wi-Fi, or a ~GBP 5 ESP32 AP in the van (permanent fix).
 - Root (Pixel bootloader unlock + Magisk) removes the problem entirely; costs a data wipe
   and Play Integrity. User's call.
+
+## Measurement without adb (2026-10-27)
+The kernel PMU (perf_event) is gated by security.perf_harden, settable only from shell. The
+optimisation loop does not depend on it:
+1. Time: CNTVCT_EL0 is readable from user space with no permission (verified: 24.576 MHz,
+   40.7 ns/tick). Pin the thread to an X1 core (sched_setaffinity), hold clocks steady with
+   ADPF (PerformanceHintManager), read cpufreq; cycles/iter = ticks x (freq / 24.576 MHz) over
+   10^6+ iterations, median of runs. Sub-cycle resolution per iteration.
+2. Energy: Pixel ODPM rails (per CPU cluster, uJ) via SystemHealthManager power monitors
+   (API 35+, verify on device) or the permanent DUMP grant -> powerstats. This is the metric.
+3. Static: llvm-mca with Cortex-X1/A78/A55 scheduling models predicts cycles and the binding
+   bottleneck per instruction block. Runs anywhere (VM, Oracle, Actions).
+4. Hardware PMU (instructions, cache/branch misses): only when a Wi-Fi moment allows, used to
+   calibrate 1-3, never required by the loop.
