@@ -432,3 +432,8 @@ signed bundle's texec, so a bad self build cannot outlive a restart. Device chec
   1614 ms, smoke-tested (texec launcher: true + threadtest ok; execmap shell ok), identical to
   the bundle -> bundle's kept. nativeEdit: an edited texec built (1509 ms), passed the smoke
   tests and differs -> would be installed.
+
+## Seeing the UI without adb (2026-10-27)
+Main.screenshot draws Trough's view tree into a bitmap 4 s after each boot and writes
+Download/trough/shot-<ms>-boot.png (1080x1874 on the phone). Verified: the VM read the native
+chat screen. Basis for golden-screenshot oracles when the native UI (Forge "next" spec) is built.
