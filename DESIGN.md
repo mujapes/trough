@@ -221,3 +221,12 @@ A run of Forge's daemon + WebView inside Trough was built and reverted the same 
 - Forge's Android shell ideas that are about capability, not plumbing, carry over: every
   component declared up front, an AppComponentFactory so components come from hot code,
   the reflective bridge pattern. They are rewritten, not copied.
+
+## Working rules (user, 10-27)
+- No stopgaps, no "easiest version first". Each task in this doc is built as the real thing,
+  from the ground up, starting with its hardest core. A quick native chat screen was exactly
+  the kind of interim piece this rules out; it stays only as a debug console.
+- Hot reload is a capability of Trough itself: Trough rebuilds and reloads its own code while
+  running, from source it holds. The VM-published signed bundle is only a development and test
+  channel, not the architecture. An APK update is fine when the native side genuinely needs it.
+- The VM may drive Trough remotely for testing; the user does not touch the phone for tests.
