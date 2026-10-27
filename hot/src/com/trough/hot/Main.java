@@ -33,6 +33,13 @@ public final class Main {
                     r.put("bundle", dir.getName().substring(0, 8));
                     Process p = new ProcessBuilder("/system/bin/pkill", "-f", "forged").redirectErrorStream(true).start();
                     r.put("stopped_forged_exit", p.waitFor());  // 0 = killed something, 1 = none running
+                    // ...and the ~180 MB it unpacked (python, forged, forge-ui, their libs).
+                    File data = activity.getDataDir();
+                    long freed = 0;
+                    for (String dead : new String[]{"py", "forge", "etc", "d", "log", "bin/claude"}) freed += delete(new File(data, dead));
+                    File[] markers = data.listFiles();
+                    if (markers != null) for (File m : markers) if (m.getName().startsWith(".stack-")) freed += delete(m);
+                    r.put("transplant_bytes_freed", freed);
                     r.put("root", Root.install(activity, dir).getPath());
                     r.put("payloads", Payloads.ensure(activity, dir));
                 } catch (Throwable e) {
@@ -48,4 +55,17 @@ public final class Main {
     }
 
     public static void stop() {}
+
+    private static long delete(File f) {
+        long n = 0;
+        File[] kids = f.isDirectory() && !isLink(f) ? f.listFiles() : null;
+        if (kids != null) for (File k : kids) n += delete(k);
+        n += f.isFile() ? f.length() : 0;
+        f.delete();
+        return n;
+    }
+
+    private static boolean isLink(File f) {
+        try { return !f.getCanonicalPath().equals(f.getAbsolutePath()); } catch (Exception e) { return true; }
+    }
 }
