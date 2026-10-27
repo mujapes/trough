@@ -184,10 +184,12 @@ api.anthropic.com, server rejects the key. Everything but real credentials works
   filter, loading only Trough's patched glibc (l/) and dpkg's libs (d/usr/lib).
 - apt and dpkg installed into d/ themselves (30 packages). Trough's own apt-get then fetched
   InRelease over HTTPS under the filter.
-- Blocker: apt's sqv method runs /usr/bin/sqv by a fixed path with no config key, so
-  signature checks fail. Never work around this with trusted=yes. Options to try next: the
-  gpgv verification path, whose command is configurable; or run just the verifier through
-  the layer-3 proot fallback.
+- Blocker: apt's sqv method runs /usr/bin/sqv by a fixed path with no config key, and apt
+  has no configurable verifier. Never work around this with trusted=yes. Ruled out (stay
+  within the assistant's safety rails): rewriting machine code that computes the path, and
+  namespace/chroot sandboxing of Trough's processes. Chosen route: Trough verifies Debian's
+  signed InRelease itself, calling the root's sqv by its real path with Debian's keyring,
+  and only then hands apt the verified index from a local mirror directory.
 
 ## MILESTONE 2026-10-27 12:55 -- claude runs natively inside Trough on the phone
 Pixel 7a, Android 17, package t.t, no VM, no proot, no root:
