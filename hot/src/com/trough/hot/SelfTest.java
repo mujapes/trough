@@ -72,7 +72,7 @@ final class SelfTest {
         String d = new File(ctx.getDataDir(), "d").getPath();
         JSONObject r = new JSONObject();
         r.put("build", exec(ctx.getCacheDir(), ctx, null, 600, "/system/bin/sh",
-            new File(bundle, "native/build.sh").getPath(), new File(bundle, "native").getPath(), out.getPath()));
+            new File(bundle, "src/native/build.sh").getPath(), new File(bundle, "src/native").getPath(), out.getPath()));
         r.put("tfix", exec(ctx.getCacheDir(), ctx, null, 60, d + "/usr/libexec/trough/tfix", out.getPath()));
         JSONObject same = new JSONObject();
         boolean all = true;
@@ -84,6 +84,25 @@ final class SelfTest {
         }
         Main.deleteTree(out);
         return r.put("identical", same).put("ok", all);
+    }
+
+    /**
+     * The native edit path without touching what runs: a scratch copy of files/src with texec's
+     * usage text changed builds, passes the smoke tests, and differs from the bundle's texec.
+     */
+    static JSONObject nativeEdit(Context ctx, File bundle) throws Exception {
+        File w = new File(ctx.getCacheDir(), "nativeedit"), src = new File(w, "src");
+        Main.deleteTree(w);
+        copy(new File(Self.src(ctx), "native"), new File(src, "native"));
+        File t = new File(src, "native/texec/texec.c");
+        String c = new String(Payloads.readSmall(t), "UTF-8");
+        Payloads.writeSmall(t, c.replace("\"usage: texec <program> [args...]\"", "\"usage: texec <program> [args...] (edited)\""));
+        JSONObject r = new JSONObject();
+        File built = Self.buildNative(ctx, src, r);
+        r.put("differs_from_bundle", built != null && !Self.sameAsBundle(built, bundle));
+        if (built != null) Main.deleteTree(built);
+        Main.deleteTree(w);
+        return r.put("ok", built != null && r.optBoolean("differs_from_bundle"));
     }
 
     /** native/probe: which syscalls the app filter traps, including the agent-sandbox ones. */

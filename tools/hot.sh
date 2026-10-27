@@ -15,11 +15,11 @@ B="$(mktemp -d)"; trap 'rm -rf "$B"' EXIT
 mkdir -p "$B/z/bin"
 
 # Native code, by the same script Trough runs on the phone (native/build.sh). Sources ship too,
-# so the phone can rebuild and compare (SelfTest.native).
+# so the phone can rebuild them (Self.buildNative) and compare (SelfTest.nativeRepro).
 CC="$CC_ARM64" sh "$ROOT/native/build.sh" "$ROOT/native" "$B/z"
 python3 "$ROOT/tools/set_interp.py" "$B/z/bin/threadtest" "$B/z/bin/dnstest" "$B/z/bin/nsprobe"
-mkdir -p "$B/z/native" && (cd "$ROOT/native" && cp --parents bench/bench.c probe/probe.c texec/texec.c \
-    threadtest/threadtest.c threadtest/dnstest.c nsprobe/nsprobe.c execmap/execmap.c "$B/z/native/") && cp "$ROOT/native/build.sh" "$B/z/native/"
+mkdir -p "$B/native" && (cd "$ROOT/native" && cp --parents bench/bench.c probe/probe.c texec/texec.c \
+    threadtest/threadtest.c threadtest/dnstest.c nsprobe/nsprobe.c execmap/execmap.c "$B/native/") && cp "$ROOT/native/build.sh" "$B/native/"
 
 # Trough's own glibc: the VM's arm64 copy, with trapped syscalls rewritten to -ENOSYS.
 GLIBC_DIR="${GLIBC_DIR:-/lib/aarch64-linux-gnu}"
@@ -70,6 +70,7 @@ fi
 "$ROOT/hot/build.sh" "$ROOT/hot/src" "$B/java" "$ANDROID_JAR" "$D8_JAR"
 cp "$B/java/classes.dex" "$B/z/"
 cp -r "$ROOT/hot/src" "$B/z/src" && cp "$ROOT/hot/build.sh" "$B/z/build.sh"
+cp -r "$B/native" "$B/z/src/native"   # native sources live in files/src too (Self.buildNative)
 for jar in "$ANDROID_JAR" "$D8_JAR"; do
     sha=$(sha256sum "$jar" | cut -d' ' -f1)
     [ -f "$PAYLOAD_DIR/$sha" ] || { cp "$jar" "$PAYLOAD_DIR/.$sha.tmp" && mv "$PAYLOAD_DIR/.$sha.tmp" "$PAYLOAD_DIR/$sha"; }

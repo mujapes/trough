@@ -415,8 +415,13 @@ native/build.sh is the one native build (tools/hot.sh uses it; the bundle ships 
 sources). Built by the root's gcc under the phone's conditions it is byte-identical to the VM's
 build for all 7 outputs (tests/native_repro.sh, phone-filesystem harness): dynamic ones link with
 the stock interpreter name and get texec by in-place rewrite on both sides (set_interp / tfix).
-Device check: SelfTest.nativeRepro. Next: Trough rebuilds its natives from source it holds, with
-the new texec smoke-tested as a launcher and the previous kept for rollback before it replaces x.
+Device check: SelfTest.nativeRepro.
+Step 2: native sources live in files/src/native (seeded and merged like the Java). Boot and
+reload build them (Self.buildNative, cached by source hash, then tfix) and smoke-test before
+they count: new texec as a launcher runs `true` and threadtest, the new libexecmap.so loads into
+a shell. Installed (Root.installNative: x and l/libexecmap.so, previous kept as *.prev) only if
+they differ from the bundle's, i.e. an agent changed native code; every boot first installs the
+signed bundle's texec, so a bad self build cannot outlive a restart. Device check: nativeEdit.
 - ON THE PHONE (10-27, status-1793115507780.json): nativeRepro -- all 7 outputs rebuilt by the
   root's gcc on the device are byte-identical to the bundle's (1.5 s). apt: jq_before=true, i.e.
   a package installed by apt in an earlier boot survived a new bundle (dpkg owns d/).

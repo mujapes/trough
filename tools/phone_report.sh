@@ -24,7 +24,7 @@ print("root:", d.get("root_install"), "| files:", d.get("root_files"), "| packag
 errs = {k: str(v)[:160] for k, v in d.items() if k.endswith("_error")}
 print("errors:", errs or "none")
 print("selftest:", {k: v.get("exit") for k, v in (d.get("selftest") or {}).items()})
-print("self_edit:", g("self_edit", "ok"), "| seed_merge:", g("seed_merge", "ok"), "| native_repro:", g("native_repro", "ok"),
+print("self_edit:", g("self_edit", "ok"), "| seed_merge:", g("seed_merge", "ok"), "| native_repro:", g("native_repro", "ok"), "| self_native:", g("self_native", "installed"), "| native_edit:", g("native_edit", "ok"),
       "| apt:", g("apt", "ok"), "jq_before:", g("apt", "jq_before"), "| codex refused:", g("codex", "refused"),
       "| providers:", [v.get("refused") for v in (d.get("providers") or {}).values()])
 PY

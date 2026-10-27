@@ -65,6 +65,12 @@ public final class Main {
                     File built = Self.build(activity, Self.src(activity), dir, bootPayloads, Self.builds(activity), b);
                     self = Self.load(activity, built, dir, Main.class.getName());
                     runningKey = built.getName();
+                    if (DebRoot.present(activity)) {
+                        step(boot, "self_native");
+                        JSONObject n = new JSONObject();
+                        boot.put("self_native", n);
+                        try { native_(activity, dir, n); } catch (Throwable e) { n.put("error", String.valueOf(e)); }
+                    }
                     boot.put("running", "self " + built.getName().substring(0, 12));
                 } catch (Throwable e) {
                     put(boot, "self_error", String.valueOf(e));
@@ -101,7 +107,12 @@ public final class Main {
                         step(boot, "reload_build");
                         final File built = Self.build(bootActivity, Self.src(bootActivity), bootDir, bootPayloads, Self.builds(bootActivity), b);
                         log.delete();
-                        if (built.getName().equals(runningKey)) { reloading.set(false); return; }
+                        if (DebRoot.present(bootActivity)) {   // native edits rebuild and install too
+                            JSONObject n = new JSONObject();
+                            boot.put("self_native", n);
+                            try { native_(bootActivity, bootDir, n); } catch (Throwable ne) { n.put("error", String.valueOf(ne)); }
+                        }
+                        if (built.getName().equals(runningKey)) { reloading.set(false); status(boot); return; }
                         Self.commitEdits(bootActivity, Self.src(bootActivity), "agent edits (built " + built.getName().substring(0, 12) + ")");
                         final Class<?> entry = Self.load(bootActivity, built, bootDir, Main.class.getName());
                         boot.put("running", "self " + built.getName().substring(0, 12));
@@ -128,6 +139,15 @@ public final class Main {
             }, "trough-reload").start();
         }
     };
+
+    /** Native code from files/src/native: built, smoke-tested, installed only if it differs. */
+    private static void native_(Activity activity, File dir, JSONObject n) throws Exception {
+        File nb = Self.buildNative(activity, Self.src(activity), n);
+        if (nb == null) { n.put("installed", "no native sources"); return; }
+        if (Self.sameAsBundle(nb, dir)) { n.put("installed", "bundle's (identical)"); return; }
+        Root.installNative(activity, nb);
+        n.put("installed", "self-built " + nb.getName());
+    }
 
     private static void enter(Class<?> entry, JSONObject boot) {
         try {
@@ -178,6 +198,8 @@ public final class Main {
                         try { boot.put("selftest", SelfTest.run(activity)); } catch (Throwable e) { boot.put("selftest_error", String.valueOf(e)); }
                         step(boot, "native_repro");
                         try { boot.put("native_repro", SelfTest.nativeRepro(activity, dir)); } catch (Throwable e) { boot.put("native_repro_error", String.valueOf(e)); }
+                        step(boot, "native_edit");
+                        try { boot.put("native_edit", SelfTest.nativeEdit(activity, dir)); } catch (Throwable e) { boot.put("native_edit_error", String.valueOf(e)); }
                         step(boot, "self_edit");
                         try { boot.put("self_edit", SelfTest.selfEdit(activity, dir, payloads)); } catch (Throwable e) { boot.put("self_edit_error", String.valueOf(e)); }
                         step(boot, "probe");

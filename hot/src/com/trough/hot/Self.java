@@ -181,6 +181,57 @@ final class Self {
         return out;
     }
 
+    static final String[] NATIVE = {"bin/bench", "bin/probe", "bin/texec", "bin/threadtest", "bin/dnstest", "bin/nsprobe", "lib/libexecmap.so"};
+
+    /**
+     * Trough's native code from files/src/native (native/build.sh with the root's gcc, then tfix),
+     * into files/self-native/<key>, cached by source hash. Smoke-tested before it counts as
+     * built: the new texec as a launcher runs a stock program and the threaded test, and the new
+     * preload library loads into a shell. Returns the dir, or null if src has no native/.
+     */
+    static File buildNative(Context ctx, File src, JSONObject r) throws Exception {
+        File nat = new File(src, "native");
+        if (!new File(nat, "build.sh").isFile()) return null;
+        String key = treeSha(nat).substring(0, 16);
+        File root = new File(ctx.getFilesDir(), "self-native"), out = new File(root, key);
+        r.put("key", key);
+        if (new File(out, ".ok").exists()) { r.put("cached", true); return out; }
+        File tmp = new File(root, key + ".tmp");
+        Main.deleteTree(tmp);
+        tmp.mkdirs();
+        File cwd = ctx.getCacheDir();
+        String d = new File(ctx.getDataDir(), "d").getPath();
+        long t0 = System.nanoTime();
+        JSONObject b = SelfTest.exec(cwd, ctx, null, 600, "/system/bin/sh", new File(nat, "build.sh").getPath(), nat.getPath(), tmp.getPath());
+        r.put("build", b).put("build_ms", (System.nanoTime() - t0) / 1_000_000);
+        if (b.getInt("exit") != 0) { Main.deleteTree(tmp); throw new IllegalStateException("native build failed"); }
+        SelfTest.exec(cwd, ctx, null, 60, d + "/usr/libexec/trough/tfix", tmp.getPath());
+        String texec = new File(tmp, "bin/texec").getPath();
+        JSONObject s1 = SelfTest.exec(cwd, ctx, null, 60, texec, d + "/usr/bin/true");
+        JSONObject s2 = SelfTest.exec(cwd, ctx, null, 60, texec, new File(tmp, "bin/threadtest").getPath());
+        java.util.Map<String, String> pre = new java.util.HashMap<>();
+        pre.put("LD_PRELOAD", new File(tmp, "lib/libexecmap.so").getPath());
+        JSONObject s3 = SelfTest.exec(cwd, ctx, pre, 60, d + "/usr/bin/sh", "-c", "echo execmap-ok");
+        boolean ok = s1.getInt("exit") == 0 && s2.getString("out").contains("\"ok\":true")
+            && s3.getInt("exit") == 0 && s3.getString("out").contains("execmap-ok") && !s3.getString("out").contains("cannot be preloaded");
+        r.put("smoke", new JSONObject().put("texec_true", s1.getInt("exit")).put("texec_threadtest", s2.getString("out").trim())
+            .put("execmap_shell", s3.getString("out").trim()).put("ok", ok));
+        if (!ok) { Main.deleteTree(tmp); throw new IllegalStateException("native smoke test failed"); }
+        Payloads.writeSmall(new File(tmp, ".ok"), "smoke-tested");
+        Main.deleteTree(out);
+        if (!tmp.renameTo(out)) throw new IllegalStateException("rename " + out);
+        return out;
+    }
+
+    /** True when every native output of built equals the bundle's: nothing to install. */
+    static boolean sameAsBundle(File built, File bundle) throws Exception {
+        for (String f : NATIVE) {
+            File a = new File(built, f), b = new File(bundle, f);
+            if (!a.isFile() || !b.isFile() || !java.util.Arrays.equals(Payloads.readSmall(a), Payloads.readSmall(b))) return false;
+        }
+        return true;
+    }
+
     /** Loads a self-built dex beside, not under, the bundle: its classes replace the bundle's. */
     static Class<?> load(Context ctx, File built, File bundle, String name) throws Exception {
         ClassLoader apk = Self.class.getClassLoader().getParent();

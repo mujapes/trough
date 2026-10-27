@@ -21,6 +21,22 @@ final class Root {
 
     static final String DIR = "/data/data/t.t";
 
+    /**
+     * Native code Trough built itself (Self.buildNative, already smoke-tested) replaces texec and
+     * the exec mapper. The previous copies stay as x.prev / libexecmap.so.prev; and every boot
+     * first installs the signed bundle's, so a bad self build cannot outlive a restart.
+     */
+    static void installNative(Context ctx, File built) throws Exception {
+        File root = ctx.getDataDir();
+        File x = new File(root, "x"), prev = new File(root, "x.prev");
+        if (x.isFile() && java.util.Arrays.equals(Payloads.readSmall(x), Payloads.readSmall(new File(built, "bin/texec")))) return;
+        if (x.exists()) { prev.delete(); java.nio.file.Files.copy(x.toPath(), prev.toPath()); prev.setExecutable(true, false); }
+        replace(new File(built, "bin/texec"), x, true);
+        File lib = new File(root, "l/libexecmap.so"), lprev = new File(root, "l/libexecmap.so.prev");
+        if (lib.exists()) { lprev.delete(); java.nio.file.Files.copy(lib.toPath(), lprev.toPath()); }
+        replace(new File(built, "lib/libexecmap.so"), lib, false);
+    }
+
     static File install(Context ctx, File bundleDir) throws Exception {
         File root = ctx.getDataDir();  // /data/user/0/t.t, which /data/data/t.t reaches
         // /data/data is a bind mount of /data/user/0, not a symlink, so canonical paths differ
