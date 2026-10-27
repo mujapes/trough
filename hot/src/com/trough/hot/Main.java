@@ -237,7 +237,12 @@ public final class Main {
             + "  branch bundle is what arrived in signed bundles; bundles are merged into main, and a\n"
             + "  conflicting edit is kept on an agent-* branch. git and the toolchain are on PATH.\n"
             + "- Java 8 source against android.jar, no lambdas (no LambdaMetafactory there).\n"
-            + "- Native views only: no WebView, no HTML, no local servers.\n";
+            + "- Native views only: no WebView, no HTML, no local servers.\n\n"
+            + "## Your userland\n"
+            + "Debian trixie arm64, running natively from /data/data/t.t/d (no VM, no root). bash, git,\n"
+            + "gcc 14, JDK 21 and the Debian essentials are on PATH. `apt-get install <pkg>` works: real\n"
+            + "Debian packages, signatures verified, installed into the root (you are not root and need\n"
+            + "no sudo). Android has no /bin, /usr, /etc or /tmp: use $TMPDIR, and paths under the root.\n";
         for (String[] f : new String[][]{{"AGENTS.md", notes}, {"CLAUDE.md", NOTES_MARK + "\n@AGENTS.md\n"}}) {
             File file = new File(work, f[0]);
             if (file.exists() && !new String(Payloads.readSmall(file), "UTF-8").startsWith(NOTES_MARK)) continue;

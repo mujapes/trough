@@ -417,3 +417,9 @@ build for all 7 outputs (tests/native_repro.sh, phone-filesystem harness): dynam
 the stock interpreter name and get texec by in-place rewrite on both sides (set_interp / tfix).
 Device check: SelfTest.nativeRepro. Next: Trough rebuilds its natives from source it holds, with
 the new texec smoke-tested as a launcher and the previous kept for rollback before it replaces x.
+- ON THE PHONE (10-27, status-1793115507780.json): nativeRepro -- all 7 outputs rebuilt by the
+  root's gcc on the device are byte-identical to the bundle's (1.5 s). apt: jq_before=true, i.e.
+  a package installed by apt in an earlier boot survived a new bundle (dpkg owns d/).
+- VM-side lesson: the VM's view of shared storage reports stale mtimes (bundle.zip showed 14:51
+  after a 15:38 publish), so `find -newer` waits were wrong. tools/phone_report.sh waits on the
+  report's name (status-<epoch ms>.json) instead.
