@@ -83,8 +83,15 @@ user's own sessions; keep WebView fallback for any site that starts refusing us.
 ## Optimisation rules
 - The metric is energy per frame / per task, not peak speed: the phone's real ceiling is
   thermal (the 10-27 crash started as heat). Measure joules before and after.
-- Profile first. Hand NEON/assembly only for measured hot kernels (Tensor G2: Cortex-X1/A78/
-  A55, ARMv8.2, no SVE); PGO + LTO + -mcpu tuning for everything else.
+- Claude is the compiler, inside a verified loop (superoptimisation, cf. AlphaDev's sort
+  routines merged into libc++): generate candidates (asm, intrinsics, layouts, algorithms) ->
+  measure on the phone's own PMU and energy counters -> prove equivalence (differential
+  testing vs reference; formal checks where possible) -> keep only winners. Applies to all
+  code, not just kernels. Target: Tensor G2 (Cortex-X1/A78/A55, ARMv8.2, no SVE).
+- The edge over a compiler is semantics: known invariants, no-alias facts and value ranges
+  across the whole program, which a compiler must assume away. Exploit them first; instruction
+  selection is the last 10-30%.
+- PMU access needs a one-time adb toggle (security.perf_harden) -- verify when we get there.
 - WebView fallback stays but is metered: every fallback is counted and shown, so the debt is
   visible and drives what gets a native renderer next.
 - AI-written ports are only as good as their oracle (an AI Rust port of ScanCode benchmarked
