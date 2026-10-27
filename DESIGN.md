@@ -400,3 +400,7 @@ dpkg's own configuration only; signatures fully verified.
   failed on the phone. execmap's second behaviour: link/linkat failing with EACCES/EPERM on a
   regular file -> a same-mode copy. tests/phonefs.sh now denies linkat as Android does; it
   reproduced the phone's exact error before the fix, and tests/apt.sh passes 10/10 after.
+- ON THE PHONE (10-27, status-1793115027671.json): root kept ("dpkg owns d/"), rootfiles
+  converged (apt.conf), package list installed by the phone's apt (no-op, verified update);
+  Os.link from the app -> EACCES (Android's hard-link denial, measured); `apt-get install jq`
+  downloaded, verified, unpacked, configured and tfix'd on Android, and jq runs ([1,2]).
