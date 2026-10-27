@@ -105,5 +105,22 @@ Most real use is web scrolling, so arbitrary web content is first-class, not a f
 - Arbitrary third-party JS: ONE lightweight isolated process for all of it (not Chrome's
   process-per-site). Trough holds Claude credentials, the userland and Shizuku shell-level
   power, so an engine exploit without isolation would own all of that.
+- Harden beyond Chrome, not below it (AI-driven exploitation makes this matter more each year):
+  memory-safe engine code (Rust) where untrusted input is parsed, strict IPC schema between the
+  isolated JS process and everything else, no userland/Shizuku/credential access from it.
+- Component-level native acceleration: recognise reusable pieces of known sites (video
+  players, feeds, comment threads, embedded posts) and swap in native implementations, so
+  partial wins land long before a whole site is native.
 - Bigger wins than dropping isolation: block ads/trackers (often half a page's JS), cache
   compiled code across visits, and give the most-scrolled sites L0 native renderers.
+
+## adb without Wi-Fi (2026-10-27)
+Android drops adb on reboot and wireless debugging requires a real Wi-Fi association (own
+hotspot does not count, tested). No non-root way to persist adbd across reboots is known.
+Minimise what needs it instead:
+- One adb session grants Trough permissions that SURVIVE reboots: WRITE_SECURE_SETTINGS,
+  DUMP, READ_LOGS, PACKAGE_USAGE_STATS (pm grant / appops). Covers most of what adb was for.
+- Per-boot needs (Shizuku, perf_harden for PMU access) come back with one Wi-Fi moment:
+  another phone's hotspot, public Wi-Fi, or a ~GBP 5 ESP32 AP in the van (permanent fix).
+- Root (Pixel bootloader unlock + Magisk) removes the problem entirely; costs a data wipe
+  and Play Integrity. User's call.
