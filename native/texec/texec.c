@@ -204,8 +204,9 @@ __attribute__((used)) void texec_main(u64 *sp) {
     SYS(NR_rt_sigaction, 31 /* SIGSYS */, &sa, 0, 8, 0, 0);
 
     const char *ld_path = TROUGH_LD, *tun = 0;
+    int ld_forced = 0;  /* TROUGH_LD set: it wins over the program's own PT_INTERP */
     for (char **v = envp; *v; v++) {
-        if (prefix(*v, "TROUGH_LD=")) ld_path = *v + 10;
+        if (prefix(*v, "TROUGH_LD=")) { ld_path = *v + 10; ld_forced = 1; }
         if (prefix(*v, "GLIBC_TUNABLES=")) tun = *v;
     }
 
@@ -228,7 +229,9 @@ __attribute__((used)) void texec_main(u64 *sp) {
         load(argv[1], &prog);
         entry = prog.entry;
         if (prog.interp[0]) {  /* a patched binary names texec as interp: use the real ld.so */
-            load(ends_with(prog.interp, "/texec") ? ld_path : prog.interp, &ld);
+            /* Stock binaries name /lib/ld-linux-aarch64.so.1, which Android does not have
+               (10-27 phone run: "cannot open"); patched ones name texec itself. */
+            load(ld_forced || ends_with(prog.interp, "/texec") ? ld_path : prog.interp, &ld);
             entry = ld.entry;
             base = ld.bias;
         }
