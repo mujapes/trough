@@ -20,8 +20,9 @@ printf '#!%s/bin/sh -e\necho "shebang-arg-ok $1"\n' "$T" > "$R$T/bin/argscript"
 printf '#!%s/bin/sh\necho "printenv-ok $MARK"\n' "$T" > "$R$T/bin/printenv-mark"
 chmod +x "$R$T/bin/"*
 F=0
-with="$(LD_PRELOAD="$W/libexecmap.so" "$W/drive" 2>&1)"
-without="$("$W/drive" 2>&1)"
+mkdir -p "$W/l1" "$W/l2"
+with="$(LINKDIR="$W/l1" LD_PRELOAD="$W/libexecmap.so" "$W/drive" 2>&1)"
+without="$(LINKDIR="$W/l2" "$W/drive" 2>&1)"
 expect() {  # expect <label> <regex>
     if echo "$with" | grep -qE "$2"; then echo "ok    $1"; else echo "FAIL  $1 (no /$2/)"; F=$((F+1)); fi
 }
@@ -39,10 +40,14 @@ expect "system() via mapped sh" '^system-ok sh$'
 expect "system() status" '^system status 0$'
 expect "popen/pclose via mapped sh" '^popen read: popen-ok$'
 expect "pclose status" '^pclose 0$'
+expect "link() denied -> copy, same content and mode" '^link: copied same-content mode 640$'
+expect "link() onto an existing name -> EEXIST" '^link existing: EEXIST$'
+expect "linkat() denied -> copy" '^linkat: copied$'
+echo "$without" | grep -q '^link: FAILED Permission denied' && echo "ok    negative control: without the preload link() is EACCES" || { echo "FAIL  link negative control"; F=$((F+1)); }
 n=$(echo "$with" | grep -c FAILED)
 if [ "$n" = 0 ]; then echo "ok    no failures with the preload"; else echo "FAIL  $n failures with the preload"; echo "$with" | grep FAILED | sed 's/^/      /'; F=$((F+1)); fi
 n=$(echo "$without" | grep -cE 'FAILED|status 127|pclose 32512')
-if [ "$n" -ge 10 ]; then echo "ok    negative control: without the preload $n calls fail"; else echo "FAIL  negative control: only $n failures without the preload"; echo "$without" | sed 's/^/      /'; F=$((F+1)); fi
+if [ "$n" -ge 12 ]; then echo "ok    negative control: without the preload $n calls fail"; else echo "FAIL  negative control: only $n failures without the preload"; echo "$without" | sed 's/^/      /'; F=$((F+1)); fi
 # Existing paths are never touched: /bin/sh here stays /bin/sh.
 out="$(LD_PRELOAD="$W/libexecmap.so" sh -c 'echo $0' 2>&1)"; [ "$out" = sh ] && echo "ok    existing paths untouched" || { echo "FAIL  existing paths"; F=$((F+1)); }
 echo "== $F failed"; exit $F

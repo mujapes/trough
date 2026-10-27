@@ -3,7 +3,12 @@
  * Android has none of /bin, /usr or /sbin. texec preloads this into every glibc program it
  * starts (LD_PRELOAD, only if this file exists), so their exec calls find Trough's root.
  *
- * Scope is deliberately narrow: only the exec family, posix_spawn(p), system and popen/pclose.
+ * Scope is deliberately narrow, two behaviours:
+ *  1. exec mapping: the exec family, posix_spawn(p), system and popen/pclose (below);
+ *  2. hard links: Android's policy denies apps link(2); dpkg backs up its status file with link()
+ *     (atomic-file.c) and packages carry hard-linked files. link/linkat that fail with EACCES or
+ *     EPERM on a regular file make a copy with the same mode instead -- a correct stand-in for
+ *     backups and packaged duplicates, and the only answer Android leaves.
  * No open/stat/chdir path rewriting -- everything else uses the paths dpkg and tfix laid out.
  * The rule: an absolute program or #! interpreter under /bin /sbin /lib /usr that does not
  * exist on this device but exists under the root (/data/data/t.t/d) runs from the root. Paths
@@ -22,6 +27,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -332,4 +338,57 @@ int pclose(FILE *f) {
     }
     int (*real)(FILE *) = (int (*)(FILE *))dlsym(RTLD_NEXT, "pclose");
     return real(f);
+}
+
+/* --- hard links (Android denies them to apps) --- */
+
+static int copy_instead(int olddirfd, const char *oldpath, int newdirfd, const char *newpath, int follow) {
+    struct stat st;
+    if (fstatat(olddirfd, oldpath, &st, follow ? 0 : AT_SYMLINK_NOFOLLOW) != 0 || !S_ISREG(st.st_mode)) return -1;
+    int in = openat(olddirfd, oldpath, O_RDONLY | O_CLOEXEC);
+    if (in < 0) return -1;
+    int out = openat(newdirfd, newpath, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, st.st_mode & 07777);
+    if (out < 0) { int e = errno; close(in); errno = e; return -1; }
+    char buf[65536];
+    ssize_t n;
+    while ((n = read(in, buf, sizeof buf)) > 0) {
+        for (ssize_t off = 0; off < n; ) {
+            ssize_t w = write(out, buf + off, n - off);
+            if (w < 0) { if (errno == EINTR) continue; goto fail; }
+            off += w;
+        }
+    }
+    if (n < 0) goto fail;
+    fchmod(out, st.st_mode & 07777);   /* umask may have cut bits at create */
+    close(in);
+    if (close(out) != 0) { unlinkat(newdirfd, newpath, 0); return -1; }
+    return 0;
+fail: {
+        int e = errno;
+        close(in); close(out);
+        unlinkat(newdirfd, newpath, 0);
+        errno = e;
+        return -1;
+    }
+}
+
+int linkat(int olddirfd, const char *oldpath, int newdirfd, const char *newpath, int flags) {
+    int (*real)(int, const char *, int, const char *, int) =
+        (int (*)(int, const char *, int, const char *, int))dlsym(RTLD_NEXT, "linkat");
+    if (real(olddirfd, oldpath, newdirfd, newpath, flags) == 0) return 0;
+    if (errno != EACCES && errno != EPERM) return -1;
+    int saved = errno;
+    if (copy_instead(olddirfd, oldpath, newdirfd, newpath, flags & AT_SYMLINK_FOLLOW) == 0) return 0;
+    if (errno != EEXIST && errno != ENOENT) errno = saved;
+    return -1;
+}
+
+int link(const char *oldpath, const char *newpath) {
+    int (*real)(const char *, const char *) = (int (*)(const char *, const char *))dlsym(RTLD_NEXT, "link");
+    if (real(oldpath, newpath) == 0) return 0;
+    if (errno != EACCES && errno != EPERM) return -1;
+    int saved = errno;
+    if (copy_instead(AT_FDCWD, oldpath, AT_FDCWD, newpath, 0) == 0) return 0;
+    if (errno != EEXIST && errno != ENOENT) errno = saved;
+    return -1;
 }

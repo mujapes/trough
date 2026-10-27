@@ -27,10 +27,11 @@ static void put(const char *path, const char *text) {
     close(fd);
 }
 
-/* Outside a user namespace (the phone), chown to another user is EPERM, which dpkg tolerates
- * as a non-root user; inside this one, an unmapped uid gives EINVAL instead. Restore the phone's
- * answer: fchownat/fchown with a uid or gid other than ours (or -1) -> EPERM. */
-static void phone_chown(uid_t u, gid_t g) {
+/* The phone's answers where this namespace would differ:
+ *  - chown to another user is EPERM there (dpkg tolerates it as a non-root user); here an
+ *    unmapped uid gives EINVAL: fchownat/fchown with a uid or gid other than ours (or -1) -> EPERM;
+ *  - Android's policy denies apps hard links: linkat -> EACCES (dpkg's status backup, 10-27). */
+static void phone_policy(uid_t u, gid_t g) {
 #define ARG(n) offsetof(struct seccomp_data, args[n])
 #define CHECK(arg, want, skip) \
     BPF_STMT(BPF_LD | BPF_W | BPF_ABS, ARG(arg)), \
@@ -39,6 +40,8 @@ static void phone_chown(uid_t u, gid_t g) {
     BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | EPERM)
     struct sock_filter f[] = {
         BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, nr)),
+        BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_linkat, 0, 1),
+        BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | EACCES),
         BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_fchownat, 0, 9),
         CHECK(2, u, 2),
         CHECK(3, g, 2),
@@ -80,7 +83,7 @@ int main(int argc, char **argv) {
     }
     if (chroot(n) != 0) die("chroot");
     if (chdir("/data/data/t.t") != 0) die("chdir");
-    phone_chown(u, g);
+    phone_policy(u, g);
     execv(argv[1], argv + 1);
     die(argv[1]);
 }

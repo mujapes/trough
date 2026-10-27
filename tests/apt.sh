@@ -12,7 +12,7 @@ ok() { if [ "$1" = 0 ]; then echo "ok    $2"; else echo "FAIL  $2"; F=$((F+1)); 
 # What ships: the root zip unpacked the way the phone does it, not the VM's build tree.
 ZIP="${ROOT_ZIP:-$HOME/.trough/root.zip}"
 "$ROOT/tools/unpack_root.sh" "$ZIP" "$D"
-[ -f /data/data/t.t/l/libexecmap.so ] || gcc -O2 -shared -fPIC -o /data/data/t.t/l/libexecmap.so "$ROOT/native/execmap/execmap.c" -ldl
+gcc -O2 -shared -fPIC -o /data/data/t.t/l/libexecmap.so "$ROOT/native/execmap/execmap.c" -ldl
 SRC=$D/etc/apt/sources.list.d/debian.sources
 cp "$SRC" "$SRC.good"
 sed -i 's|debian-archive-keyring.gpg|debian-archive-removed-keys.gpg|' "$SRC"

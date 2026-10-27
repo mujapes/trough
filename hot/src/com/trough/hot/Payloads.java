@@ -25,7 +25,10 @@ final class Payloads {
     static File dir(Context ctx) { return new File(ctx.getFilesDir(), "payload"); }
 
     /** Installs every payload in manifest; returns name -> local path, or throws on mismatch. */
-    static JSONObject ensure(Context ctx, File bundleDir) throws Exception {
+    static JSONObject ensure(Context ctx, File bundleDir) throws Exception { return ensure(ctx, bundleDir, null); }
+
+    /** As ensure, leaving out the payloads named in skip (not fetched, not listed). */
+    static JSONObject ensure(Context ctx, File bundleDir, java.util.Set<String> skip) throws Exception {
         JSONObject manifest = new JSONObject(new String(readSmall(new File(bundleDir, "manifest.json")), "UTF-8"));
         JSONObject wanted = manifest.optJSONObject("payloads");
         JSONObject out = new JSONObject();
@@ -34,6 +37,7 @@ final class Payloads {
         dir(ctx).mkdirs();
         for (Iterator<String> it = wanted.keys(); it.hasNext(); ) {
             String name = it.next(), sha = wanted.getString(name);
+            if (skip != null && skip.contains(name)) continue;
             File local = new File(dir(ctx), sha);
             if (!local.exists()) {
                 File tmp = new File(dir(ctx), sha + ".tmp");

@@ -6,6 +6,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <linux/filter.h>
+#include <linux/seccomp.h>
+#include <stddef.h>
+#include <sys/prctl.h>
+#include <sys/stat.h>
+#include <sys/syscall.h>
 #include <sys/wait.h>
 #include <unistd.h>
 extern char **environ;
@@ -54,5 +62,28 @@ int main(void) {
     char line[128] = "";
     if (f) { if (!fgets(line, sizeof line, f)) line[0] = 0; printf("popen read: %s", line); printf("pclose %d\n", pclose(f)); }
     else printf("popen: FAILED %m\n");
+    /* Android denies apps hard links: from here on linkat is EACCES, as there. */
+    struct sock_filter flt[] = {
+        BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, nr)),
+        BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_linkat, 0, 1),
+        BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | EACCES),
+        BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+    };
+    struct sock_fprog prog = {4, flt};
+    prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
+    prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog);
+    const char *dir = getenv("LINKDIR");
+    char a[512], b[512], c2[512];
+    snprintf(a, sizeof a, "%s/status", dir); snprintf(b, sizeof b, "%s/status-old", dir); snprintf(c2, sizeof c2, "%s/status-at", dir);
+    int fd = open(a, O_WRONLY | O_CREAT | O_TRUNC, 0640);
+    if (write(fd, "Package: x\n", 11) != 11) printf("write: FAILED\n");
+    close(fd);
+    if (link(a, b) == 0) {
+        struct stat st; char got[32] = ""; int g = open(b, O_RDONLY); ssize_t n = read(g, got, sizeof got - 1); close(g);
+        stat(b, &st);
+        printf("link: copied %s mode %o\n", n == 11 && !strncmp(got, "Package: x\n", 11) ? "same-content" : "WRONG", st.st_mode & 0777);
+    } else printf("link: FAILED %m\n");
+    if (link(a, b) != 0 && errno == EEXIST) printf("link existing: EEXIST\n"); else printf("link existing: WRONG\n");
+    if (linkat(AT_FDCWD, a, AT_FDCWD, c2, 0) == 0) printf("linkat: copied\n"); else printf("linkat: FAILED %m\n");
     return 0;
 }

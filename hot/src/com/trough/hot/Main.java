@@ -49,12 +49,14 @@ public final class Main {
                     step(boot, "root");
                     Root.install(activity, dir);      // texec, patched glibc, resolv.conf
                     step(boot, "payloads");
-                    bootPayloads = Payloads.ensure(activity, dir);
+                    // The root zip only bootstraps: once dpkg owns d/, it is never fetched again.
+                    bootPayloads = Payloads.ensure(activity, dir, rootSkip(activity));
                     if (bootPayloads.has("root")) {
                         long t = System.nanoTime();
                         boot.put("root_install", DebRoot.install(activity, bootPayloads.getString("root")));
                         boot.put("root_install_ms", (System.nanoTime() - t) / 1_000_000);
-                    }
+                    } else if (DebRoot.present(activity)) boot.put("root_install", "kept: dpkg owns d/");
+                    if (DebRoot.present(activity)) boot.put("root_files", DebRoot.converge(activity, dir));
                     step(boot, "seed");
                     boot.put("seed", Self.seed(activity, dir));
                     step(boot, "self_build");
@@ -155,7 +157,7 @@ public final class Main {
         new Thread(new Runnable() {
             @Override public void run() {
                 try {
-                    JSONObject payloads = Payloads.ensure(activity, dir);
+                    JSONObject payloads = Payloads.ensure(activity, dir, rootSkip(activity));
                     Creds.sync(activity, home);
                     File work = work(activity);
                     agentNotes(activity, work);
@@ -169,7 +171,9 @@ public final class Main {
                     if (boot.optBoolean("reload")) { status(boot); return; }
                     // Self-hosting proofs, reported to the VM: the toolchain builds C and Java here,
                     // and an edited copy of Trough's own source builds and loads.
-                    if (payloads.has("root")) {
+                    if (DebRoot.present(activity)) {
+                        step(boot, "root_packages");
+                        try { boot.put("root_packages", DebRoot.packages(activity, dir)); } catch (Throwable e) { boot.put("root_packages_error", String.valueOf(e)); }
                         step(boot, "selftest");
                         try { boot.put("selftest", SelfTest.run(activity)); } catch (Throwable e) { boot.put("selftest_error", String.valueOf(e)); }
                         step(boot, "self_edit");
@@ -197,6 +201,12 @@ public final class Main {
                 }
             }
         }, "trough-start").start();
+    }
+
+    private static java.util.Set<String> rootSkip(android.content.Context ctx) {
+        java.util.Set<String> s = new java.util.HashSet<>();
+        if (DebRoot.present(ctx)) s.add("root");
+        return s;
     }
 
     static File work(android.content.Context ctx) {

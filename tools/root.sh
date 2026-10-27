@@ -112,6 +112,7 @@ Dir::dpkg::cputable "$D/usr/share/dpkg/cputable";
 Dir::dpkg::tupletable "$D/usr/share/dpkg/tupletable";
 Dir::dpkg::triplettable "$D/usr/share/dpkg/triplettable";
 DPkg::Path "$D/usr/sbin:$D/usr/bin:/system/bin";
+DPkg::Lock::Timeout "300";
 DPkg::Options { "--instdir=$D"; "--admindir=$D/var/lib/dpkg"; "--log=$D/var/log/dpkg.log"; "--force-not-root"; "--force-script-chrootless"; "--force-bad-path"; };
 CONF
 cat > "$D/etc/apt/sources.list.d/debian.sources" <<SRC
@@ -134,4 +135,28 @@ python3 "$ROOT/tools/tfix.py" "$D" >&2   # l/ exists here (tests/run.sh) and on 
     && find . -type l -printf '%P\t%l\n' > links.txt \
     && find . -type f -perm -u+x ! -name '*.so*' -printf '%P\n' > exec.txt)
 rm -f "$OUT"; (cd "$D" && find . -type f -print0 | xargs -0 zip -q -X "$OUT")
+
+# Trough's own files in d/ -- everything above that no Debian package owns. The root zip only
+# bootstraps a phone that has no d/ yet; after that dpkg owns d/ (packages agents install must
+# survive), and these ride in every signed bundle instead (DebRoot.converge), with the package
+# list, which the phone's own apt installs.
+OWNED="lib bin sbin usr/sbin/ldconfig usr/libexec/trough/tfix usr/local/bin/apt usr/local/bin/apt-get
+    usr/local/bin/dpkg usr/bin/gcc usr/bin/cc usr/bin/java usr/bin/javac usr/bin/jar
+    usr/lib/gcc/aarch64-linux-gnu/14/specs usr/lib/ld-linux-aarch64.so.1 etc/apt/apt.conf
+    etc/apt/sources.list.d/debian.sources etc/ssl/certs/ca-certificates.crt etc/ssl/certs/java/cacerts"
+for n in ld-linux-aarch64.so.1 libc.so.6 libm.so.6 librt.so.1 libpthread.so.0 libdl.so.2; do
+    [ -L "$L/$n" ] && OWNED="$OWNED usr/lib/aarch64-linux-gnu/$n"
+done
+F="$(mktemp -d)"; trap 'rm -f "$LIST"; rm -rf "$F"' EXIT
+: > "$F/rootfiles-links.txt"; : > "$F/rootfiles-exec.txt"
+for rel in $OWNED; do
+    if [ -L "$D/$rel" ]; then printf '%s\t%s\n' "$rel" "$(readlink "$D/$rel")" >> "$F/rootfiles-links.txt"
+    elif [ -f "$D/$rel" ]; then mkdir -p "$F/files/$(dirname "$rel")"; cp "$D/$rel" "$F/files/$rel"
+        [ -x "$D/$rel" ] && echo "$rel" >> "$F/rootfiles-exec.txt"
+    else echo "root.sh: owned path missing: $rel" >&2; exit 1; fi
+done
+echo $WANT | tr ' ' '\n' > "$F/packages.txt"
+FILES_ZIP="${OUT%.zip}files.zip"
+rm -f "$FILES_ZIP"; (cd "$F" && zip -q -X -r "$FILES_ZIP" .)
+echo "root.sh: Trough-owned: $(echo $OWNED | wc -w) paths -> $(du -h "$FILES_ZIP" | cut -f1) $FILES_ZIP" >&2
 echo "root.sh: $(du -sh "$D" | cut -f1) -> $(du -h "$OUT" | cut -f1) ($(wc -l < "$D/links.txt") links, $(wc -l < "$D/exec.txt") executables)" >&2

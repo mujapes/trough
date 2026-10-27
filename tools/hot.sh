@@ -62,6 +62,9 @@ fi
 # Trough's Debian root (self-hosting toolchain, tools/root.sh). Rebuilt with ROOTFS=1.
 ROOT_ZIP="${ROOT_ZIP:-$HOME/.trough/root.zip}"
 if [ "${ROOTFS:-0}" = 1 ]; then "$ROOT/tools/root.sh" "$ROOT_ZIP" >&2; fi
+# Trough's own files in d/ + the package list (small, signed): what a phone that already has a
+# root converges to (DebRoot.converge); the root zip itself only bootstraps.
+if [ -f "${ROOT_ZIP%.zip}files.zip" ]; then mkdir -p "$B/z/rootfiles" && (cd "$B/z/rootfiles" && unzip -q "${ROOT_ZIP%.zip}files.zip"); fi
 if [ -f "$ROOT_ZIP" ]; then
     sha=$(sha256sum "$ROOT_ZIP" | cut -d' ' -f1)
     [ -f "$PAYLOAD_DIR/$sha" ] || { cp "$ROOT_ZIP" "$PAYLOAD_DIR/.$sha.tmp" && mv "$PAYLOAD_DIR/.$sha.tmp" "$PAYLOAD_DIR/$sha"; }

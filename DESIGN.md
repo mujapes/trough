@@ -392,6 +392,11 @@ dpkg's own configuration only; signatures fully verified.
   + jq with maintainer scripts; alternatives; programs run; dpkg db; remove), tests/execmap.sh
   17/17 (with a without-preload negative control), tests/tfix.sh 7/7, tests/run.sh 10/10 with
   execmap preloaded.
-- OPEN: a new root payload replaces d/ wholesale (DebRoot), which would drop packages agents
-  installed with apt. Next: root updates go through apt/dpkg on the device (the payload seeds
-  only a fresh install), so d/ is owned by dpkg from then on.
+- dpkg owns d/ once it exists: the root zip only bootstraps (and is no longer even fetched
+  after that). Bundles carry rootfiles/ (root.sh OWNED: Trough's own files in d/, 25 paths,
+  260 KB) applied by DebRoot.converge, and packages.txt, which the phone's own apt installs
+  when it changed (DebRoot.packages; marker d/.trough-packages). Packages agents install survive.
+- Android denies apps hard links; dpkg backs up its status with link() (atomic-file.c:101) and
+  failed on the phone. execmap's second behaviour: link/linkat failing with EACCES/EPERM on a
+  regular file -> a same-mode copy. tests/phonefs.sh now denies linkat as Android does; it
+  reproduced the phone's exact error before the fix, and tests/apt.sh passes 10/10 after.

@@ -47,6 +47,14 @@ final class SelfTest {
         w.mkdirs();
         String d = new File(ctx.getDataDir(), "d").getPath();
         JSONObject r = new JSONObject();
+        // Android's policy on hard links for apps, measured (dpkg backs up its status with link()).
+        File a = new File(w, "link-src"), b = new File(w, "link-dst");
+        b.delete();
+        Payloads.writeSmall(a, "x");
+        try { android.system.Os.link(a.getPath(), b.getPath()); r.put("hardlink", "allowed"); }
+        catch (android.system.ErrnoException e) { r.put("hardlink", "denied: " + android.system.OsConstants.errnoName(e.errno)); }
+        // A root that survives bundles keeps what apt installed: true from the second run on.
+        r.put("jq_before", new File(d, "usr/bin/jq").exists());
         r.put("update", exec(w, ctx, null, 600, d + "/usr/local/bin/apt-get", "update"));
         r.put("install", exec(w, ctx, null, 600, d + "/usr/local/bin/apt-get", "install", "-y", "jq"));
         r.put("jq", exec(w, ctx, null, 60, d + "/usr/bin/sh", "-c", "echo '{\"a\":[1,2]}' | jq -c .a"));
@@ -208,7 +216,7 @@ final class SelfTest {
         return exec(cwd, ctx, extra, EXEC_TIMEOUT_S, cmd);
     }
 
-    private static JSONObject exec(File cwd, Context ctx, Map<String, String> extra, long timeoutS, String... cmd) throws Exception {
+    static JSONObject exec(File cwd, Context ctx, Map<String, String> extra, long timeoutS, String... cmd) throws Exception {
         ProcessBuilder pb = new ProcessBuilder(cmd).directory(cwd).redirectErrorStream(true)
             .redirectInput(new File("/dev/null"));
         Map<String, String> env = pb.environment();
