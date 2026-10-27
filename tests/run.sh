@@ -30,6 +30,7 @@ gcc $FREE -Wl,-Ttext-segment=0x6f00000000 -o "$R/x" "$ROOT/native/texec/texec.c"
 gcc -O2 -static -o "$OUT/bench" "$ROOT/native/bench/bench.c"
 for l in ld-linux-aarch64.so.1 libc.so.6 libm.so.6 librt.so.1 libpthread.so.0 libdl.so.2; do cp "$GLIBC_DIR/$l" "$R/l/"; done
 python3 "$ROOT/tools/patch_svc.py" "$R/l/"* >/dev/null
+gcc -O2 -shared -fPIC -o "$R/l/libexecmap.so" "$ROOT/native/execmap/execmap.c" -ldl   # preloaded by texec, as on the phone
 python3 "$ROOT/tools/patch_paths.py" "$R/l/libc.so.6" >/dev/null
 # Android has no nsswitch.conf, so glibc falls back to plain DNS via resolv.conf. Hide this
 # box's nsswitch.conf from the test copy, or it would resolve through systemd-resolved and

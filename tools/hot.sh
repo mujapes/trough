@@ -32,6 +32,8 @@ for l in ld-linux-aarch64.so.1 libc.so.6 libm.so.6 librt.so.1 libpthread.so.0 li
     cp "$GLIBC_DIR/$l" "$B/z/lib/"
 done
 python3 "$ROOT/tools/patch_svc.py" "$B/z/lib/"*
+# The exec mapper texec preloads (native/execmap): built against the same glibc.
+"$CC_ARM64" -O2 -Wall -Wextra -shared -fPIC -o "$B/z/lib/libexecmap.so" "$ROOT/native/execmap/execmap.c" -ldl
 python3 "$ROOT/tools/patch_paths.py" "$B/z/lib/libc.so.6"
 
 # Payloads: too big for the bundle. Content-addressed in shared storage; their hashes go in

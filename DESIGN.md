@@ -184,13 +184,10 @@ api.anthropic.com, server rejects the key. Everything but real credentials works
   filter, loading only Trough's patched glibc (l/) and dpkg's libs (d/usr/lib).
 - apt and dpkg installed into d/ themselves (30 packages). Trough's own apt-get then fetched
   InRelease over HTTPS under the filter.
-- Blocker: apt's sqv method runs /usr/bin/sqv by a fixed path with no config key, and apt
-  has no configurable verifier. Never work around this with trusted=yes. Not pursued by
-  Claude (its own safety checks stopped both attempts; this records that, it is not a project
-  rule for other agents): rewriting machine code that computes the path, and namespace/chroot
-  sandboxing of Trough's processes. Chosen route: Trough verifies Debian's
-  signed InRelease itself, calling the root's sqv by its real path with Debian's keyring,
-  and only then hands apt the verified index from a local mirror directory.
+- CORRECTED 10-27 (see "trough-apt, solved" below): the sqv "blocker" was a VM artifact. apt
+  3.0.3 uses its sqv method only when /usr/bin/sqv exists AND APT::Key::GPGVCommand is unset
+  (acquire-item.cc:1427); Android has no /usr/bin/sqv, and the VM simulation saw the host's.
+  Neither machine-code rewriting nor namespaces nor a local mirror is needed.
 
 ### Namespace investigation (Codex, 2026-10-27)
 - User explicitly asks to investigate the namespace/machine-code work and why Opus stopped,
@@ -363,3 +360,35 @@ one child process (or, next, in-process code) speaking its own native protocol, 
   enforces the real APIs' structure rules (400 otherwise; negative control checked), and
   tests/jvm/TroughAgentTest: text + deltas, resume, approved read round-trip, denied bash not
   run and reported as an error -- 16/16 (10-27). Device: SelfTest.providers, fake keys -> 401.
+
+## trough-apt, solved (2026-10-27)
+Stock Debian apt + dpkg run from Trough's root d/ as an ordinary app user, with apt's and
+dpkg's own configuration only; signatures fully verified.
+- Verification: APT::Key::GPGVCommand = d/usr/bin/gpgv selects apt's gpgv method (supported
+  config; apt 3.0.3 acquire-item.cc:1427, gpgv.cc FindGPGV). Signed-By the root's
+  debian-archive-keyring. Never trusted=yes.
+- d/etc/apt/apt.conf (tools/root.sh; APT_CONFIG in Root.env): Dir, Dir::Bin::Methods,
+  Dir::Bin::dpkg, Acquire::https::CaInfo, Dir::dpkg::{cputable,tupletable,triplettable},
+  DPkg::Path, DPkg::Options (--instdir/--admindir/--log, --force-not-root,
+  --force-script-chrootless, --force-bad-path). Each was a compiled-in host path found by the
+  phone-filesystem harness, which the plain VM run hid.
+- dpkg database: the whole dependency closure (tools/dpkg_closure.py, from dpkg's status --
+  apt-cache's --installed view dropped virtual Pre-Depends) recorded as installed, including
+  what is not shipped (libc6 = Trough's glibc; adduser, passwd, systemd...). Debian's Essential
+  set is in the root (dpkg and maintainer scripts assume it). Alternatives recreated.
+- execmap (native/execmap, preloaded by texec when present): exec family, posix_spawn(p),
+  system, popen -- an absolute /bin /sbin /lib /usr program or #! interpreter that is missing on
+  the device but present under d/ runs from d/. Existing paths are never touched; no other file
+  call is intercepted. Maintainer scripts (#!/bin/sh), #!/usr/bin/env, system("...") work.
+- tfix native (native/tfix, C; differential oracle tests/tfix.sh vs tools/tfix.py), run by
+  wrappers d/usr/local/bin/{apt,apt-get,dpkg} after every operation (apt's own Post-Invoke
+  hooks chdir to /tmp, which Android lacks).
+- ldconfig in d/ is a documented no-op: Trough has no ld.so.cache by design.
+- tests/phonefs.sh (VM test harness only; Trough never uses namespaces): a mount namespace
+  whose / holds only /data/data/t.t, /proc, /dev, the simulated app filter, an ordinary uid,
+  and Android's chown answer (EPERM, not the namespace's EINVAL). The sqv misreading is exactly
+  what it exists to prevent.
+- Oracles: tests/apt.sh 10/10 (wrong-keyring negative control; update verified; install less
+  + jq with maintainer scripts; alternatives; programs run; dpkg db; remove), tests/execmap.sh
+  17/17 (with a without-preload negative control), tests/tfix.sh 7/7, tests/run.sh 10/10 with
+  execmap preloaded.

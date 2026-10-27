@@ -51,7 +51,8 @@ final class Root {
         e.put("TMPDIR", tmp.getPath());   // Android has no /tmp
         e.put("SHELL", d + "/usr/bin/bash");   // agents' shell tools expect bash
         e.put("SSL_CERT_FILE", d + "/etc/ssl/certs/ca-certificates.crt");
-        e.put("PATH", d + "/usr/bin:" + new File(ctx.getDataDir(), "bin").getPath() + ":/system/bin");
+        e.put("PATH", d + "/usr/local/bin:" + d + "/usr/bin:" + d + "/usr/sbin:" + new File(ctx.getDataDir(), "bin").getPath() + ":/system/bin");
+        e.put("APT_CONFIG", d + "/etc/apt/apt.conf");   // apt rooted in d/ (tools/root.sh)
         e.put("GIT_EXEC_PATH", d + "/usr/lib/git-core");
         e.put("GIT_TEMPLATE_DIR", d + "/usr/share/git-core/templates");
         e.put("GIT_CONFIG_NOSYSTEM", "1");

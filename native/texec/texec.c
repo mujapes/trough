@@ -34,7 +34,7 @@ static i64 sys6(i64 n, i64 a, i64 b, i64 c, i64 d, i64 e, i64 f) {
 #define SYS(n, a, b, c, d, e, f) sys6(n, (i64)(a), (i64)(b), (i64)(c), (i64)(d), (i64)(e), (i64)(f))
 
 enum { NR_openat = 56, NR_close = 57, NR_pread64 = 67, NR_write = 64, NR_exit_group = 94,
-       NR_rt_sigaction = 134, NR_munmap = 215, NR_mmap = 222 };
+       NR_rt_sigaction = 134, NR_munmap = 215, NR_mmap = 222, NR_faccessat = 48 };
 enum { PROT_R = 1, PROT_W = 2, PROT_X = 4, MAP_PRIVATE = 2, MAP_FIXED = 0x10, MAP_ANON = 0x20 };
 enum { AT_NULL = 0, AT_PHDR = 3, AT_PHENT = 4, AT_PHNUM = 5, AT_PAGESZ = 6, AT_BASE = 7,
        AT_ENTRY = 9, AT_EXECFN = 31 };
@@ -218,6 +218,29 @@ static const char *with_trough_lib(const char *existing) {
     return libpath;
 }
 
+/* execmap (native/execmap): stock programs exec /bin/sh, #!/usr/bin/perl, ...; Android has no
+   /bin or /usr, so every glibc program gets the exec mapper preloaded -- only if Trough
+   installed it, so a texec without it behaves exactly as before. */
+#ifndef TROUGH_PRELOAD
+#define TROUGH_PRELOAD "/data/data/t.t/l/libexecmap.so"
+#endif
+static char preload[2048];
+static const char *with_execmap(const char *existing) {
+    if (SYS(NR_faccessat, -100 /* AT_FDCWD */, TROUGH_PRELOAD, 4 /* R_OK */, 0, 0, 0) != 0) return existing;
+    char *w = preload;
+    const char *k = "LD_PRELOAD=", *t = TROUGH_PRELOAD;
+    while (*k) *w++ = *k++;
+    while (*t) *w++ = *t++;
+    if (existing) {
+        const char *v = existing + 11;
+        if (contains(v, TROUGH_PRELOAD) || len(v) > sizeof preload - len(TROUGH_PRELOAD) - 32) return existing;
+        if (*v) *w++ = ':';
+        while (*v) *w++ = *v++;
+    }
+    *w = 0;
+    return preload;
+}
+
 __attribute__((used)) void texec_main(u64 *sp) {
     i64 argc = (i64)sp[0];
     char **argv = (char **)(sp + 1);
@@ -236,12 +259,13 @@ __attribute__((used)) void texec_main(u64 *sp) {
         { on_sigsys, 0x4 /* SA_SIGINFO */ | 0x10000000 /* SA_RESTART */, 0, 0 };
     SYS(NR_rt_sigaction, 31 /* SIGSYS */, &sa, 0, 8, 0, 0);
 
-    const char *ld_path = TROUGH_LD, *tun = 0, *llp = 0;
+    const char *ld_path = TROUGH_LD, *tun = 0, *llp = 0, *pre = 0;
     int ld_forced = 0;  /* TROUGH_LD set: it wins over the program's own PT_INTERP */
     for (char **v = envp; *v; v++) {
         if (prefix(*v, "TROUGH_LD=")) { ld_path = *v + 10; ld_forced = 1; }
         if (prefix(*v, "GLIBC_TUNABLES=")) tun = *v;
         if (prefix(*v, "LD_LIBRARY_PATH=")) llp = *v;
+        if (prefix(*v, "LD_PRELOAD=")) pre = *v;
     }
 
     /* Two ways in. As PT_INTERP of a patched binary (trough-apt rewrites every installed ELF
@@ -275,7 +299,7 @@ __attribute__((used)) void texec_main(u64 *sp) {
     /* Fresh stack: argc, argv, NULL, envp (+tunables), NULL, auxv with the target's values. */
     u64 nenv = (u64)(e - envp), naux = 0;
     for (u64 *a = auxv; a[0] != AT_NULL; a += 2) naux++;
-    u64 words = 1 + (u64)argc + 1 + nenv + 3 + 2 * (naux + 1);
+    u64 words = 1 + (u64)argc + 1 + nenv + 4 + 2 * (naux + 1);
     u64 size = 8UL << 20;
     i64 stack = SYS(NR_mmap, 0, size, PROT_R | PROT_W, MAP_PRIVATE | MAP_ANON, -1, 0);
     if (stack < 0 && stack > -4096) die("cannot map stack", 0);
@@ -284,9 +308,11 @@ __attribute__((used)) void texec_main(u64 *sp) {
     *w++ = (u64)(argc - skip);
     for (i64 i = skip; i < argc; i++) *w++ = (u64)argv[i];
     *w++ = 0;
-    for (u64 i = 0; i < nenv; i++) if (envp[i] != tun && envp[i] != llp) *w++ = (u64)envp[i];
+    for (u64 i = 0; i < nenv; i++) if (envp[i] != tun && envp[i] != llp && envp[i] != pre) *w++ = (u64)envp[i];
     *w++ = (u64)with_rseq_off(tun);
     *w++ = (u64)with_trough_lib(llp);
+    const char *p = with_execmap(pre);
+    if (p) *w++ = (u64)p;
     *w++ = 0;
     for (u64 *a = auxv; a[0] != AT_NULL; a += 2) {
         u64 v = a[1];
