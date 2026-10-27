@@ -12,12 +12,16 @@ a stock Linux userland. Trough brings that userland into the app process tree in
 Every command resolves through the layers in order; the first that has the tool runs it.
 
 1. **bionic** -- Termux-style packages built for Android (node, python, git, rg, ffmpeg,
-   clang). Native, zero overhead. Claude Code runs here on node.
+   clang). Native, zero overhead. NOTE (web check 2026-10-27): Claude Code no longer ships an
+   Android/node build -- it is a linux-arm64 glibc binary, so it runs on layer 2.
    Prefix: /data/data/<trough pkg>/files/usr (packages rebuilt for this prefix, or a
    path-rewrite shim until they are).
 2. **glibc-direct** -- stock Debian arm64 binaries launched through glibc's own ld.so with an
    explicit library path (glibc-runner approach). Native speed, no ptrace. Hardcoded
    /usr,/etc paths fixed by patchelf or an LD_PRELOAD path rewriter.
+   Generalised as `trough-apt`: fetch stock Debian arm64 .debs, unpack into our prefix, patch
+   interpreter/rpath, redirect /etc,/usr,/tmp. A universal automatic port -- no hand porting,
+   same ISA. This is how Claude's own `apt install`s keep working.
 3. **proot** -- full stock Debian rootfs for anything else. Compute native, every path syscall
    ptrace-translated (2-5x slower on fs-heavy work). Last resort only.
 
@@ -75,3 +79,14 @@ user's own sessions; keep WebView fallback for any site that starts refusing us.
 3. Native gaze.
 4. Userland layers 2 and 3.
 5. Port Forge UI; retire the VM.
+
+## Optimisation rules
+- The metric is energy per frame / per task, not peak speed: the phone's real ceiling is
+  thermal (the 10-27 crash started as heat). Measure joules before and after.
+- Profile first. Hand NEON/assembly only for measured hot kernels (Tensor G2: Cortex-X1/A78/
+  A55, ARMv8.2, no SVE); PGO + LTO + -mcpu tuning for everything else.
+- WebView fallback stays but is metered: every fallback is counted and shown, so the debt is
+  visible and drives what gets a native renderer next.
+- AI-written ports are only as good as their oracle (an AI Rust port of ScanCode benchmarked
+  faster but returned wrong results). Every engine piece is gated on its conformance suite:
+  test262 for JS, web-platform-tests for HTML/CSS/DOM, golden screenshots per site view.
