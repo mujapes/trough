@@ -149,3 +149,10 @@ optimisation loop does not depend on it:
 - GitHub's free arm64 runner (Cobalt 100) measured 3.39 GHz with the same bench; its
   CNTFRQ is 1 GHz (phone: 24.576 MHz). bench handles both.
 - The APK is now only HotLoader; everything else ships as signed bundles via tools/hot.sh.
+- Probe result (run 2): Android traps set_robust_list, rseq, futex_waitv for apps. Static glibc
+  calls the first two before main. Fixed two ways, both verified in the VM under
+  tests/seccomp_sim (same filter): native/texec (SIGSYS -> -ENOSYS handler + its own ELF
+  loader, also usable as PT_INTERP so exec chains work) and tools/patch_svc.py (rewrites
+  those svc sites in Trough's own glibc to an inline -ENOSYS -- needed because threads that
+  block all signals, e.g. node's libuv pool, are killed before any handler runs).
+  Under the simulated filter: ls, git, python3, node 20 and claude 2.1.311 all run.

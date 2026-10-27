@@ -15,8 +15,16 @@ B="$(mktemp -d)"; trap 'rm -rf "$B"' EXIT
 mkdir -p "$B/z/bin" "$B/obj" "$B/dex"
 
 "$CC_ARM64" -O2 -static -o "$B/z/bin/bench" "$ROOT/native/bench/bench.c"
-"$CC_ARM64" -O2 -static -nostdlib -ffreestanding -fno-builtin -fno-stack-protector \
-    -o "$B/z/bin/probe" "$ROOT/native/probe/probe.c"
+FREESTANDING="-O2 -static -nostdlib -ffreestanding -fno-builtin -fno-stack-protector"
+"$CC_ARM64" $FREESTANDING -o "$B/z/bin/probe" "$ROOT/native/probe/probe.c"
+"$CC_ARM64" $FREESTANDING -Wl,-Ttext-segment=0x6f00000000 -o "$B/z/bin/texec" "$ROOT/native/texec/texec.c"
+"$CC_ARM64" -O2 -o "$B/z/bin/threadtest" "$ROOT/native/threadtest/threadtest.c"
+
+# Trough's own glibc: the VM's arm64 copy, with trapped syscalls rewritten to -ENOSYS.
+GLIBC_DIR="${GLIBC_DIR:-/lib/aarch64-linux-gnu}"
+mkdir -p "$B/z/lib"
+cp "$GLIBC_DIR/ld-linux-aarch64.so.1" "$GLIBC_DIR/libc.so.6" "$B/z/lib/"
+python3 "$ROOT/tools/patch_svc.py" "$B/z/lib/ld-linux-aarch64.so.1" "$B/z/lib/libc.so.6"
 
 find "$ROOT/hot/src" -name '*.java' > "$B/sources.txt"
 if ! javac -nowarn -source 8 -target 8 -bootclasspath "$ANDROID_JAR" -classpath "$ANDROID_JAR" \

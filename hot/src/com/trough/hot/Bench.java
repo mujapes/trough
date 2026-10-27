@@ -46,9 +46,18 @@ final class Bench {
             long t0 = System.nanoTime();
             // The first device run died with SIGSYS before printing: the probe names the trapped
             // syscalls, then the bench runs as-is and with glibc's rseq registration disabled.
-            r.put("probe", exec(new File(binDir, "probe"), null));
-            r.put("bench_plain", exec(new File(binDir, "bench"), null));
-            r.put("bench_no_rseq", exec(new File(binDir, "bench"), "glibc.pthread.rseq=0"));
+            // 10-27 run 2: probe found set_robust_list, rseq, futex_waitv trapped; bench died both
+            // ways. texec catches them (static bench); patched glibc removes them (threadtest:
+            // dynamic, 4 threads with every signal blocked -- node's failure mode).
+            File lib = new File(binDir.getParentFile(), "lib");
+            String texec = new File(binDir, "texec").getPath();
+            r.put("probe", exec(new String[]{new File(binDir, "probe").getPath()}, null));
+            r.put("bench_direct", exec(new String[]{new File(binDir, "bench").getPath()}, null));
+            r.put("bench_texec", exec(new String[]{texec, new File(binDir, "bench").getPath()}, null));
+            java.util.Map<String, String> env = new java.util.HashMap<>();
+            env.put("TROUGH_LD", new File(lib, "ld-linux-aarch64.so.1").getPath());
+            env.put("LD_LIBRARY_PATH", lib.getPath());
+            r.put("threadtest_texec", exec(new String[]{texec, new File(binDir, "threadtest").getPath()}, env));
             long ms = (System.nanoTime() - t0) / 1_000_000;
             PowerMonitorReadings after = readings(ctx, monitors);
             r.put("window_ms", ms);
@@ -84,15 +93,14 @@ final class Bench {
     }
 
     /** {exit, ms, json|raw}; exit 159 = SIGSYS (seccomp). */
-    private static JSONObject exec(File bin, String tunables) throws Exception {
-        ProcessBuilder pb = new ProcessBuilder(bin.getPath()).redirectErrorStream(true);
-        if (tunables != null) pb.environment().put("GLIBC_TUNABLES", tunables);
+    private static JSONObject exec(String[] cmd, java.util.Map<String, String> env) throws Exception {
+        ProcessBuilder pb = new ProcessBuilder(cmd).redirectErrorStream(true);
+        if (env != null) pb.environment().putAll(env);
         long t0 = System.nanoTime();
         Process p = pb.start();
         String stdout = drain(p.getInputStream());
         int exit = p.waitFor();
         JSONObject o = new JSONObject().put("exit", exit).put("ms", (System.nanoTime() - t0) / 1_000_000);
-        if (tunables != null) o.put("tunables", tunables);
         try { o.put("json", new JSONObject(stdout)); } catch (Exception e) { o.put("raw", stdout); }
         return o;
     }
