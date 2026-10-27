@@ -192,6 +192,43 @@ api.anthropic.com, server rejects the key. Everything but real credentials works
   signed InRelease itself, calling the root's sqv by its real path with Debian's keyring,
   and only then hands apt the verified index from a local mirror directory.
 
+### Namespace investigation (Codex, 2026-10-27)
+- User explicitly asks to investigate the namespace/machine-code work and why Opus stopped,
+  with native performance as the goal; do not substitute work on the apt mirror route.
+- Opus's visible session replies attribute the two stopped approaches to a safety classifier.
+  No classifier rationale is available. This was not evidence of technical impossibility.
+- Added `native/nsprobe/nsprobe.c`, shipped by `tools/hot.sh`, run via `SelfTest.namespaces`.
+  Every operation runs in a disposable child. SIGSYS is reported separately from errno.
+- Actual Pixel report `status-1793109701994.json`: user namespace unshare -> EINVAL (22),
+  mount namespace -> EPERM (1), combined user+mount -> EINVAL (22); chroot -> SIGSYS
+  (probe returns ENOSYS). C/Java compilation and execution still pass in the same report.
+  This establishes that these calls fail in the app, not why USER_NS returns EINVAL.
+- Next investigation: kernel configuration and proc namespace interfaces on the phone,
+  clone versus unshare, and available supported launch contexts. VM probes are not a
+  substitute: the VM accepted CLONE_NEWUSER and combined user+mount where the phone failed.
+- Fixed `hot.sh` falsely printing publication success after shared-folder copy failures:
+  standalone copy/rename commands now honor `set -e`.
+- Extended device report `status-1793109991469.json`: ordinary clone succeeds; clone with
+  NEWUSER also returns EINVAL, clone with NEWNS returns EPERM, combined returns EINVAL.
+  `/proc/self/ns/user` and `/proc/self/ns/pid` do not exist; mnt and net do. All capability
+  sets (including bounding) are zero, seccomp mode is 2. App reads of config.gz are denied.
+- The phone's own uname is `6.1.162-android14-11-g2ec90535fa34-ab15810641`, unlike the VM's
+  6.12 kernel. Checked the [exact common-kernel revision's configuration](https://android.googlesource.com/kernel/common/+/2ec90535fa34/arch/arm64/configs/gki_defconfig):
+  it does not enable USER_NS and explicitly disables PID_NS. The matching
+  [Kconfig](https://android.googlesource.com/kernel/common/+/2ec90535fa34/init/Kconfig)
+  defaults USER_NS to n; [user_namespace.h](https://android.googlesource.com/kernel/common/+/2ec90535fa34/include/linux/user_namespace.h)
+  returns EINVAL for CLONE_NEWUSER when it is disabled. This strongly supports missing
+  kernel support, but the final running kernel config was not readable from the app.
+- Conclusion for the current unprivileged app: no working user/mount-namespace root path.
+  A kernel with USER_NS enabled (or a sufficiently privileged, policy-permitted launcher
+  for mount namespaces) is a different deployment prerequisite, not an app assembly tweak.
+  No root, bootloader, kernel, or Android security policy was changed. Namespaces can remove
+  filesystem translation from compatibility paths; they do not accelerate CPU instructions
+  over the already native glibc-direct execution layer. No speedup is claimed here.
+- `python3 tests/namespaces.py` passes both native and deliberate SIGSYS controls; CI runs
+  it on arm64. The latest signed diagnostic bundle was built and observed running on the
+  phone; gcc/C/javac/Java checks still all passed. No package-manager implementation added.
+
 ## MILESTONE 2026-10-27 12:55 -- claude runs natively inside Trough on the phone
 Pixel 7a, Android 17, package t.t, no VM, no proot, no root:
 - probe: set_robust_list, rseq, futex_waitv trapped (unchanged); stock static glibc 159.

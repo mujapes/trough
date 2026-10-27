@@ -22,6 +22,8 @@ FREESTANDING="-O2 -static -nostdlib -ffreestanding -fno-builtin -fno-stack-prote
 "$CC_ARM64" -O2 -o "$B/z/bin/threadtest" "$ROOT/native/threadtest/threadtest.c"
 "$CC_ARM64" -O2 -o "$B/z/bin/dnstest" "$ROOT/native/threadtest/dnstest.c"
 python3 "$ROOT/tools/set_interp.py" "$B/z/bin/threadtest" "$B/z/bin/dnstest"
+"$CC_ARM64" -O2 -Wall -Wextra -o "$B/z/bin/nsprobe" "$ROOT/native/nsprobe/nsprobe.c"
+python3 "$ROOT/tools/set_interp.py" "$B/z/bin/nsprobe"
 
 # Trough's own glibc: the VM's arm64 copy, with trapped syscalls rewritten to -ENOSYS.
 GLIBC_DIR="${GLIBC_DIR:-/lib/aarch64-linux-gnu}"
@@ -71,6 +73,8 @@ openssl dgst -sha256 -sign "$KEY" -out "$B/bundle.sig" "$B/bundle.zip"
 # Signature first, then the zip, each by rename: a half-written pair just fails verification
 # and is retried on the next poll.
 mkdir -p "$PUBLISH"
-cp "$B/bundle.sig" "$PUBLISH/.bundle.sig.tmp" && mv -f "$PUBLISH/.bundle.sig.tmp" "$PUBLISH/bundle.sig"
-cp "$B/bundle.zip" "$PUBLISH/.bundle.zip.tmp" && mv -f "$PUBLISH/.bundle.zip.tmp" "$PUBLISH/bundle.zip"
+cp "$B/bundle.sig" "$PUBLISH/.bundle.sig.tmp"
+mv -f "$PUBLISH/.bundle.sig.tmp" "$PUBLISH/bundle.sig"
+cp "$B/bundle.zip" "$PUBLISH/.bundle.zip.tmp"
+mv -f "$PUBLISH/.bundle.zip.tmp" "$PUBLISH/bundle.zip"
 echo "published $(sha256sum "$PUBLISH/bundle.zip" | cut -c1-8) ($(stat -c %s "$PUBLISH/bundle.zip") bytes) -> $PUBLISH"

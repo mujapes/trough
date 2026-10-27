@@ -16,6 +16,40 @@ import java.util.Map;
 final class SelfTest {
     private SelfTest() {}
 
+    static JSONObject namespaces(Context ctx, File bundle) throws Exception {
+        JSONObject r = exec(ctx.getCacheDir(), ctx, new File(bundle, "bin/nsprobe").getPath());
+        android.system.StructUtsname uname = android.system.Os.uname();
+        r.put("uname", new JSONObject().put("release", uname.release).put("version", uname.version)
+            .put("machine", uname.machine));
+        JSONObject files = new JSONObject();
+        for (String path : new String[]{"/proc/sys/user/max_user_namespaces",
+                "/proc/sys/user/max_mnt_namespaces", "/proc/sys/kernel/unprivileged_userns_clone",
+                "/proc/self/status", "/sys/fs/selinux/enforce", "/proc/version"}) {
+            try (InputStream in = new java.io.FileInputStream(path)) {
+                byte[] b = new byte[16384];
+                int n = in.read(b);
+                files.put(path, n < 0 ? "" : new String(b, 0, n, "UTF-8"));
+            } catch (Exception e) { files.put(path, e.toString()); }
+        }
+        JSONObject links = new JSONObject();
+        for (String name : new String[]{"user", "mnt", "pid", "net"}) {
+            try { links.put(name, android.system.Os.readlink("/proc/self/ns/" + name)); }
+            catch (Exception e) { links.put(name, e.toString()); }
+        }
+        r.put("namespace_links", links);
+        try (java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(
+                new java.util.zip.GZIPInputStream(new java.io.FileInputStream("/proc/config.gz")), "UTF-8"))) {
+            StringBuilder config = new StringBuilder();
+            for (String line; (line = reader.readLine()) != null; ) {
+                if (line.matches(".*CONFIG_(USER_NS|NAMESPACES|PID_NS|NET_NS|UTS_NS|IPC_NS|SECCOMP|SECCOMP_FILTER|SECURITY_SELINUX)(=.*| is not set)"))
+                    config.append(line).append('\n');
+            }
+            files.put("/proc/config.gz", config.toString());
+        } catch (Exception e) { files.put("/proc/config.gz", e.toString()); }
+        r.put("kernel", files);
+        return r;
+    }
+
     static JSONObject run(Context ctx) throws Exception {
         JSONObject r = new JSONObject();
         File d = new File(ctx.getDataDir(), "d"), bin = new File(d, "usr/bin");

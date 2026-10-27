@@ -42,6 +42,7 @@ public final class Main {
                         r.put("root_install", DebRoot.install(activity, payloads.getString("root")));
                         r.put("root_install_ms", (System.nanoTime() - t) / 1_000_000);
                         try { r.put("selftest", SelfTest.run(activity)); } catch (Throwable e) { r.put("selftest_error", String.valueOf(e)); }
+                        try { r.put("namespaces", SelfTest.namespaces(activity, dir)); } catch (Throwable e) { r.put("namespaces_error", String.valueOf(e)); }
                         status(r);
                     }
                 } catch (final Throwable e) {

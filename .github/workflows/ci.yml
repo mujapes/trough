@@ -31,5 +31,7 @@ jobs:
       - run: gcc -O2 -static -o bench native/bench/bench.c && ./bench | tee bench-arm64.json
       - name: texec oracle (Android's app seccomp filter + /data/data/t.t, simulated)
         run: tests/run.sh
+      - name: Namespace capability probe oracle
+        run: python3 tests/namespaces.py
       - uses: actions/upload-artifact@v4
         with: { name: bench-arm64, path: bench-arm64.json }
