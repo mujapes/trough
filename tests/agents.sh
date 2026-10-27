@@ -10,7 +10,7 @@ H="$ROOT/hot/src/com/trough/hot"
 # Payloads is Android-free apart from its Context helpers, which the agents never call.
 javac -nowarn -d "$W/c" -cp "${ANDROID_JAR:-$HOME/android-sdk/platforms/android-35/android.jar}" \
     "$H/Json.java" "$H/Agent.java" "$H/ClaudeAgent.java" "$H/CodexAgent.java" "$H/Provider.java" "$H/TroughAgent.java" "$H/Payloads.java" \
-    "$ROOT/tests/jvm/ClaudeAgentTest.java" "$ROOT/tests/jvm/CodexAgentTest.java" "$ROOT/tests/jvm/TroughAgentTest.java" || exit 1
+    "$ROOT/tests/jvm/ClaudeAgentTest.java" "$ROOT/tests/jvm/CodexAgentTest.java" "$ROOT/tests/jvm/TroughAgentTest.java" "$ROOT/tests/jvm/ClaudeLoginTest.java" || exit 1
 WANT="${*:-trough claude codex}"; F=0
 CLAUDE_BIN="${CLAUDE_BIN:-$(readlink -f "$HOME/.local/bin/claude" 2>/dev/null)}"
 CODEX_BIN="${CODEX_BIN:-$(ls /usr/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/bin/codex 2>/dev/null)}"
@@ -23,7 +23,9 @@ for a in $WANT; do
                 echo "== trough (fake provider)"; java -cp "$W/c" TroughAgentTest "http://127.0.0.1:$PORT" "$W/$a" "$W/req.log" || F=$((F+$?))
                 kill $FP ;;
         claude) [ -f "$CLAUDE_BIN" ] || continue
-                echo "== claude"; java -cp "$W/c" ClaudeAgentTest "$CLAUDE_BIN" "$W/$a/cwd" || F=$((F+$?)) ;;
+                echo "== claude"; java -cp "$W/c" ClaudeAgentTest "$CLAUDE_BIN" "$W/$a/cwd" || F=$((F+$?))
+                echo "== claude login (throwaway HOME, bogus code)"; mkdir -p "$W/$a/login-home"
+                java -cp "$W/c" ClaudeLoginTest "$CLAUDE_BIN" "$W/$a/login-home" || F=$((F+$?)) ;;
         codex)  [ -f "$CODEX_BIN" ] && [ -f "$HOME/.codex/auth.json" ] || continue
                 mkdir -p "$W/$a/home/.codex" && cp "$HOME/.codex/auth.json" "$W/$a/home/.codex/" && chmod 600 "$W/$a/home/.codex/auth.json"
                 echo "== codex"; java -cp "$W/c" CodexAgentTest "$CODEX_BIN" "$W/$a/cwd" "$W/$a/home/.codex" || F=$((F+$?)) ;;

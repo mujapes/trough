@@ -185,6 +185,57 @@ public final class ClaudeAgent implements Agent {
         return b.toString();
     }
 
+    /**
+     * Claude's own sign-in for this device (`claude auth login`, no TTY needed): the sign-in URL
+     * goes to the Listener's onAuth; the code the user copies from the page goes to code(); the
+     * result to done. Gives the phone its own login instead of a copy of another machine's
+     * rotating refresh token, which would log one or the other out.
+     */
+    public static final class Login {
+        public interface Done { void onDone(boolean ok, String detail); }
+        private final Process proc;
+        private final OutputStream in;
+
+        public Login(String claude, File cwd, Map<String, String> env, final Agent.Listener auth, final Done done) throws Exception {
+            ProcessBuilder pb = new ProcessBuilder(claude, "auth", "login").directory(cwd).redirectErrorStream(true);
+            if (env != null) { pb.environment().clear(); pb.environment().putAll(env); }
+            pb.environment().put("BROWSER", "/system/bin/false");   // Trough opens the page itself
+            proc = pb.start();
+            in = proc.getOutputStream();
+            thread("trough-claude-login", new Runnable() { @Override public void run() {
+                StringBuilder all = new StringBuilder();
+                boolean sent = false;
+                try (BufferedReader r = new BufferedReader(new InputStreamReader(proc.getInputStream(), StandardCharsets.UTF_8))) {
+                    StringBuilder line = new StringBuilder();
+                    for (int c; (c = r.read()) >= 0; ) {   // the code prompt ends without a newline
+                        if (c != '\n') { line.append((char) c); if (!line.toString().endsWith("> ")) continue; }
+                        String l = line.toString();
+                        line.setLength(0);
+                        all.append(l).append('\n');
+                        java.util.regex.Matcher m = java.util.regex.Pattern.compile("https://\\S+oauth/authorize\\S+").matcher(l);
+                        if (!sent && m.find()) { sent = true; auth.onAuth(m.group(), null); }
+                        // A wrong code re-prompts forever: end this attempt (/login starts afresh).
+                        if (l.contains("Invalid code")) { proc.destroy(); break; }
+                    }
+                } catch (Exception ignored) {}
+                int code;
+                try { code = proc.waitFor(); } catch (InterruptedException e) { code = -1; }
+                String out = all.toString();
+                boolean failed = code != 0 || out.toLowerCase(java.util.Locale.ROOT).contains("invalid") || out.toLowerCase(java.util.Locale.ROOT).contains("error");
+                String tail = "";   // the last line that carries no URL: never echo sign-in parameters
+                for (String l : out.split("\n")) if (!l.trim().isEmpty() && !l.contains("://") && !l.contains("oauth")) tail = l.trim();
+                done.onDone(!failed, tail.length() > 300 ? tail.substring(0, 300) : tail);
+            } });
+        }
+
+        /** The code from the sign-in page. Written to the login process only. */
+        public void code(String code) {
+            try { in.write((code.trim() + "\n").getBytes(StandardCharsets.UTF_8)); in.flush(); in.close(); } catch (Exception ignored) {}
+        }
+
+        public void cancel() { proc.destroy(); }
+    }
+
     private static void thread(String name, Runnable r) {
         Thread t = new Thread(r, name);
         t.setDaemon(true);

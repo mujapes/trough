@@ -404,3 +404,8 @@ dpkg's own configuration only; signatures fully verified.
   converged (apt.conf), package list installed by the phone's apt (no-op, verified update);
   Os.link from the app -> EACCES (Android's hard-link denial, measured); `apt-get install jq`
   downloaded, verified, unpacked, configured and tfix'd on Android, and jq runs ([1,2]).
+- Claude's own login on the phone: `/login` drives `claude auth login` over pipes (no TTY
+  needed): URL -> native sign-in card, the code from the page -> the login process only (never
+  the feed or a model). Until then claude runs on the VM's copied login, whose refresh token
+  rotates; Chat says so. Oracle: tests/jvm/ClaudeLoginTest (URL reaches Trough; bogus code ->
+  failure, nothing written; throwaway HOME).

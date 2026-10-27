@@ -42,6 +42,7 @@ final class Chat implements Agent.Listener {
     private final EditText input;
     private final Button send;
     private Agent session;
+    private ClaudeAgent.Login login;   // a /login in progress: the next message is its code
     private int generation;          // events from a replaced agent are dropped
     private Map<String, String> agents = new java.util.LinkedHashMap<>();   // name -> executable
     private String agent = "claude";
@@ -152,6 +153,9 @@ final class Chat implements Agent.Listener {
                 session = new ClaudeAgent(cmd, cwd, env, l);
             }
             note(agent + " starting" + (resume.isEmpty() ? "" : " (resuming)"));
+            if ("claude".equals(agent) && new File(home, ".claude/.credentials.json").exists()
+                    && !new File(home, ".claude/.trough-own-login").exists())
+                note("claude here uses a copy of the VM's login; its refresh token rotates, so the two can log each other out. Send /login to give this phone its own.");
         } catch (Exception e) {
             note("could not start " + agent + ": " + e);
         }
@@ -172,6 +176,27 @@ final class Chat implements Agent.Listener {
             }
         });
         menu.show();
+    }
+
+    /** Claude's own sign-in for this phone (ClaudeAgent.Login): card with the page, then the code. */
+    private void startLogin() {
+        if (login != null) login.cancel();
+        try {
+            login = new ClaudeAgent.Login(agents.get("claude"), cwd, env, this, new ClaudeAgent.Login.Done() {
+                @Override public void onDone(final boolean ok, final String detail) {
+                    ui(new Runnable() { @Override public void run() {
+                        login = null;
+                        if (ok) try { Payloads.writeSmall(new File(home, ".claude/.trough-own-login"), "1"); } catch (Exception ignored) {}
+                        note(ok ? "claude: signed in on this phone" : "claude sign-in did not complete: " + detail);
+                        report("login", ok ? "ok" : "failed");
+                        if (ok) connect();
+                    } });
+                }
+            });
+            note("claude sign-in started: open the page, sign in, then paste the code shown there as a message");
+        } catch (Exception e) {
+            note("could not start claude sign-in: " + e);
+        }
     }
 
     /** This Chat as the listener of agent generation gen only. */
@@ -199,6 +224,18 @@ final class Chat implements Agent.Listener {
             input.setText("");
             note("rebuilding Trough from files/src (swaps in only if it changed)");
             reload.run();
+            return;
+        }
+        if (login != null && !text.isEmpty() && !text.startsWith("/")) {
+            input.setText("");   // the sign-in code goes to claude's login only, never the feed or a model
+            login.code(text);
+            note("code sent, finishing sign-in");
+            return;
+        }
+        if (text.equals("/login")) {
+            input.setText("");
+            if (!"claude".equals(agent)) { note("/login is for claude; " + agent + " signs in its own way"); return; }
+            startLogin();
             return;
         }
         if (text.startsWith("/key ")) {
