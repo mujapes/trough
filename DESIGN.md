@@ -218,3 +218,9 @@ then goes native piece by piece per the layered viewer plan (WebView = metered L
 4. Forge's Java (MainActivity WebView host, JavaBridge/forgeJava, media deck, capture)
    becomes hot code, so the UI runs unchanged against the in-app daemon.
 Each step is verified in the VM under tests/seccomp_sim before the phone sees it.
+- Step 1-2 verified in the VM (10-27 ~13:20), under the simulated filter from /data/data/t.t:
+  tools/stack.sh -> 64 MB zip (python3.13 + stdlib + 15 native libs + the 32 distributions
+  forged actually imports -- metadata missed mcp -> cryptography -- + forged/forge-ui/tools).
+  Debian's python reads lib/python3/dist-packages under its prefix. Python HTTPS works with
+  SSL_CERT_FILE=t.t/etc/ssl/ca.crt. forged + forged.host served /state and the UI, and a real
+  prompt ran end to end: session host -> /data/data/t.t/bin/claude -> "forge-in-trough-ok".
