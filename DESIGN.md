@@ -344,3 +344,12 @@ one child process (or, next, in-process code) speaking its own native protocol, 
   unsandboxed agent was (rightly) stopped by Claude's safety checks.
 - Lesson: a model's "done" is not evidence. Codex's first VM trace "succeeded" while its command
   had died with SIGSYS (the VM's stock bash under the filter); tests check exit codes and effects.
+- ON THE PHONE (10-27, status-1793112201640.json): codex-cli 0.162.1 runs natively (version
+  103 ms); `codex exec` with a fake key resolved api.openai.com via /data/data/t.t/r, verified
+  TLS with the root's CA bundle and was refused (401) in 34 s. Root bash 5.2.37 + git 2.47.3
+  run. Probe: landlock_create_ruleset -> ENOSYS (-38, not trapped: no Landlock in this kernel),
+  seccomp(GET_ACTION_AVAIL) ok, no_new_privs readable. So codex's sandbox could not work here
+  even without namespaces; the app sandbox + approval cards stand.
+- Self-test lesson: the report was written only at the end, so one hung test (codex, whose
+  pipe stayed open) hid everything for 20 minutes. Now: one report file, rewritten at every
+  boot/test step ("step"), every exec has a hard timeout and a side-thread reader.
