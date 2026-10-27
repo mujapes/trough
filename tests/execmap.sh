@@ -64,11 +64,17 @@ if [ -z "$FC" ]; then echo "FAIL  libfakechroot is not installed (apt install li
 R2="$W/root2"; mkdir -p "$R2/bin" "$R2/usr/bin"
 cp /usr/bin/dash "$R2/bin/sh"; cp /usr/bin/mkdir /usr/bin/touch "$R2/usr/bin/"
 gcc -O2 -Wall -Wextra -shared -fPIC -DTROUGH_ROOT="\"$R2\"" -DTROUGH_FAKECHROOT="\"$FC\"" \
-    -DTROUGH_HOST_PATHS="\"$W:/proc:/dev:/sys:/lib:/usr/lib\"" -o "$W/fc.so" "$ROOT/native/execmap/execmap.c" -ldl
+    -DTROUGH_HOST_PATHS="\"$W:/proc:/dev:/sys:/lib:/usr/lib\"" -DTROUGH_PLATFORM="\"$W/platform/\"" \
+    -o "$W/fc.so" "$ROOT/native/execmap/execmap.c" -ldl
 [ -e /etc/.trough-test ] && { echo "/etc/.trough-test exists here; the test needs it absent"; exit 1; }
 printf '#!/bin/sh\nmkdir -p /etc/.trough-test/x && touch /etc/.trough-test/x/f && echo script-ok\n' > "$W/postinst"; chmod +x "$W/postinst"
 out="$(DPKG_MAINTSCRIPT_NAME=postinst LD_PRELOAD="$W/fc.so" dash -c "$W/postinst" 2>&1)"
 [ "$out" = script-ok ] && [ -f "$R2/etc/.trough-test/x/f" ] && [ ! -e /etc/.trough-test ] && echo "ok    maintainer script's /etc writes land in the root" || { echo "FAIL  maintainer script under fakechroot ($out)"; F=$((F+1)); }
+# fakechroot's own execve re-adds its saved loader variables; a platform binary run from a
+# maintainer script (openjdk's postinst runs toybox mountpoint) must still get none.
+printf '#!/bin/sh\n%s\n' "$W/platform/bin/plat" > "$W/postinst-plat"; chmod +x "$W/postinst-plat"
+out="$(DPKG_MAINTSCRIPT_NAME=postinst LD_LIBRARY_PATH=/x LD_PRELOAD="$W/fc.so" dash -c "$W/postinst-plat" 2>&1)"
+[ "$out" = platform-env-ok ] && echo "ok    platform binaries from maintainer scripts get no loader variables" || { echo "FAIL  platform env under fakechroot ($out)"; F=$((F+1)); }
 rm -rf "$R2/etc"
 out="$(LD_PRELOAD="$W/fc.so" dash -c "$W/postinst" 2>&1)"
 [ "$out" != script-ok ] && [ ! -e "$R2/etc" ] && echo "ok    negative control: other programs get no path translation" || { echo "FAIL  translation leaked outside maintainer scripts"; F=$((F+1)); }

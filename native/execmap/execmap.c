@@ -100,11 +100,21 @@ static void free_env(char **v, char *const original[]) {
     free(v);
 }
 
+/* libc's own entry points, past any later preload. fakechroot's execve re-adds its saved loader
+ * variables (a platform binary must not receive them) and its realpath answers in chroot terms. */
+static void *libc_symbol(const char *name) {
+    static void *libc;
+    if (!libc) libc = dlopen("libc.so.6", RTLD_NOW | RTLD_NOLOAD);
+    void *f = libc ? dlsym(libc, name) : NULL;
+    return f ? f : dlsym(RTLD_NEXT, name);
+}
+
 /* envp minus the glibc loader variables when exe is a platform (bionic) binary; else NULL. */
 static char **platform_env(const char *exe, char *const envp[]) {
     static const char *const platform[] = {TROUGH_PLATFORM};
     char real[PATH_MAX];
-    if (!exe || !envp || !realpath(exe, real)) return NULL;
+    char *(*resolve)(const char *, char *) = (char *(*)(const char *, char *))libc_symbol("realpath");
+    if (!exe || !envp || !resolve || !resolve(exe, real)) return NULL;
     unsigned i = 0;
     while (i < sizeof platform / sizeof *platform && strncmp(real, platform[i], strlen(platform[i]))) i++;
     if (i == sizeof platform / sizeof *platform) return NULL;
@@ -203,7 +213,8 @@ int execve(const char *path, char *const argv[], char *const envp[]) {
     char **script = script_env(envp);
     char *const *env = script ? script : envp;
     char **clean = platform_env(interp ? interp : p, env);
-    int r = real_execve()(interp ? interp : p, interp ? nargv : argv, clean ? clean : env);
+    execve_fn run = clean ? (execve_fn)libc_symbol("execve") : real_execve();
+    int r = run(interp ? interp : p, interp ? nargv : argv, clean ? clean : env);
     int e = errno;
     free(nargv);
     free(clean);
@@ -310,7 +321,8 @@ int posix_spawn(pid_t *pid, const char *path, const posix_spawn_file_actions_t *
     char **script = script_env(envp);
     char *const *env = script ? script : envp;
     char **clean = platform_env(interp ? interp : p, env);
-    int r = real_spawn()(pid, interp ? interp : p, fa, attr, interp ? nargv : argv, clean ? clean : env);
+    spawn_fn run = clean ? (spawn_fn)libc_symbol("posix_spawn") : real_spawn();
+    int r = run(pid, interp ? interp : p, fa, attr, interp ? nargv : argv, clean ? clean : env);
     free(nargv);
     free(clean);
     free_env(script, envp);
