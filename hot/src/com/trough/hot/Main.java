@@ -24,6 +24,9 @@ public final class Main {
 
     // Boot state (signed-bundle copy only): what is running now, so it can be stopped or replaced.
     private static Method runningStop;
+    // A string literal is interned once per VM, so this is the same object in every bundle's and
+    // every self build's class loader: a lock that spans them.
+    private static final Object BOOT_LOCK = "com.trough.hot.boot";
     private static Activity bootActivity;
     private static FrameLayout bootRoot;
     private static File bootDir;
@@ -41,15 +44,20 @@ public final class Main {
             @Override public void run() {
                 final JSONObject boot = new JSONObject();
                 Class<?> self = null;
-                try {
+                // A newer bundle can arrive while an older boot still installs; never two at once.
+                synchronized (BOOT_LOCK) { try {
+                    step(boot, "root");
                     Root.install(activity, dir);      // texec, patched glibc, resolv.conf
+                    step(boot, "payloads");
                     bootPayloads = Payloads.ensure(activity, dir);
                     if (bootPayloads.has("root")) {
                         long t = System.nanoTime();
                         boot.put("root_install", DebRoot.install(activity, bootPayloads.getString("root")));
                         boot.put("root_install_ms", (System.nanoTime() - t) / 1_000_000);
                     }
+                    step(boot, "seed");
                     boot.put("seed", Self.seed(activity, dir));
+                    step(boot, "self_build");
                     JSONObject b = new JSONObject();
                     boot.put("self_build", b);
                     File built = Self.build(activity, Self.src(activity), dir, bootPayloads, Self.builds(activity), b);
@@ -59,7 +67,8 @@ public final class Main {
                 } catch (Throwable e) {
                     put(boot, "self_error", String.valueOf(e));
                     put(boot, "running", "bundle");
-                }
+                } }
+                step(boot, "enter");
                 final Class<?> entry = self != null ? self : Main.class;
                 activity.runOnUiThread(new Runnable() { @Override public void run() {
                     root.removeAllViews();
@@ -87,6 +96,7 @@ public final class Main {
                     File log = new File(work(bootActivity), ".trough/build.log");
                     try {
                         boot.put("self_build", b).put("reload", true);
+                        step(boot, "reload_build");
                         final File built = Self.build(bootActivity, Self.src(bootActivity), bootDir, bootPayloads, Self.builds(bootActivity), b);
                         log.delete();
                         if (built.getName().equals(runningKey)) { reloading.set(false); return; }
@@ -159,12 +169,22 @@ public final class Main {
                     // Self-hosting proofs, reported to the VM: the toolchain builds C and Java here,
                     // and an edited copy of Trough's own source builds and loads.
                     if (payloads.has("root")) {
+                        step(boot, "selftest");
                         try { boot.put("selftest", SelfTest.run(activity)); } catch (Throwable e) { boot.put("selftest_error", String.valueOf(e)); }
+                        step(boot, "self_edit");
                         try { boot.put("self_edit", SelfTest.selfEdit(activity, dir, payloads)); } catch (Throwable e) { boot.put("self_edit_error", String.valueOf(e)); }
-                        if (payloads.has("codex")) try { boot.put("codex", SelfTest.codex(activity, payloads)); } catch (Throwable e) { boot.put("codex_error", String.valueOf(e)); }
+                        step(boot, "probe");
                         try { boot.put("probe", SelfTest.probe(activity, dir)); } catch (Throwable e) { boot.put("probe_error", String.valueOf(e)); }
+                        step(boot, "seed_merge");
                         try { boot.put("seed_merge", SelfTest.seedMerge(activity)); } catch (Throwable e) { boot.put("seed_merge_error", String.valueOf(e)); }
+                        step(boot, "namespaces");
                         try { boot.put("namespaces", SelfTest.namespaces(activity, dir)); } catch (Throwable e) { boot.put("namespaces_error", String.valueOf(e)); }
+                        if (payloads.has("codex")) {
+                            step(boot, "codex");
+                            try { boot.put("codex", SelfTest.codex(activity, payloads)); } catch (Throwable e) { boot.put("codex_error", String.valueOf(e)); }
+                        }
+                        step(boot, "done");
+                        return;
                     }
                     status(boot);
                 } catch (final Throwable e) {
@@ -208,12 +228,25 @@ public final class Main {
         }
     }
 
+    static File statusFile() {
+        return new File(new File(android.os.Environment.getExternalStoragePublicDirectory(
+            android.os.Environment.DIRECTORY_DOWNLOADS), "trough"), "status-" + System.currentTimeMillis() + ".json");
+    }
+
+    /** Writes r to its own report file (r.report, set on first write), replacing what was there. */
     static void status(JSONObject r) {
         try {
-            File f = new File(new File(android.os.Environment.getExternalStoragePublicDirectory(
-                android.os.Environment.DIRECTORY_DOWNLOADS), "trough"), "status-" + System.currentTimeMillis() + ".json");
-            try (java.io.FileOutputStream o = new java.io.FileOutputStream(f)) { o.write(r.toString(2).getBytes("UTF-8")); }
+            if (!r.has("report")) r.put("report", statusFile().getPath());
+            File f = new File(r.getString("report")), tmp = new File(f.getPath() + ".tmp");
+            try (java.io.FileOutputStream o = new java.io.FileOutputStream(tmp)) { o.write(r.toString(2).getBytes("UTF-8")); }
+            tmp.renameTo(f);
         } catch (Exception ignored) {}
+    }
+
+    /** Marks the step about to run and rewrites the report: a hang still shows how far it got. */
+    private static void step(JSONObject r, String next) {
+        try { r.put("step", next).put("step_at_ms", System.currentTimeMillis()); } catch (Exception ignored) {}
+        status(r);
     }
 
     private static void put(JSONObject o, String k, String v) { try { o.put(k, v); } catch (Exception ignored) {} }

@@ -174,15 +174,29 @@ final class SelfTest {
         env.putAll(Root.env(ctx, cwd));
         if (extra != null) env.putAll(extra);
         long t0 = System.nanoTime();
-        Process p = pb.start();
-        ByteArrayOutputStream buf = new ByteArrayOutputStream();
-        try (InputStream in = p.getInputStream()) {
-            byte[] b = new byte[8192];
-            for (int n; (n = in.read(b)) > 0; ) buf.write(b, 0, n);
-        }
-        int exit = p.waitFor();
-        String out = buf.toString("UTF-8");
+        final Process p = pb.start();
+        final ByteArrayOutputStream buf = new ByteArrayOutputStream();
+        // Read on a side thread: a grandchild that inherits stdout can hold the pipe open after
+        // the process itself exits or is killed, and must never hang the report.
+        Thread reader = new Thread(new Runnable() { @Override public void run() {
+            try (InputStream in = p.getInputStream()) {
+                byte[] b = new byte[8192];
+                for (int n; (n = in.read(b)) > 0; ) synchronized (buf) { buf.write(b, 0, n); }
+            } catch (Exception ignored) {}
+        } }, "selftest-read");
+        reader.setDaemon(true);
+        reader.start();
+        boolean done = p.waitFor(EXEC_TIMEOUT_S, java.util.concurrent.TimeUnit.SECONDS);
+        if (!done) p.destroyForcibly();
+        reader.join(2000);
+        int exit = done ? p.exitValue() : -1;
+        String out;
+        synchronized (buf) { out = buf.toString("UTF-8"); }
         if (out.length() > 1500) out = out.substring(out.length() - 1500);
-        return new JSONObject().put("exit", exit).put("ms", (System.nanoTime() - t0) / 1_000_000).put("out", out);
+        JSONObject r = new JSONObject().put("exit", exit).put("ms", (System.nanoTime() - t0) / 1_000_000).put("out", out);
+        if (!done) r.put("timed_out", true);
+        return r;
     }
+
+    private static final long EXEC_TIMEOUT_S = 180;
 }

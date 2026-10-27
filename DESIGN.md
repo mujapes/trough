@@ -322,3 +322,25 @@ the seed and the fallback, not the architecture (Working rules).
   returned the expected nonce. gcc/C/javac/Java selftests still pass.
 Next: reload on Claude's edits without a typed command (Trough's claude editing files/src is
 the normal way Trough changes); native code (bin/) rebuilt the same way with the root's gcc.
+
+## Models: any, not just Claude (user, 2026-10-27)
+Trough runs arbitrary models. Chat talks only to `Agent` (hot/.../Agent.java); each backend is
+one child process (or, next, in-process code) speaking its own native protocol, no servers:
+- ClaudeAgent: claude's stream-json over pipes (was Session).
+- CodexAgent: `codex app-server` JSON-RPC over pipes; codex-cli 0.162.1 is a static musl
+  binary, so no texec -- only its two /etc/resolv.conf constants are redirected (patch_paths
+  --any; one is a Rust &str, not NUL-terminated). approvalPolicy "untrusted": every ask goes to
+  Trough's approval card. Codex's own sandbox needs bubblewrap/user namespaces, which the phone
+  kernel lacks, so on the phone the Android app sandbox + approval cards are the boundary
+  (same as claude inside Trough). Thread ids persist per backend, so reloads resume.
+- Next: Trough's own agent loop for any model with an API (Anthropic, OpenAI-compatible --
+  DeepSeek, OpenRouter, local), with Trough's own tools; agent CLIs stay as backends.
+- Tap the status strip to pick the backend; remembered in home/.trough-agent.
+- Userland every agent gets (Root.env): root bash as SHELL, root first on PATH, git's knobs,
+  SSL_CERT_FILE. In-app instructions are agent-neutral: work/AGENTS.md, CLAUDE.md -> @AGENTS.md.
+- Oracles: tests/agents.sh (real claude and codex: text turn, deltas == final text, resume,
+  permission request reaches Trough and is denied, denied action did not happen). VM, 10-27:
+  claude 7/7, codex 9/9. Never auto-approve in tests: a test that approves model actions in an
+  unsandboxed agent was (rightly) stopped by Claude's safety checks.
+- Lesson: a model's "done" is not evidence. Codex's first VM trace "succeeded" while its command
+  had died with SIGSYS (the VM's stock bash under the filter); tests check exit codes and effects.
