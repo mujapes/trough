@@ -168,12 +168,30 @@ public final class Main {
         if (m != null) try { m.invoke(null); } catch (Throwable ignored) {}
     }
 
+    /**
+     * Trough's own screen as a PNG in Download/trough/shot-<ms>.png: the view tree drawn into a
+     * bitmap by the app itself, so the VM can see the UI with no adb (golden screenshots next).
+     */
+    static void screenshot(final Activity activity, final android.view.View v, final String tag) {
+        try {
+            int w = v.getWidth(), h = v.getHeight();
+            if (w <= 0 || h <= 0) return;
+            android.graphics.Bitmap bm = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888);
+            v.draw(new android.graphics.Canvas(bm));
+            File f = new File(new File(android.os.Environment.getExternalStoragePublicDirectory(
+                android.os.Environment.DIRECTORY_DOWNLOADS), "trough"), "shot-" + System.currentTimeMillis() + "-" + tag + ".png");
+            try (java.io.FileOutputStream o = new java.io.FileOutputStream(f)) { bm.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, o); }
+            bm.recycle();
+        } catch (Throwable ignored) {}
+    }
+
     /** Trough itself. Entered by the boot, on the UI thread. */
-    public static void run(final Activity activity, FrameLayout root, final File dir, final JSONObject boot, Runnable reload) {
+    public static void run(final Activity activity, final FrameLayout root, final File dir, final JSONObject boot, Runnable reload) {
         final File home = new File(activity.getFilesDir(), "home");
         home.mkdirs();
         chat = new Chat(activity, root, home, reload);
         final Chat c = chat;
+        if (!boot.optBoolean("reload")) root.postDelayed(new Runnable() { @Override public void run() { screenshot(activity, root, "boot"); } }, 4000);
         new Thread(new Runnable() {
             @Override public void run() {
                 try {
