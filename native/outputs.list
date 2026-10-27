@@ -1,0 +1,13 @@
+bin/bench
+bin/probe
+bin/texec
+bin/threadtest
+bin/dnstest
+bin/nsprobe
+lib/libexecmap.so
+lib/libtroughcore.a
+bin/core-publication
+bin/core-resources
+bin/core-replacement
+fixtures/module-1.so
+fixtures/module-2.so

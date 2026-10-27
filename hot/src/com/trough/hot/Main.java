@@ -21,6 +21,7 @@ import java.util.Map;
  */
 public final class Main {
     private static Chat chat;
+    private static Development development;
 
     // Boot state (signed-bundle copy only): what is running now, so it can be stopped or replaced.
     private static Method runningStop;
@@ -191,6 +192,9 @@ public final class Main {
         home.mkdirs();
         chat = new Chat(activity, root, home, reload);
         final Chat c = chat;
+        JSONObject build = boot.optJSONObject("self_build");
+        String identity = build == null || !boot.optString("running").startsWith("self ") ? "bundle" : build.optString("identity", "bundle");
+        development = new Development(activity, root, dir, identity);
         if (!boot.optBoolean("reload")) root.postDelayed(new Runnable() { @Override public void run() { screenshot(activity, root, "boot"); } }, 4000);
         new Thread(new Runnable() {
             @Override public void run() {
@@ -212,6 +216,12 @@ public final class Main {
                     if (DebRoot.present(activity)) {
                         step(boot, "root_packages");
                         try { boot.put("root_packages", DebRoot.packages(activity, dir)); } catch (Throwable e) { boot.put("root_packages_error", String.valueOf(e)); }
+                        // Expensive/networked regression suites are explicit development work,
+                        // not competition for foreground interaction after every code change.
+                        boolean diagnostics = new JSONObject(new String(Payloads.readSmall(
+                            new File(dir, "manifest.json")), "UTF-8")).optBoolean("diagnostics", false);
+                        boot.put("diagnostics", diagnostics);
+                        if (!diagnostics) { step(boot, "done"); return; }
                         step(boot, "selftest");
                         try { boot.put("selftest", SelfTest.run(activity)); } catch (Throwable e) { boot.put("selftest_error", String.valueOf(e)); }
                         step(boot, "native_repro");
@@ -326,6 +336,8 @@ public final class Main {
     /** Called by HotLoader on the boot copy (forwards to what runs), and by the boot on run's copy. */
     public static void stop() {
         if (runningStop != null) { stopRunning(); return; }
+        if (development != null) development.close();
+        development = null;
         if (chat != null) chat.close();
         chat = null;
     }

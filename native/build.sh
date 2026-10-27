@@ -19,3 +19,19 @@ $CC -O2 $DYN -o "$O/bin/threadtest" "$S/threadtest/threadtest.c"
 $CC -O2 $DYN -o "$O/bin/dnstest" "$S/threadtest/dnstest.c"
 $CC -O2 -Wall -Wextra $DYN -o "$O/bin/nsprobe" "$S/nsprobe/nsprobe.c"
 $CC -O2 -Wall -Wextra -shared -fPIC -o "$O/lib/libexecmap.so" "$S/execmap/execmap.c" -ldl
+
+# The same native substrate and scenario executors are built on the VM and on the phone.
+CORE="-std=c11 -O2 -Wall -Wextra -Werror -fPIC -ffile-prefix-map=$S=native"
+for part in world resources modules; do
+    $CC $CORE -c "$S/core/$part.c" -o "$O/lib/core-$part.o"
+done
+${AR:-ar} rcsD "$O/lib/libtroughcore.a" "$O/lib/core-world.o" "$O/lib/core-resources.o" "$O/lib/core-modules.o"
+rm -f "$O/lib/core-world.o" "$O/lib/core-resources.o" "$O/lib/core-modules.o"
+for scenario in publication resources replacement; do
+    $CC $CORE $DYN -I"$S/core" "$S/scenarios/$scenario.c" "$O/lib/libtroughcore.a" -ldl -o "$O/bin/core-$scenario"
+done
+mkdir -p "$O/fixtures"
+for version in 1 2; do
+    $CC $CORE -shared -DVERSION=$version "$S/scenarios/fixtures/implementation.c" -o "$O/fixtures/module-$version.so"
+done
+cp "$S/outputs.list" "$O/outputs.list"

@@ -1,3 +1,87 @@
+# Current handoff: unified design and hot replacement, 2026-10-27
+
+Read [DESIGN.md](DESIGN.md), [construction](docs/CONSTRUCTION.md), and
+[hot replacement](docs/HOT_RELOAD.md) before continuing. The namespace investigation below is
+preserved evidence, not the current task. The old chronological DESIGN.md is preserved in
+[IMPLEMENTATION_HISTORY.md](docs/IMPLEMENTATION_HISTORY.md).
+
+## User intent, including corrections during this work
+
+The user wants a coherent end-state Trough, with Forge's final UI as the interaction/layout
+reference. "Parallelisation" means harmony across representations, ownership, computation,
+resources and presentation, not merely threads. No stopgap products or incremental debug-chat
+patches. Build real internals against one design; automated verification is the builder's job,
+not repeated user-operated testing. Do not claim a whole new browser can be completed in a
+few days/weeks without evidence.
+
+The user then asked specifically about Opus making hot reload the first foundation. Preserve
+that decision and the working loader/self-build infrastructure. The design now explicitly
+puts state/resource-preserving replacement alongside identity/ownership at the beginning.
+Do not demote it to a final UI feature or discard working Opus mechanisms for an abstract rewrite.
+
+## Latest clarification: seamless evolution and autonomous construction
+
+The user wants effectively any application-level change to become seamless, treating hard
+migration/handoff cases as valuable architecture work rather than settling for a small set of
+compatible reloads. This is a target to expand with real continuity evidence, not a present
+capability claim or a promise across every externally controlled platform failure.
+
+The user will stay in the VM environment until Trough is substantially complete, keeping both
+apps open in Android split view. The builder must control/test/build/refactor autonomously,
+without routine user input. Define cases, build until passing, expand coverage and repeat.
+Ultimately that same loop must be wholly owned within Trough, including future feature work.
+The user acknowledges the large ground-up browser/native filesystem-or-port/runtime scope;
+hardware changes are out of scope. Plan, implementation and end state must remain cohesive.
+
+See [AUTONOMOUS_DEVELOPMENT.md](docs/AUTONOMOUS_DEVELOPMENT.md). This clarification updated
+contracts only; it did not implement a remote controller, verify split-view access, deploy
+another bundle or prove seamless resource migration. The next foundation work includes typed
+scenario control/observation alongside resource leases and module activation/retirement.
+
+## Changes and status
+
+- DESIGN.md is an end-state architecture instead of contradictory chronological additions:
+  one semantic model, specialised physical representations, explicit ownership and causality.
+  Includes whole-product paths, trust, persistence/effects, rendering, measurement and completion.
+- Construction and hot-replacement contracts distinguish planned components from implemented code.
+  Compiler/engine selection, full document standards coverage and isolated-service topology remain
+  major explicit dependencies. No WebView fallback or complete-browser claim.
+- Initial callback-batching work in the old Chat was removed after the user's correction. Chat
+  and its UI are unchanged. Experimental files are outside the repo at
+  /tmp/trough-local-patch-experiment, not a product dependency.
+- native/core/world.{h,c}: bounded owner-serialized publication kernel with exact read revisions,
+  mandatory module revision capture, write-conflict validation, atomic output sets, unchanged-value
+  pruning, generation-safe identities and failed-staging transaction poisoning. Allocation-free.
+  Values are canonical immutable identities/scalars, not an implemented object/resource store.
+- Native build emits lib/libtroughcore.a. Hot bundles include sources; Self/SelfTest and native
+  reproduction inventory include the archive. It is not linked into the debug UI or a completed
+  runtime yet. Existing loader, userland, provider protocols and UI behaviour were preserved.
+- CI has portable sanitizer and arm64 kernel oracles. No commit, publish or phone reload occurred.
+
+## Verification in this workspace
+
+- tests/core_world.sh passed 10,000 differential completion interleavings (3991 valid publications,
+  6009 correctly rejected stale results), plus atomicity, identity, capacity, no-op and exhaustion
+  controls. AddressSanitizer + UndefinedBehaviorSanitizer run passed.
+- Full native/build.sh passed, and hot/build.sh produced DEX with the Android API 35 SDK/D8.
+- The root's actual GCC built the native outputs under tests/seccomp_sim; libtroughcore.a was
+  byte-identical to the VM compiler output, SHA256
+  8e9b485f9dc4c68a5923f92dadea70a21ad932f67f151d9d4b247a56caf97451.
+- The root's GCC built the kernel oracle under the same simulated filter; that executable passed
+  all checks under the filter. These runs used /tmp with host filesystem visibility. They are
+  NOT the restricted phone-filesystem harness or a real-device run. The updated full
+  tests/native_repro.sh was not executed in that restricted harness during this turn.
+- Shell syntax and git diff --check passed. No latency, energy or whole-app speedup claim.
+
+## Next construction dependency
+
+Extend the semantic kernel with immutable resource leases and revision retirement, together with
+module prepare/activation/quiescence contracts. These make state-preserving hot replacement
+possible before product components depend on it. Develop against the complete design, not by
+injecting isolated performance patches into Chat. See construction map for downstream obligations.
+
+---
+
 # Codex → Opus: namespace investigation, 2026-10-27
 
 The user asked Codex to investigate the namespace/machine-code work where Opus stopped,

@@ -10,6 +10,8 @@ CC_ARM64="${CC_ARM64:-$( [ "$(uname -m)" = aarch64 ] && echo gcc || echo aarch64
 KEY="${HOT_KEY:-$HOME/.trough/hot-key.pem}"
 PUBLISH="${PUBLISH:-/mnt/shared/Download/trough/hot}"
 ENTRY="${ENTRY:-com.trough.hot.Main}"
+DIAGNOSTICS="${DIAGNOSTICS:-false}"
+case "$DIAGNOSTICS" in true|false) ;; *) echo "DIAGNOSTICS must be true or false" >&2; exit 2;; esac
 
 B="$(mktemp -d)"; trap 'rm -rf "$B"' EXIT
 mkdir -p "$B/z/bin"
@@ -17,16 +19,16 @@ mkdir -p "$B/z/bin"
 # Native code, by the same script Trough runs on the phone (native/build.sh). Sources ship too,
 # so the phone can rebuild them (Self.buildNative) and compare (SelfTest.nativeRepro).
 CC="$CC_ARM64" sh "$ROOT/native/build.sh" "$ROOT/native" "$B/z"
-python3 "$ROOT/tools/set_interp.py" "$B/z/bin/threadtest" "$B/z/bin/dnstest" "$B/z/bin/nsprobe"
-mkdir -p "$B/native" && (cd "$ROOT/native" && cp --parents bench/bench.c probe/probe.c texec/texec.c \
-    threadtest/threadtest.c threadtest/dnstest.c nsprobe/nsprobe.c execmap/execmap.c "$B/native/") && cp "$ROOT/native/build.sh" "$B/native/"
+python3 "$ROOT/tools/set_interp.py" "$B/z/bin/threadtest" "$B/z/bin/dnstest" "$B/z/bin/nsprobe" "$B/z/bin/core-publication" "$B/z/bin/core-resources" "$B/z/bin/core-replacement"
+mkdir -p "$B/native"
+tar -C "$ROOT/native" -cf - -T "$ROOT/native/sources.list" | tar -C "$B/native" -xf -
 
 # Trough's own glibc: the VM's arm64 copy, with trapped syscalls rewritten to -ENOSYS.
 GLIBC_DIR="${GLIBC_DIR:-/lib/aarch64-linux-gnu}"
 for l in ld-linux-aarch64.so.1 libc.so.6 libm.so.6 librt.so.1 libpthread.so.0 libdl.so.2; do
     cp "$GLIBC_DIR/$l" "$B/z/lib/"
 done
-python3 "$ROOT/tools/patch_svc.py" "$B/z/lib/"*
+python3 "$ROOT/tools/patch_svc.py" "$B/z/lib/"*.so*
 # (lib/libexecmap.so, the exec mapper texec preloads, came from native/build.sh above.)
 python3 "$ROOT/tools/patch_paths.py" "$B/z/lib/libc.so.6"
 
@@ -76,8 +78,8 @@ for jar in "$ANDROID_JAR" "$D8_JAR"; do
     [ -f "$PAYLOAD_DIR/$sha" ] || { cp "$jar" "$PAYLOAD_DIR/.$sha.tmp" && mv "$PAYLOAD_DIR/.$sha.tmp" "$PAYLOAD_DIR/$sha"; }
     PAYLOADS="$PAYLOADS${PAYLOADS:+,}\"$(basename "$jar")\":\"$sha\""
 done
-printf '{"entry":"%s","built_at":%s,"git":"%s","payloads":{%s}}\n' "$ENTRY" "$(date +%s)" \
-    "$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo dev)" "$PAYLOADS" > "$B/z/manifest.json"
+printf '{"entry":"%s","built_at":%s,"git":"%s","diagnostics":%s,"payloads":{%s}}\n' "$ENTRY" "$(date +%s)" \
+    "$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo dev)" "$DIAGNOSTICS" "$PAYLOADS" > "$B/z/manifest.json"
 (cd "$B/z" && zip -q -X -r "$B/bundle.zip" .)
 openssl dgst -sha256 -sign "$KEY" -out "$B/bundle.sig" "$B/bundle.zip"
 

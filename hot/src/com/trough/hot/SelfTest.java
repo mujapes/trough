@@ -76,7 +76,7 @@ final class SelfTest {
         r.put("tfix", exec(ctx.getCacheDir(), ctx, null, 60, d + "/usr/libexec/trough/tfix", out.getPath()));
         JSONObject same = new JSONObject();
         boolean all = true;
-        for (String f : new String[]{"bin/bench", "bin/probe", "bin/texec", "bin/threadtest", "bin/dnstest", "bin/nsprobe", "lib/libexecmap.so"}) {
+        for (String f : Self.nativeOutputs(bundle)) {
             File a = new File(bundle, f), b = new File(out, f);
             boolean eq = a.isFile() && b.isFile() && java.util.Arrays.equals(Payloads.readSmall(a), Payloads.readSmall(b));
             same.put(f, eq);

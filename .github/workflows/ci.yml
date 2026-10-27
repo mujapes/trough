@@ -13,6 +13,8 @@ jobs:
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq gcc-aarch64-linux-gnu
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0" >/dev/null
+      - name: Scenario protocol oracle
+        run: tests/scenarios.sh
       - name: Build
         # ANDROID_HOME is set in the runner's shell, not the workflow env context.
         run: |
@@ -23,6 +25,15 @@ jobs:
       - uses: actions/upload-artifact@v4
         with: { name: trough-apk, path: out/trough.apk }
 
+  semantic-core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publication kernel oracle and memory checks
+        run: |
+          CORE_CFLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer' tests/core_world.sh
+          CORE_CFLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer' tests/core_lifecycle.sh
+
   bench-arm64:
     # Free arm64 runner (public repo): the same static bench, run natively on Neoverse.
     runs-on: ubuntu-24.04-arm
@@ -31,6 +42,8 @@ jobs:
       - run: gcc -O2 -static -o bench native/bench/bench.c && ./bench | tee bench-arm64.json
       - name: texec oracle (Android's app seccomp filter + /data/data/t.t, simulated)
         run: tests/run.sh
+      - name: Semantic publication kernel oracle
+        run: tests/core_world.sh && tests/core_lifecycle.sh
       - name: Namespace capability probe oracle
         run: python3 tests/namespaces.py
       - uses: actions/upload-artifact@v4

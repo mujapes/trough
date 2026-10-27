@@ -141,7 +141,7 @@ final class Self {
         String aj = payloads.getString("android.jar"), d8 = payloads.getString("d8.jar");
         String key = sha((treeSha(src) + treeSha(script) + new File(aj).getName() + new File(d8).getName()).getBytes("UTF-8"));
         File out = new File(self, key);
-        r.put("key", key.substring(0, 12));
+        r.put("key", key.substring(0, 12)).put("identity", key);
         if (new File(out, "classes.dex").exists()) { r.put("cached", true); return out; }
         File tmp = new File(self, key + ".tmp");
         Main.deleteTree(tmp);
@@ -181,7 +181,12 @@ final class Self {
         return out;
     }
 
-    static final String[] NATIVE = {"bin/bench", "bin/probe", "bin/texec", "bin/threadtest", "bin/dnstest", "bin/nsprobe", "lib/libexecmap.so"};
+    static String[] nativeOutputs(File build) throws Exception {
+        String[] paths = new String(Payloads.readSmall(new File(build, "outputs.list")), "UTF-8").trim().split("\\s+");
+        for (String path : paths) if (!path.matches("(bin|lib|fixtures)/[a-zA-Z0-9_.-]+"))
+            throw new IllegalArgumentException("invalid native output path");
+        return paths;
+    }
 
     /**
      * Trough's native code from files/src/native (native/build.sh with the root's gcc, then tfix),
@@ -225,7 +230,7 @@ final class Self {
 
     /** True when every native output of built equals the bundle's: nothing to install. */
     static boolean sameAsBundle(File built, File bundle) throws Exception {
-        for (String f : NATIVE) {
+        for (String f : nativeOutputs(bundle)) {
             File a = new File(built, f), b = new File(bundle, f);
             if (!a.isFile() || !b.isFile() || !java.util.Arrays.equals(Payloads.readSmall(a), Payloads.readSmall(b))) return false;
         }
