@@ -15,6 +15,24 @@ first, last-known-good (settled 15 s) fallback, a bundle that kills the process 
 is never reactivated (marker keyed by pid), crashes copied to Download/trough/crash-*.txt,
 bundle checks continue behind other apps, split-view resizes no longer recreate the activity.
 
+Stage 2 started (ff441a0): native/store, a SQLite record store (captured-read commits, revisions,
+effect journal with issued -> unknown recovery, verified content-addressed objects). Oracle
+core-store passes in the VM (ASan/UBSan, 6/7 mutants caught; fsync loss needs a power cut) and on
+the phone (9.7 s). Not yet used by any product component.
+
+Open blocker found by the store's build dependency: adding libsqlite3-dev to the root's package
+list let apt take an openjdk-21 security update. Fixed on the way (bff51ca, latest execmap):
+Android's /bin is a symlink to /system/bin, so execmap now runs the root's copy first; bionic
+platform binaries exec'd from the root no longer inherit glibc's LD_LIBRARY_PATH/LD_PRELOAD.
+Still failing: openjdk-21-jre-headless postinst does `mkdir /etc/.java` (absolute, read-only on
+Android; no mount namespace). The JRE/JDK are unpacked but unconfigured; javac still works and
+libsqlite3-dev is configured, but DebRoot.packages retries apt on every boot until this passes.
+Decision needed: DESIGN.md says "No open/stat/chdir path rewriting". Recommended: path
+translation in execmap scoped to dpkg maintainer scripts (env DPKG_MAINTSCRIPT_PACKAGE, inherited
+by their children): absolute /etc /var /usr /opt paths that are absent or read-only on the device
+resolve under the root, for the open/stat/mkdir/rename/unlink/chmod/access/opendir families, with
+an oracle on the phone-filesystem harness. Revise DESIGN.md in the same commit.
+
 Next construction dependency (unchanged from below): durable meaning and effects
 (docs/CONSTRUCTION.md stage 2) on top of the stage-1 kernel, each with a phone scenario in the
 same registry so loop.sh proves it on the device.
