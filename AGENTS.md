@@ -4,6 +4,9 @@
 Trough is and every decision made so far, with dates. If your change contradicts it, either
 stop and ask, or update DESIGN.md in the same commit and say why.
 
+Current cross-model handoff: read [HANDOFF.md](HANDOFF.md) for the namespace investigation,
+device evidence, remaining options, and the user's requested scope.
+
 ## Ground rules
 - Trough is ONE Android app replacing the Forge VM. Target device: Pixel (Tensor G2, arm64,
   Android 17), sideloaded, targetSdk 28 (needed to exec binaries from app storage).

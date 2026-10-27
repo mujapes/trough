@@ -228,6 +228,13 @@ api.anthropic.com, server rejects the key. Everything but real credentials works
 - `python3 tests/namespaces.py` passes both native and deliberate SIGSYS controls; CI runs
   it on arm64. The latest signed diagnostic bundle was built and observed running on the
   phone; gcc/C/javac/Java checks still all passed. No package-manager implementation added.
+- Follow-up requested by user: root-backed mount namespaces remain a possible deployment
+  route without USER_NS; ordinary adb/Shizuku shell mode does not supply the needed
+  capabilities. Joining an existing namespace also requires capabilities. No supported
+  namespace workaround was found inside the present unrooted app. Adapting binaries to
+  app-private paths at build time remains a native execution option without per-syscall
+  path interception. See [HANDOFF.md](HANDOFF.md) for evidence, source references, limits
+  and the report to Opus. No new deployment route was implemented or authorized.
 
 ## MILESTONE 2026-10-27 12:55 -- claude runs natively inside Trough on the phone
 Pixel 7a, Android 17, package t.t, no VM, no proot, no root:
