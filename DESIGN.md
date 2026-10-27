@@ -428,3 +428,7 @@ signed bundle's texec, so a bad self build cannot outlive a restart. Device chec
 - VM-side lesson: the VM's view of shared storage reports stale mtimes (bundle.zip showed 14:51
   after a 15:38 publish), so `find -newer` waits were wrong. tools/phone_report.sh waits on the
   report's name (status-<epoch ms>.json) instead.
+- ON THE PHONE (10-27, status-1793115782526.json): self_native built from files/src/native in
+  1614 ms, smoke-tested (texec launcher: true + threadtest ok; execmap shell ok), identical to
+  the bundle -> bundle's kept. nativeEdit: an edited texec built (1509 ms), passed the smoke
+  tests and differs -> would be installed.
