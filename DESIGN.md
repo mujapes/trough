@@ -230,3 +230,17 @@ A run of Forge's daemon + WebView inside Trough was built and reverted the same 
   running, from source it holds. The VM-published signed bundle is only a development and test
   channel, not the architecture. An APK update is fine when the native side genuinely needs it.
 - The VM may drive Trough remotely for testing; the user does not touch the phone for tests.
+
+## Self-hosting toolchain (2026-10-27, VM simulation under the phone filter)
+Trough must build itself, so the compilers live in the Debian root d/ and run via texec.
+- JDK 21 (stock Debian): javac + java run from d/usr/lib/jvm. Its 20 absolute symlinks into
+  /etc made the first VM pass hollow; tfix now re-roots absolute links and fails on any that
+  would dangle on the phone.
+- GCC 14 + binutils + libc6-dev (34 packages, imported from the VM's verified install with the
+  files dpkg lists, zero download). tools/gcc_specs.py writes GCC's specs: -dynamic-linker
+  /data/data/t.t/x, -isysroot (in cpp_unique_options -- cpp_options is not used by cc1, which
+  silently fell back to the VM's /usr/include once), --sysroot and startfile prefix in d/.
+  A threaded C program compiled under the filter runs directly; strace shows the toolchain
+  opens nothing outside /data/data/t.t (only the test harness's own env/sim do).
+Next: ship d/ (toolchain) to the phone and build + run C and Java there; then Trough builds
+its own bundle from its own source and reloads it.
