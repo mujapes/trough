@@ -23,6 +23,9 @@ import java.util.Map;
  *      fileChange|mcpToolCall|webSearch|..}}, item/agentMessage/delta {delta}, turn/completed
  *   <- (server requests) item/commandExecution/requestApproval, item/fileChange/requestApproval
  *        -> result {decision: accept | decline}
+ * Sign-in: account/read; if signed out, account/login/start {type: chatgptDeviceCode} -> the
+ * Listener shows verificationUrl + userCode, and account/login/completed starts the thread. So
+ * the phone gets its own Codex login, never a copy of another machine's rotating tokens.
  * approvalPolicy "untrusted": anything codex does not itself classify as a safe read asks first,
  * and every ask goes to the Listener. Server requests Trough does not implement get a JSON-RPC
  * error, so codex never hangs waiting on Trough.
@@ -154,6 +157,10 @@ public final class CodexAgent implements Agent {
         if (method == null || p == null) return;
         if (id != null) { request(id, method, p); return; }
         switch (method) {
+            case "account/login/completed":
+                if (Boolean.TRUE.equals(p.get("success"))) startThread();
+                else listener.onExit(-1, "codex sign-in failed: " + Json.str(p, "error"));
+                break;
             case "turn/started": {
                 Map<String, Object> t = Json.obj(p.get("turn"));
                 if (t != null) turnId = Json.str(t, "id");
@@ -209,7 +216,14 @@ public final class CodexAgent implements Agent {
         Map<String, Object> error = Json.obj(m.get("error"));
         if ("initialize".equals(method) && result != null) {
             write(Json.map("method", "initialized"));
-            startThread();
+            call("account/read", Json.map());
+        } else if ("account/read".equals(method)) {
+            boolean signedOut = result != null && result.get("account") == null && Boolean.TRUE.equals(result.get("requiresOpenaiAuth"));
+            if (signedOut) call("account/login/start", Json.map("type", "chatgptDeviceCode"));
+            else startThread();
+        } else if ("account/login/start".equals(method)) {
+            if (result == null) { listener.onExit(-1, "codex sign-in failed to start: " + (error == null ? "" : Json.str(error, "message"))); return; }
+            listener.onAuth(Json.str(result, "verificationUrl"), Json.str(result, "userCode"));
         } else if (("thread/start".equals(method) || "thread/resume".equals(method))) {
             if (result == null && "thread/resume".equals(method)) { resume = null; startThread(); return; }  // gone: start fresh
             Map<String, Object> t = result == null ? null : Json.obj(result.get("thread"));

@@ -30,6 +30,8 @@ public class CodexAgentTest {
         public void onToolResult(String id, String t, boolean err) { toolResult = t; toolError = err; }
         public void onPermission(String rid, String tool, Map<String, Object> in) { permTool = tool; s.deny(rid, "declined by Trough's test"); }
         public void onResult(boolean ok, double cost, long ms, String t) { this.ok = ok; done.countDown(); }
+        String authUrl, authCode;
+        public void onAuth(String url, String code) { authUrl = url; authCode = code; ready.countDown(); done.countDown(); }
         public void onExit(int code, String err) { System.out.println("exit " + code + " " + err); ready.countDown(); done.countDown(); }
     }
 
@@ -61,6 +63,13 @@ public class CodexAgentTest {
         Rec p = turn(a[0], cwd, a[2], null, "Run this exact shell command: touch " + target.getPath());
         check("permission: request reached Trough", "Bash".equals(p.permTool), "tool=" + p.permTool);
         check("permission: declined command did not run", !target.exists(), target + " exists");
+        // Signed out (empty CODEX_HOME): the device-code sign-in reaches Trough. Not completed.
+        File empty = new File(a[2] + "-empty");
+        empty.mkdirs();
+        Rec s = turn(a[0], cwd, empty.getPath(), null, "unused");
+        check("signed out: device-code sign-in reaches Trough", s.authUrl != null && s.authUrl.startsWith("https://") && s.authCode != null && !s.authCode.isEmpty(),
+            "url=" + s.authUrl + " code=" + (s.authCode == null ? null : "(" + s.authCode.length() + " chars)"));
+        check("signed out: no thread before sign-in", s.thread == null, "thread=" + s.thread);
         System.out.println("== " + fails + " failed");
         System.exit(fails);
     }

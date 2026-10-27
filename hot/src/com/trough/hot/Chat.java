@@ -177,6 +177,7 @@ final class Chat implements Agent.Listener {
             @Override public void onPermission(String r, String t, Map<String, Object> in) { if (live()) c.onPermission(r, t, in); }
             @Override public void onResult(boolean ok, double cost, long ms, String t) { if (live()) c.onResult(ok, cost, ms, t); }
             @Override public void onExit(int code, String err) { if (live()) c.onExit(code, err); }
+            @Override public void onAuth(String url, String code) { if (live()) c.onAuth(url, code); }
         };
     }
 
@@ -267,6 +268,42 @@ final class Chat implements Agent.Listener {
             v.setTypeface(Typeface.MONOSPACE);
             v.setText("  " + first + (lines > 1 ? "  (+" + (lines - 1) + " lines)" : ""));
             add(v);
+        } });
+    }
+
+    /** A backend's own sign-in, in the system browser (never a WebView). */
+    @Override public void onAuth(final String url, final String code) {
+        ui(new Runnable() { @Override public void run() {
+            LinearLayout card = new LinearLayout(a);
+            card.setOrientation(LinearLayout.VERTICAL);
+            card.setBackground(round(PANEL, 12));
+            card.setPadding(dp(12), dp(10), dp(12), dp(10));
+            TextView what = text(WARN, 14);
+            what.setText("Sign in to " + agent + (code == null ? "" : ", then enter this code:"));
+            card.addView(what);
+            if (code != null) {
+                TextView c = text(FG, 22);
+                c.setTypeface(Typeface.MONOSPACE);
+                c.setTextIsSelectable(true);
+                c.setText(code);
+                card.addView(c);
+            }
+            LinearLayout row = new LinearLayout(a);
+            row.setGravity(Gravity.END);
+            Button open = button("Open sign-in page", USER, BG);
+            row.addView(open);
+            card.addView(row);
+            open.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    if (code != null) {
+                        android.content.ClipboardManager cb = (android.content.ClipboardManager) a.getSystemService(android.content.Context.CLIPBOARD_SERVICE);
+                        cb.setPrimaryClip(android.content.ClipData.newPlainText("code", code));
+                    }
+                    a.startActivity(new android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)));
+                }
+            });
+            add(card);
+            report("auth", agent + " sign-in requested");
         } });
     }
 

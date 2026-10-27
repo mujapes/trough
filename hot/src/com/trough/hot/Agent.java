@@ -26,5 +26,7 @@ public interface Agent {
         void onPermission(String requestId, String toolName, Map<String, Object> input);
         void onResult(boolean ok, double costUsd, long durationMs, String text);
         void onExit(int code, String stderrTail);
+        /** The backend needs its own sign-in: open url in a browser and enter code (may be null). */
+        default void onAuth(String url, String code) {}
     }
 }
