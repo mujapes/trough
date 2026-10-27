@@ -42,10 +42,32 @@ requested, ~220ms/frame). Native path: camera frames stay in a HardwareBuffer, L
 landmark model on the GPU delegate or the Tensor TPU via NNAPI, no bridge copy. Target
 ~10-20ms/frame (estimate; measure).
 
-## Web content
-Decision 2026-10-27: build our own engine. Staged plan and honest risk notes in
-docs/engine.md once started. System WebView stays as the fallback renderer until the
-engine wins on the content that matters (YouTube-class pages are the hard bar: DRM/EME).
+## Viewer: native per-site renderers, layered fallback (decided 2026-10-27)
+Each site we use gets a purpose-built native view that fetches the site's data and renders it
+ourselves, never running the site's own JS. Fallbacks are costlier but always available, so the
+product is strictly better than WebView alone.
+
+  L0 site-native   YouTube, Shorts, Twitter/X first; TikTok, Instagram, Snapchat next.
+                   Data from the site's API/stream URLs; video via MediaCodec straight to a
+                   SurfaceView (hardware overlay plane: decode -> display, no GPU composite).
+  L1 trough-native Our own UI: scripts compiled ahead of time to native code, drawn on the
+                   GPU (Vulkan/AHardwareBuffer). No DOM, no JIT, no warm-up.
+  L2 doc engine    HTML/CSS for static and dynamic pages, our own layout + JS engine tuned to
+                   how we use it (AOT for known code, fast interpreter for the rest).
+  L3 WebView       Everything else. Shrinks as L0-L2 grow.
+
+Beating V8: not head-on for arbitrary site JS. We win by not running that JS at all (L0) and
+by compiling the JS we write ahead of time (L1). Borrow parsers/compilers from existing
+open-source Rust/Go work (oxc, swc, Boa, tsgo) instead of starting from zero.
+
+Risks to manage, not reasons to stop: site private APIs churn (extractors need upkeep), and
+third-party clients can get accounts banned -- Snapchat bans them aggressively. Use the
+user's own sessions; keep WebView fallback for any site that starts refusing us.
+
+## Hot reload: everything, including native
+- Java: JVMTI RedefineClasses (debuggable build) for loaded classes, new class loaders for new.
+- C/C++/Rust: compiled on-device, loaded as versioned .so, function pointers swapped, state kept.
+- Scripts/UI: trivial. Only the manifest is fixed, so it declares everything up front.
 
 ## Order
 1. Spike: bionic node + `claude` running from an APK; measure RAM / start / git status vs VM.
