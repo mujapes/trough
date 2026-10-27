@@ -18,7 +18,10 @@ mkdir -p "$B/z/bin" "$B/obj" "$B/dex"
 FREESTANDING="-O2 -static -nostdlib -ffreestanding -fno-builtin -fno-stack-protector"
 "$CC_ARM64" $FREESTANDING -o "$B/z/bin/probe" "$ROOT/native/probe/probe.c"
 "$CC_ARM64" $FREESTANDING -Wl,-Ttext-segment=0x6f00000000 -o "$B/z/bin/texec" "$ROOT/native/texec/texec.c"
+# Stock-built glibc programs, pointed at texec in place (PT_INTERP -> /data/data/t.t/x).
 "$CC_ARM64" -O2 -o "$B/z/bin/threadtest" "$ROOT/native/threadtest/threadtest.c"
+"$CC_ARM64" -O2 -o "$B/z/bin/dnstest" "$ROOT/native/threadtest/dnstest.c"
+python3 "$ROOT/tools/set_interp.py" "$B/z/bin/threadtest" "$B/z/bin/dnstest"
 
 # Trough's own glibc: the VM's arm64 copy, with trapped syscalls rewritten to -ENOSYS.
 GLIBC_DIR="${GLIBC_DIR:-/lib/aarch64-linux-gnu}"
@@ -27,6 +30,7 @@ for l in ld-linux-aarch64.so.1 libc.so.6 libm.so.6 librt.so.1 libpthread.so.0 li
     cp "$GLIBC_DIR/$l" "$B/z/lib/"
 done
 python3 "$ROOT/tools/patch_svc.py" "$B/z/lib/"*
+python3 "$ROOT/tools/patch_paths.py" "$B/z/lib/libc.so.6"
 
 # Payloads: too big for the bundle. Content-addressed in shared storage; their hashes go in
 # the signed manifest, so they are verified on the phone as they stream in.
@@ -34,9 +38,11 @@ PAYLOAD_DIR="$(dirname "$PUBLISH")/payload"
 CLAUDE_BIN="${CLAUDE_BIN:-$(readlink -f "$HOME/.local/bin/claude")}"
 PAYLOADS=""
 if [ -f "$CLAUDE_BIN" ]; then
-    sha=$(sha256sum "$CLAUDE_BIN" | cut -d' ' -f1)
+    # Interp rewritten in place (patchelf's layout change segfaults Bun's embedded payload).
+    cp "$CLAUDE_BIN" "$B/claude" && python3 "$ROOT/tools/set_interp.py" "$B/claude"
+    sha=$(sha256sum "$B/claude" | cut -d' ' -f1)
     mkdir -p "$PAYLOAD_DIR"
-    [ -f "$PAYLOAD_DIR/$sha" ] || { cp "$CLAUDE_BIN" "$PAYLOAD_DIR/.$sha.tmp" && mv "$PAYLOAD_DIR/.$sha.tmp" "$PAYLOAD_DIR/$sha"; }
+    [ -f "$PAYLOAD_DIR/$sha" ] || { cp "$B/claude" "$PAYLOAD_DIR/.$sha.tmp" && mv "$PAYLOAD_DIR/.$sha.tmp" "$PAYLOAD_DIR/$sha"; }
     PAYLOADS="\"claude\":\"$sha\""
 fi
 

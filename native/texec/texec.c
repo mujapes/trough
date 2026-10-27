@@ -156,12 +156,26 @@ __attribute__((noreturn)) static void jump(u64 sp, u64 entry) {
     __builtin_unreachable();
 }
 
+/* Trough's root is the app's own data dir, reached by the shortest stable absolute path:
+   package "t.t" -> /data/data/t.t (15 chars). Short enough to fit in place of strings in
+   stock binaries, so nothing is moved and no fd tricks are needed:
+     PT_INTERP  /lib/ld-linux-aarch64.so.1 -> /data/data/t.t/x   (texec; tools/set_interp.py)
+     glibc      /etc/resolv.conf           -> /data/data/t.t/r   (tools/patch_paths.py)
+   (10-27: an fd-98 version broke whenever a parent closed all fds before exec, which
+   Python's subprocess does by default.) */
+#ifndef TROUGH_TEXEC
+#define TROUGH_TEXEC "/data/data/t.t/x"
+#endif
 #ifndef TROUGH_LD
-#define TROUGH_LD "/lib/ld-linux-aarch64.so.1"
+#define TROUGH_LD "/data/data/t.t/l/ld-linux-aarch64.so.1"
+#endif
+#ifndef TROUGH_LIB
+#define TROUGH_LIB "/data/data/t.t/l"
 #endif
 
 static int prefix(const char *s, const char *p) { while (*p) if (*s++ != *p++) return 0; return 1; }
 static int contains(const char *s, const char *p) { for (; *s; s++) if (prefix(s, p)) return 1; return 0; }
+static int streq(const char *a, const char *b) { return len(a) == len(b) && prefix(a, b); }
 static int ends_with(const char *s, const char *p) { u64 a = len(s), b = len(p); return a >= b && prefix(s + a - b, p); }
 
 /* Threads that block all signals (node's libuv pool) are KILLED by a trapped syscall instead
@@ -185,6 +199,24 @@ static const char *with_rseq_off(const char *existing) {
     return tunables;
 }
 
+/* Trough's lib dir goes first on LD_LIBRARY_PATH: binaries keep their stock layout (no
+   rpath edits), and a parent that cleared the environment does not strand its child. */
+static char libpath[2048];
+static const char *with_trough_lib(const char *existing) {
+    char *w = libpath;
+    const char *k = "LD_LIBRARY_PATH=", *t = TROUGH_LIB;
+    while (*k) *w++ = *k++;
+    while (*t) *w++ = *t++;
+    if (existing) {
+        const char *v = existing + 16;
+        if (prefix(v, TROUGH_LIB) || len(v) > sizeof libpath - len(TROUGH_LIB) - 32) return existing;
+        if (*v) *w++ = ':';
+        while (*v) *w++ = *v++;
+    }
+    *w = 0;
+    return libpath;
+}
+
 __attribute__((used)) void texec_main(u64 *sp) {
     i64 argc = (i64)sp[0];
     char **argv = (char **)(sp + 1);
@@ -203,11 +235,12 @@ __attribute__((used)) void texec_main(u64 *sp) {
         { on_sigsys, 0x4 /* SA_SIGINFO */ | 0x10000000 /* SA_RESTART */, 0, 0 };
     SYS(NR_rt_sigaction, 31 /* SIGSYS */, &sa, 0, 8, 0, 0);
 
-    const char *ld_path = TROUGH_LD, *tun = 0;
+    const char *ld_path = TROUGH_LD, *tun = 0, *llp = 0;
     int ld_forced = 0;  /* TROUGH_LD set: it wins over the program's own PT_INTERP */
     for (char **v = envp; *v; v++) {
         if (prefix(*v, "TROUGH_LD=")) { ld_path = *v + 10; ld_forced = 1; }
         if (prefix(*v, "GLIBC_TUNABLES=")) tun = *v;
+        if (prefix(*v, "LD_LIBRARY_PATH=")) llp = *v;
     }
 
     /* Two ways in. As PT_INTERP of a patched binary (trough-apt rewrites every installed ELF
@@ -231,7 +264,8 @@ __attribute__((used)) void texec_main(u64 *sp) {
         if (prog.interp[0]) {  /* a patched binary names texec as interp: use the real ld.so */
             /* Stock binaries name /lib/ld-linux-aarch64.so.1, which Android does not have
                (10-27 phone run: "cannot open"); patched ones name texec itself. */
-            load(ld_forced || ends_with(prog.interp, "/texec") ? ld_path : prog.interp, &ld);
+            load(ld_forced || ends_with(prog.interp, "/texec") || streq(prog.interp, TROUGH_TEXEC)
+                 ? ld_path : prog.interp, &ld);
             entry = ld.entry;
             base = ld.bias;
         }
@@ -240,7 +274,7 @@ __attribute__((used)) void texec_main(u64 *sp) {
     /* Fresh stack: argc, argv, NULL, envp (+tunables), NULL, auxv with the target's values. */
     u64 nenv = (u64)(e - envp), naux = 0;
     for (u64 *a = auxv; a[0] != AT_NULL; a += 2) naux++;
-    u64 words = 1 + (u64)argc + 1 + nenv + 2 + 2 * (naux + 1);
+    u64 words = 1 + (u64)argc + 1 + nenv + 3 + 2 * (naux + 1);
     u64 size = 8UL << 20;
     i64 stack = SYS(NR_mmap, 0, size, PROT_R | PROT_W, MAP_PRIVATE | MAP_ANON, -1, 0);
     if (stack < 0 && stack > -4096) die("cannot map stack", 0);
@@ -249,8 +283,9 @@ __attribute__((used)) void texec_main(u64 *sp) {
     *w++ = (u64)(argc - skip);
     for (i64 i = skip; i < argc; i++) *w++ = (u64)argv[i];
     *w++ = 0;
-    for (u64 i = 0; i < nenv; i++) if (envp[i] != tun) *w++ = (u64)envp[i];
+    for (u64 i = 0; i < nenv; i++) if (envp[i] != tun && envp[i] != llp) *w++ = (u64)envp[i];
     *w++ = (u64)with_rseq_off(tun);
+    *w++ = (u64)with_trough_lib(llp);
     *w++ = 0;
     for (u64 *a = auxv; a[0] != AT_NULL; a += 2) {
         u64 v = a[1];

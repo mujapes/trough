@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Every permission and component Trough may ever need is declared here, once (DESIGN.md:
+<!-- Package "t.t": its data dir /data/data/t.t is short enough to replace paths inside stock
+     binaries in place (DESIGN.md "Trough root"). Classes keep their Java package.
+     Every permission and component Trough may ever need is declared here, once (DESIGN.md:
      "Everything native is declared up front"). The permission list starts from Forge's 315. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
-    package="com.trough.app">
+    package="t.t">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
@@ -327,14 +329,14 @@
         android:largeHeap="true"
         android:debuggable="true"
         tools:ignore="HardcodedDebugMode">
-        <activity android:name=".TroughActivity" android:exported="true"
+        <activity android:name="com.trough.app.TroughActivity" android:exported="true"
             android:configChanges="orientation|screenSize|keyboard|keyboardHidden|uiMode|density">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <service android:name=".TroughService" android:exported="false"
+        <service android:name="com.trough.app.TroughService" android:exported="false"
  />
     </application>
 </manifest>

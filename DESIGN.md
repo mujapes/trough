@@ -161,3 +161,17 @@ optimisation loop does not depend on it:
   (CPU(BIG): 1.14 J over 20.5 s idle-ish); energy needs windows spanning refreshes.
 - Large binaries ship as payloads: Download/trough/payload/<sha256>, hash listed in the
   signed manifest, verified while streaming into app storage (hot/Payloads.java).
+
+## Trough root: package "t.t" (2026-10-27)
+Stock binaries hard-code paths. Rewriting them in place (never moving bytes: patchelf's
+layout change segfaulted claude, a Bun single-file executable) needs replacement paths no
+longer than the originals. Package "t.t" makes the app's data dir /data/data/t.t (15 chars):
+  PT_INTERP /lib/ld-linux-aarch64.so.1 -> /data/data/t.t/x  (texec)        tools/set_interp.py
+  glibc     /etc/resolv.conf           -> /data/data/t.t/r  (resolv.conf)  tools/patch_paths.py
+  glibc lib dir /data/data/t.t/l, put first on LD_LIBRARY_PATH by texec.
+Rejected: /proc/self/fd/NN paths kept open by texec -- broke whenever a parent closed all fds
+before exec (Python subprocess's default).
+VM simulation (tests/seccomp_sim + hidden nsswitch.conf, exact /data/data/t.t layout), all
+exec'd directly: threadtest; dnstest via python subprocess with env cleared and fds closed;
+claude --version; claude -p with a fake key -> DNS to 1.1.1.1:53, HTTPS to
+api.anthropic.com, server rejects the key. Everything but real credentials works.
