@@ -201,26 +201,16 @@ Next: Trough's own chat UI over claude's stream-json; a separate long-lived toke
 Trough (claude setup-token) so the VM and phone stop sharing one refresh token; trough-apt
 signature verification.
 
-## Next phase: Forge moves into Trough, whole (decided 2026-10-27)
-No interim chat screen. The setup the user actually lives in -- the deck shell
-(browser-lab.html), dock + Flow modules, forged + session host -- moves into Trough in one go,
-then goes native piece by piece per the layered viewer plan (WebView = metered L3 fallback).
-1. Stack payload: python3.13 + stdlib + the libs its extension modules link, forged's
-   38-package closure (claude_agent_sdk without its bundled 208 MB CLI; Trough's claude is on
-   PATH), and the forge repo's forged/ + forge-ui/. Extracted under /data/data/t.t, ELFs
-   pointed at texec by tfix.
-2. forged runs as a Trough child process on 127.0.0.1:8787; its claude session is the
-   in-app claude. systemctl/sudo paths (restart endpoints) degrade gracefully.
-3. One last "everything up front" APK: TroughActivity forwards every Activity callback
-   (back, results, permissions, config, keys, focus, new intent) to the hot entry, and
-   Forge's ExtensionSlots (30 components: IME, accessibility, VPN, tile, calls, autofill...)
-   come over as stubs that delegate to hot code.
-4. Forge's Java (MainActivity WebView host, JavaBridge/forgeJava, media deck, capture)
-   becomes hot code, so the UI runs unchanged against the in-app daemon.
-Each step is verified in the VM under tests/seccomp_sim before the phone sees it.
-- Step 1-2 verified in the VM (10-27 ~13:20), under the simulated filter from /data/data/t.t:
-  tools/stack.sh -> 64 MB zip (python3.13 + stdlib + 15 native libs + the 32 distributions
-  forged actually imports -- metadata missed mcp -> cryptography -- + forged/forge-ui/tools).
-  Debian's python reads lib/python3/dist-packages under its prefix. Python HTTPS works with
-  SSL_CERT_FILE=t.t/etc/ssl/ca.crt. forged + forged.host served /state and the UI, and a real
-  prompt ran end to end: session host -> /data/data/t.t/bin/claude -> "forge-in-trough-ok".
+## Direction: ground up, not a transplant (2026-10-27, user correction)
+The VM-era architecture -- a Python daemon serving HTTP on localhost, a token, a WebView client,
+SSE event streams -- existed because the code lived in a VM and the UI lived on the phone.
+Trough owns its filesystem and processes, so that plumbing is skeuomorphic and is NOT ported.
+A run of Forge's daemon + WebView inside Trough was built and reverted the same day.
+- Trough talks to claude directly: one child process, stream-json over pipes, in Trough's own
+  code. No server, no port, no token, no event bus.
+- The UI is native (L1): the Forge design the user lives in (deck shell, dock, Flow modules:
+  teleprompter, beam, working status, power keys, model selector) is the SPEC, rebuilt as
+  native views, not loaded as HTML. WebView is only L3, for arbitrary web content.
+- Forge's Android shell ideas that are about capability, not plumbing, carry over: every
+  component declared up front, an AppComponentFactory so components come from hot code,
+  the reflective bridge pattern. They are rewritten, not copied.
