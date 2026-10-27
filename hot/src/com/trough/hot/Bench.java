@@ -73,6 +73,10 @@ final class Bench {
                 env.put("SHELL", "/system/bin/sh");
                 String claude = payloads.getString("claude");
                 r.put("claude_version", exec(new String[]{claude, "--version"}, env));
+                // The real thing: the user's login, delivered encrypted to this app's own key.
+                r.put("creds", Creds.sync(ctx, home));
+                if (new File(home, ".claude/.credentials.json").exists())
+                    r.put("claude_real", exec(new String[]{claude, "-p", "Reply with exactly: trough-ok", "--model", "haiku"}, env));
                 env.put("ANTHROPIC_API_KEY", "sk-ant-trough-deliberately-invalid");
                 r.put("claude_fake_key", exec(new String[]{claude, "-p", "say ok", "--model", "haiku"}, env));
             }
