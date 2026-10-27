@@ -10,9 +10,11 @@
  *     EPERM on a regular file make a copy with the same mode instead -- a correct stand-in for
  *     backups and packaged duplicates, and the only answer Android leaves.
  * No open/stat/chdir path rewriting -- everything else uses the paths dpkg and tfix laid out.
- * The rule: an absolute program or #! interpreter under /bin /sbin /lib /usr that does not
- * exist on this device but exists under the root (/data/data/t.t/d) runs from the root. Paths
- * that exist are never touched, so on a normal Linux box this library changes nothing.
+ * The rule: an absolute program or #! interpreter under /bin /sbin /lib /usr that exists under
+ * the root (/data/data/t.t/d) runs from the root, even when the device has the same path:
+ * Android's /bin is a symlink to /system/bin, whose bionic toybox sh cannot run under glibc's
+ * LD_LIBRARY_PATH (found 2026-10-27: dpkg's preinst hit "libc.so has bad ELF magic"). Paths the
+ * root lacks are never touched, so on a normal Linux box (no root) this library changes nothing.
  *
  * Build: gcc -O2 -shared -fPIC -o libexecmap.so execmap.c -ldl
  */
@@ -49,7 +51,7 @@ static int mapped_prefix(const char *p) {
 
 /* The path to exec for p: p itself, or its copy under the root when p is missing here. */
 static const char *map(const char *p, char *buf) {
-    if (!p || p[0] != '/' || !mapped_prefix(p) || access(p, F_OK) == 0) return p;
+    if (!p || p[0] != '/' || !mapped_prefix(p)) return p;
     if (snprintf(buf, PATH_MAX, "%s%s", TROUGH_ROOT, p) >= PATH_MAX) return p;
     return access(buf, F_OK) == 0 ? buf : p;
 }
@@ -251,7 +253,7 @@ int posix_spawnp(pid_t *pid, const char *file, const posix_spawn_file_actions_t 
 }
 
 /* system() and popen() name /bin/sh inside glibc, out of a preload's reach, so they are
- * reimplemented over the mapped posix_spawn -- only when /bin/sh is missing here. */
+ * reimplemented over the mapped posix_spawn -- only when the root has its own /bin/sh. */
 static const char *shell(char *buf) { return map(TROUGH_SH, buf); }
 
 int system(const char *cmd) {

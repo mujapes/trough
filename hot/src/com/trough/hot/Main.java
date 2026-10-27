@@ -194,7 +194,7 @@ public final class Main {
     }
 
     /** Trough itself. Entered by the boot, on the UI thread. */
-    public static void run(final Activity activity, final FrameLayout root, final File dir, final JSONObject boot, Runnable reload) {
+    public static void run(final Activity activity, final FrameLayout root, final File dir, final JSONObject boot, final Runnable reload) {
         final File home = new File(activity.getFilesDir(), "home");
         home.mkdirs();
         chat = new Chat(activity, root, home, reload);
@@ -222,7 +222,13 @@ public final class Main {
                     // and an edited copy of Trough's own source builds and loads.
                     if (DebRoot.present(activity)) {
                         step(boot, "root_packages");
-                        try { boot.put("root_packages", DebRoot.packages(activity, dir)); } catch (Throwable e) { boot.put("root_packages_error", String.valueOf(e)); }
+                        try {
+                            JSONObject pk = DebRoot.packages(activity, dir);
+                            boot.put("root_packages", pk);
+                            // Newly installed packages are build inputs (native/packages.list):
+                            // rebuild now rather than run without them until the next bundle.
+                            if (pk.optBoolean("ok")) reload.run();
+                        } catch (Throwable e) { boot.put("root_packages_error", String.valueOf(e)); }
                         // Expensive/networked regression suites are explicit development work,
                         // not competition for foreground interaction after every code change.
                         boolean diagnostics = new JSONObject(new String(Payloads.readSmall(

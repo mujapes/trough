@@ -19,6 +19,8 @@ printf 'echo "noshebang-ok $1"\n' > "$R$T/bin/noshebang"
 printf '#!%s/bin/sh -e\necho "shebang-arg-ok $1"\n' "$T" > "$R$T/bin/argscript"
 printf '#!%s/bin/sh\necho "printenv-ok $MARK"\n' "$T" > "$R$T/bin/printenv-mark"
 chmod +x "$R$T/bin/"*
+# A path the device ALSO has (Android's /bin -> /system/bin): the root's copy must win.
+mkdir -p "$R/usr/bin" && printf '#!/bin/sh\necho root-first-ok\n' > "$R/usr/bin/true" && chmod +x "$R/usr/bin/true"
 F=0
 mkdir -p "$W/l1" "$W/l2"
 with="$(LINKDIR="$W/l1" LD_PRELOAD="$W/libexecmap.so" "$W/drive" 2>&1)"
@@ -48,6 +50,8 @@ n=$(echo "$with" | grep -c FAILED)
 if [ "$n" = 0 ]; then echo "ok    no failures with the preload"; else echo "FAIL  $n failures with the preload"; echo "$with" | grep FAILED | sed 's/^/      /'; F=$((F+1)); fi
 n=$(echo "$without" | grep -cE 'FAILED|status 127|pclose 32512')
 if [ "$n" -ge 12 ]; then echo "ok    negative control: without the preload $n calls fail"; else echo "FAIL  negative control: only $n failures without the preload"; echo "$without" | sed 's/^/      /'; F=$((F+1)); fi
-# Existing paths are never touched: /bin/sh here stays /bin/sh.
-out="$(LD_PRELOAD="$W/libexecmap.so" sh -c 'echo $0' 2>&1)"; [ "$out" = sh ] && echo "ok    existing paths untouched" || { echo "FAIL  existing paths"; F=$((F+1)); }
+out="$(LD_PRELOAD="$W/libexecmap.so" dash -c '/usr/bin/true' 2>&1)"; [ "$out" = root-first-ok ] && echo "ok    root copy wins over a device path of the same name" || { echo "FAIL  root-first ($out)"; F=$((F+1)); }
+out="$(dash -c '/usr/bin/true; echo $?' 2>&1)"; [ "$out" = 0 ] && echo "ok    negative control: without the preload the device's copy runs" || { echo "FAIL  root-first negative control"; F=$((F+1)); }
+# Paths the root lacks are never touched: /bin/sh here stays /bin/sh.
+out="$(LD_PRELOAD="$W/libexecmap.so" sh -c 'echo $0' 2>&1)"; [ "$out" = sh ] && echo "ok    paths the root lacks untouched" || { echo "FAIL  existing paths"; F=$((F+1)); }
 echo "== $F failed"; exit $F
