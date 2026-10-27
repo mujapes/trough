@@ -134,7 +134,17 @@ final class Chat implements Agent.Listener {
         try { if (sessionFile().exists()) resume = new String(Payloads.readSmall(sessionFile()), "UTF-8").trim(); } catch (Exception ignored) {}
         try {
             Agent.Listener l = bound(gen);
-            if ("codex".equals(agent)) {
+            if (Models.MARK.equals(exe)) {
+                String key = Models.readKey(home, agent);
+                if (key == null) {
+                    note(agent + " needs an API key: send  /key <your key>  (kept in Trough's private storage, never sent to a model, never shown)");
+                    paint();
+                    return;
+                }
+                Map<String, Object> cfg = Models.config(home, agent);
+                session = new TroughAgent(Provider.of(cfg, key), agent + " (" + Json.str(cfg, "model") + ")", cwd, env,
+                    new File(home, ".trough/conversations"), resume, l);
+            } else if ("codex".equals(agent)) {
                 session = new CodexAgent(exe, cwd, env, resume, null, "danger-full-access", l);
             } else {
                 List<String> cmd = new ArrayList<>(Arrays.asList(exe, "--model", "opus"));
@@ -189,6 +199,13 @@ final class Chat implements Agent.Listener {
             input.setText("");
             note("rebuilding Trough from files/src (swaps in only if it changed)");
             reload.run();
+            return;
+        }
+        if (text.startsWith("/key ")) {
+            input.setText("");   // the secret never reaches the feed or a model
+            if (!Models.MARK.equals(agents.get(agent))) { note("/key is for models Trough runs itself (models.json); " + agent + " signs in its own way"); return; }
+            try { Models.writeKey(home, agent, text.substring(5).trim()); note("key saved for " + agent); connect(); }
+            catch (Exception e) { note("could not save key: " + e); }
             return;
         }
         if (text.isEmpty() || session == null) return;

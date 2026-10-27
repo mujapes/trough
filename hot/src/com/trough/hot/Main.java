@@ -164,6 +164,7 @@ public final class Main {
                     new File(home, ".codex").mkdirs();
                     Map<String, String> agents = new java.util.LinkedHashMap<>();
                     for (String name : new String[]{"claude", "codex"}) if (payloads.has(name)) agents.put(name, payloads.getString(name));
+                    for (String name : Models.names(home)) if (!agents.containsKey(name)) agents.put(name, Models.MARK);
                     c.start(agents, work, env);
                     if (boot.optBoolean("reload")) { status(boot); return; }
                     // Self-hosting proofs, reported to the VM: the toolchain builds C and Java here,
@@ -175,6 +176,8 @@ public final class Main {
                         try { boot.put("self_edit", SelfTest.selfEdit(activity, dir, payloads)); } catch (Throwable e) { boot.put("self_edit_error", String.valueOf(e)); }
                         step(boot, "probe");
                         try { boot.put("probe", SelfTest.probe(activity, dir)); } catch (Throwable e) { boot.put("probe_error", String.valueOf(e)); }
+                        step(boot, "providers");
+                        try { boot.put("providers", SelfTest.providers()); } catch (Throwable e) { boot.put("providers_error", String.valueOf(e)); }
                         step(boot, "seed_merge");
                         try { boot.put("seed_merge", SelfTest.seedMerge(activity)); } catch (Throwable e) { boot.put("seed_merge_error", String.valueOf(e)); }
                         step(boot, "namespaces");

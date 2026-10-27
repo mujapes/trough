@@ -353,3 +353,13 @@ one child process (or, next, in-process code) speaking its own native protocol, 
 - Self-test lesson: the report was written only at the end, so one hung test (codex, whose
   pipe stayed open) hid everything for 20 minutes. Now: one report file, rewritten at every
   boot/test step ("step"), every exec has a hard timeout and a side-thread reader.
+- TroughAgent (hot/.../TroughAgent.java + Provider.java), Trough's own loop: Anthropic Messages
+  and OpenAI-compatible Chat Completions over plain HttpURLConnection + SSE; tools bash (root
+  bash, 10 min, interruptible), read_file, write_file, edit_file; every call approved in Trough;
+  conversations in home/.trough/conversations/<id>.json (Trough's format, any model resumes).
+  Models: home/.trough/models.json (seeded: deepseek, claude api); keys: `/key <secret>` in the
+  chat -> home/.trough/keys/<name>, 0600, never echoed or sent to a model.
+  Oracle: tests/fake_provider.py, a scripted (no model) server for both wire formats that
+  enforces the real APIs' structure rules (400 otherwise; negative control checked), and
+  tests/jvm/TroughAgentTest: text + deltas, resume, approved read round-trip, denied bash not
+  run and reported as an error -- 16/16 (10-27). Device: SelfTest.providers, fake keys -> 401.

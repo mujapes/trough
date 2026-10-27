@@ -16,6 +16,28 @@ import java.util.Map;
 final class SelfTest {
     private SelfTest() {}
 
+    /**
+     * TroughAgent's providers from the phone over the real network, with deliberately invalid
+     * keys: each must come back as the API's own 401, which proves DNS, TLS and the request shape
+     * from inside the app. No model is reached.
+     */
+    static JSONObject providers() throws Exception {
+        JSONObject r = new JSONObject();
+        String[][] cases = {{"anthropic", "https://api.anthropic.com", "claude-opus-5-5"},
+                            {"openai", "https://api.deepseek.com", "deepseek-v4-flash"}};
+        for (String[] c : cases) {
+            long t0 = System.nanoTime();
+            Provider p = Provider.of(Json.map("api", c[0], "base", c[1], "model", c[2]), "sk-trough-deliberately-invalid");
+            java.util.List<java.util.Map<String, Object>> msgs = new java.util.ArrayList<>();
+            msgs.add(Json.map("role", "user", "text", "say ok"));
+            Provider.Reply reply = p.send("test", msgs, TroughAgent.TOOLS, new Provider.Sink() { @Override public void onTextDelta(String t) {} });
+            String err = String.valueOf(reply.error);
+            r.put(c[1], new JSONObject().put("refused", err.startsWith("HTTP 401")).put("ms", (System.nanoTime() - t0) / 1_000_000)
+                .put("error", err.length() > 200 ? err.substring(0, 200) : err));
+        }
+        return r;
+    }
+
     /** native/probe: which syscalls the app filter traps, including the agent-sandbox ones. */
     static JSONObject probe(Context ctx, File bundle) throws Exception {
         JSONObject r = exec(ctx.getCacheDir(), ctx, new File(bundle, "bin/probe").getPath());
