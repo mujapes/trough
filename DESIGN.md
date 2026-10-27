@@ -210,7 +210,14 @@ A run of Forge's daemon + WebView inside Trough was built and reverted the same 
   code. No server, no port, no token, no event bus.
 - The UI is native (L1): the Forge design the user lives in (deck shell, dock, Flow modules:
   teleprompter, beam, working status, power keys, model selector) is the SPEC, rebuilt as
-  native views, not loaded as HTML. WebView is only L3, for arbitrary web content.
+  native views, not loaded as HTML.
+- NO WEBVIEW, anywhere, including arbitrary web content (user, explicit, 10-27; this
+  supersedes the "L3 WebView fallback" and "metered fallback" lines above). Arbitrary pages
+  are rendered by Trough's own engine, built from the ground up to run faster than WebView
+  on this phone. Known cost, accepted: DRM (Widevine/EME) content cannot play.
+- Forge itself was a stack of transplants -- each feature patched onto the last thing to
+  reach new functionality with the least work, until performance drowned. Trough's rule is
+  the opposite: build each piece for what it is, from the ground up.
 - Forge's Android shell ideas that are about capability, not plumbing, carry over: every
   component declared up front, an AppComponentFactory so components come from hot code,
   the reflective bridge pattern. They are rewritten, not copied.
