@@ -23,27 +23,15 @@ import java.util.Map;
  *        "response":{"behavior":"allow","updatedInput":..} | {"behavior":"deny","message":..}}}
  * Tool use is never pre-approved: every can_use_tool goes to the Listener.
  */
-public final class Session {
-    public interface Listener {
-        void onInit(String sessionId, String model);
-        void onTextDelta(String text);
-        void onAssistantText(String text);
-        void onToolUse(String id, String name, Map<String, Object> input);
-        void onToolResult(String toolUseId, String text, boolean isError);
-        /** Answer with allow() or deny(); the turn waits until then. */
-        void onPermission(String requestId, String toolName, Map<String, Object> input);
-        void onResult(boolean ok, double costUsd, long durationMs, String text);
-        void onExit(int code, String stderrTail);
-    }
-
+public final class ClaudeAgent implements Agent {
     private final Process proc;
     private final OutputStream in;
-    private final Listener listener;
+    private final Agent.Listener listener;
     private int counter;
     private final StringBuilder stderr = new StringBuilder();
 
     /** cmd: the claude executable followed by any extra flags (e.g. --model). */
-    public Session(List<String> cmd, File cwd, Map<String, String> env, Listener listener) throws Exception {
+    public ClaudeAgent(List<String> cmd, File cwd, Map<String, String> env, Agent.Listener listener) throws Exception {
         this.listener = listener;
         cmd.add("--input-format");
         cmd.add("stream-json");
@@ -62,22 +50,22 @@ public final class Session {
         control(Json.map("subtype", "initialize", "hooks", null));
     }
 
-    public void send(String text) {
+    @Override public void send(String text) {
         write(Json.map("type", "user", "message", Json.map("role", "user",
             "content", Json.list(Json.map("type", "text", "text", text)))));
     }
 
-    public void allow(String requestId, Map<String, Object> input) {
+    @Override public void allow(String requestId, Map<String, Object> input) {
         respond(requestId, Json.map("behavior", "allow", "updatedInput", input));
     }
 
-    public void deny(String requestId, String message) {
+    @Override public void deny(String requestId, String message) {
         respond(requestId, Json.map("behavior", "deny", "message", message));
     }
 
-    public void interrupt() { control(Json.map("subtype", "interrupt")); }
+    @Override public void interrupt() { control(Json.map("subtype", "interrupt")); }
 
-    public void close() {
+    @Override public void close() {
         try { in.close(); } catch (Exception ignored) {}
         proc.destroy();
     }

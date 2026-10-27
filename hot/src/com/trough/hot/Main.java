@@ -15,8 +15,8 @@ import java.util.Map;
  * Bundle entry point (contract: app/.../HotLoader.java). Two halves:
  *   start  -- the boot, always the signed bundle's own copy: installs the root and payloads,
  *             seeds files/src, builds it with Trough's own toolchain (Self) and hands off.
- *   run    -- Trough itself, normally the copy Trough just built: its own UI (Chat) over its
- *             own claude session (Session). No daemon, no server, no WebView.
+ *   run    -- Trough itself, normally the copy Trough just built: its own UI (Chat) over an
+ *             agent it runs directly (Agent: claude, codex, ...). No daemon, no server, no WebView.
  * If the self build fails, the boot runs the bundle's own copy of run, so Trough always comes up.
  */
 public final class Main {
@@ -150,13 +150,19 @@ public final class Main {
                     File work = work(activity);
                     agentNotes(activity, work);
                     Map<String, String> env = Root.env(activity, activity.getCacheDir());
-                    c.start(payloads.getString("claude"), work, env);
+                    env.put("CODEX_HOME", new File(home, ".codex").getPath());
+                    new File(home, ".codex").mkdirs();
+                    Map<String, String> agents = new java.util.LinkedHashMap<>();
+                    for (String name : new String[]{"claude", "codex"}) if (payloads.has(name)) agents.put(name, payloads.getString(name));
+                    c.start(agents, work, env);
                     if (boot.optBoolean("reload")) { status(boot); return; }
                     // Self-hosting proofs, reported to the VM: the toolchain builds C and Java here,
                     // and an edited copy of Trough's own source builds and loads.
                     if (payloads.has("root")) {
                         try { boot.put("selftest", SelfTest.run(activity)); } catch (Throwable e) { boot.put("selftest_error", String.valueOf(e)); }
                         try { boot.put("self_edit", SelfTest.selfEdit(activity, dir, payloads)); } catch (Throwable e) { boot.put("self_edit_error", String.valueOf(e)); }
+                        if (payloads.has("codex")) try { boot.put("codex", SelfTest.codex(activity, payloads)); } catch (Throwable e) { boot.put("codex_error", String.valueOf(e)); }
+                        try { boot.put("probe", SelfTest.probe(activity, dir)); } catch (Throwable e) { boot.put("probe_error", String.valueOf(e)); }
                         try { boot.put("seed_merge", SelfTest.seedMerge(activity)); } catch (Throwable e) { boot.put("seed_merge_error", String.valueOf(e)); }
                         try { boot.put("namespaces", SelfTest.namespaces(activity, dir)); } catch (Throwable e) { boot.put("namespaces_error", String.valueOf(e)); }
                     }

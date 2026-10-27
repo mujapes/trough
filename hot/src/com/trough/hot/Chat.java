@@ -25,11 +25,11 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Trough's own UI over Session: native views, no HTML, no WebView. Forge's dock is the spec:
+ * Trough's own UI over an Agent (any backend: claude, codex, ...): native views, no HTML, no WebView. Forge's dock is the spec:
  * a feed of the conversation (live text, compact tool lines, inline permission cards), a status
  * strip, and a prompt dock whose button is Send when idle and Stop while claude works.
  */
-final class Chat implements Session.Listener {
+final class Chat implements Agent.Listener {
     private static final int BG = 0xFF0B0F0D, FG = 0xFFE8EFE6, DIM = 0xFF8FA394, USER = 0xFF9FD3A8,
         TOOL = 0xFF7FA7C9, WARN = 0xFFE0B26A, PANEL = 0xFF151B18;
 
@@ -41,7 +41,12 @@ final class Chat implements Session.Listener {
     private final TextView status;
     private final EditText input;
     private final Button send;
-    private Session session;
+    private Agent session;
+    private int generation;          // events from a replaced agent are dropped
+    private Map<String, String> agents = new java.util.LinkedHashMap<>();   // name -> executable
+    private String agent = "claude";
+    private File cwd;
+    private Map<String, String> env;
     private TextView live;          // the assistant text being streamed
     private boolean busy;
     private String model = "", sessionId;
@@ -59,6 +64,9 @@ final class Chat implements Session.Listener {
 
         status = text(DIM, 12);
         status.setPadding(dp(14), dp(8), dp(14), dp(6));
+        status.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { pickAgent(v); }
+        });
         col.addView(status);
 
         scroll = new ScrollView(a);
@@ -97,21 +105,79 @@ final class Chat implements Session.Listener {
         paint();
     }
 
-    void start(String claude, File cwd, Map<String, String> env) {
-        List<String> cmd = new ArrayList<>(Arrays.asList(claude, "--model", "opus"));
-        File saved = new File(home, ".trough-session");
+    /**
+     * agents: every backend this bundle carries, name -> executable. The one last picked (tap the
+     * status strip) is remembered in home/.trough-agent; each keeps its own conversation to resume.
+     */
+    void start(Map<String, String> agents, File cwd, Map<String, String> env) {
+        this.agents = agents;
+        this.cwd = cwd;
+        this.env = env;
         try {
-            if (saved.exists()) {
-                String id = new String(Payloads.readSmall(saved), "UTF-8").trim();
-                if (!id.isEmpty()) { cmd.add("--resume"); cmd.add(id); }
-            }
+            File f = new File(home, ".trough-agent");
+            String saved = f.exists() ? new String(Payloads.readSmall(f), "UTF-8").trim() : "";
+            if (agents.containsKey(saved)) agent = saved;
         } catch (Exception ignored) {}
+        if (!agents.containsKey(agent) && !agents.isEmpty()) agent = agents.keySet().iterator().next();
+        ui(new Runnable() { @Override public void run() { connect(); } });
+    }
+
+    private File sessionFile() { return new File(home, "claude".equals(agent) ? ".trough-session" : ".trough-session-" + agent); }
+
+    private void connect() {
+        if (session != null) session.close();
+        session = null;
+        busy = false;
+        model = "";
+        final int gen = ++generation;
+        String exe = agents.get(agent), resume = "";
+        try { if (sessionFile().exists()) resume = new String(Payloads.readSmall(sessionFile()), "UTF-8").trim(); } catch (Exception ignored) {}
         try {
-            session = new Session(cmd, cwd, env, this);
-            note("session starting" + (cmd.contains("--resume") ? " (resuming)" : ""));
+            Agent.Listener l = bound(gen);
+            if ("codex".equals(agent)) {
+                session = new CodexAgent(exe, cwd, env, resume, null, "danger-full-access", l);
+            } else {
+                List<String> cmd = new ArrayList<>(Arrays.asList(exe, "--model", "opus"));
+                if (!resume.isEmpty()) { cmd.add("--resume"); cmd.add(resume); }
+                session = new ClaudeAgent(cmd, cwd, env, l);
+            }
+            note(agent + " starting" + (resume.isEmpty() ? "" : " (resuming)"));
         } catch (Exception e) {
-            note("could not start claude: " + e);
+            note("could not start " + agent + ": " + e);
         }
+        paint();
+    }
+
+    private void pickAgent(View anchor) {
+        android.widget.PopupMenu menu = new android.widget.PopupMenu(a, anchor);
+        for (String name : agents.keySet()) menu.getMenu().add(name.equals(agent) ? name + "  ✓" : name);
+        menu.setOnMenuItemClickListener(new android.widget.PopupMenu.OnMenuItemClickListener() {
+            @Override public boolean onMenuItemClick(android.view.MenuItem item) {
+                String name = item.getTitle().toString().replace("  ✓", "");
+                if (name.equals(agent) || busy) return true;
+                agent = name;
+                try { Payloads.writeSmall(new File(home, ".trough-agent"), name); } catch (Exception ignored) {}
+                connect();
+                return true;
+            }
+        });
+        menu.show();
+    }
+
+    /** This Chat as the listener of agent generation gen only. */
+    private Agent.Listener bound(final int gen) {
+        final Chat c = this;
+        return new Agent.Listener() {
+            boolean live() { return gen == generation; }
+            @Override public void onInit(String id, String m) { if (live()) c.onInit(id, m); }
+            @Override public void onTextDelta(String t) { if (live()) c.onTextDelta(t); }
+            @Override public void onAssistantText(String t) { if (live()) c.onAssistantText(t); }
+            @Override public void onToolUse(String id, String n, Map<String, Object> in) { if (live()) c.onToolUse(id, n, in); }
+            @Override public void onToolResult(String id, String t, boolean e) { if (live()) c.onToolResult(id, t, e); }
+            @Override public void onPermission(String r, String t, Map<String, Object> in) { if (live()) c.onPermission(r, t, in); }
+            @Override public void onResult(boolean ok, double cost, long ms, String t) { if (live()) c.onResult(ok, cost, ms, t); }
+            @Override public void onExit(int code, String err) { if (live()) c.onExit(code, err); }
+        };
     }
 
     void close() { if (session != null) session.close(); }
@@ -141,13 +207,13 @@ final class Chat implements Session.Listener {
         note("interrupted");
     }
 
-    // --- Session.Listener: called on the reader thread, so everything hops to the UI thread ---
+    // --- Agent.Listener: called on the reader thread, so everything hops to the UI thread ---
 
     @Override public void onInit(final String id, final String m) {
         ui(new Runnable() { @Override public void run() {
             sessionId = id;
             model = m == null ? "" : m;
-            try { Payloads.writeSmall(new File(home, ".trough-session"), id); } catch (Exception ignored) {}
+            try { Payloads.writeSmall(sessionFile(), id); } catch (Exception ignored) {}
             report("init", "model " + model);
             paint();
         } });
@@ -206,6 +272,7 @@ final class Chat implements Session.Listener {
 
     @Override public void onPermission(final String rid, final String tool, final Map<String, Object> in) {
         ui(new Runnable() { @Override public void run() {
+            final Agent asker = session;   // answer the agent that asked, even after a switch
             final LinearLayout card = new LinearLayout(a);
             card.setOrientation(LinearLayout.VERTICAL);
             card.setBackground(round(PANEL, 12));
@@ -226,7 +293,8 @@ final class Chat implements Session.Listener {
             View.OnClickListener answer = new View.OnClickListener() {
                 @Override public void onClick(View v) {
                     boolean ok = v == allow;
-                    if (ok) session.allow(rid, in); else session.deny(rid, "The user denied this in Trough.");
+                    if (asker == null) return;
+                    if (ok) asker.allow(rid, in); else asker.deny(rid, "The user denied this in Trough.");
                     what.setText((ok ? "Allowed " : "Denied ") + tool);
                     card.removeView(row);
                 }
@@ -296,7 +364,7 @@ final class Chat implements Session.Listener {
     }
 
     private void paint() {
-        status.setText((model.isEmpty() ? "claude" : model) + "  ·  " + (busy ? "working" : "idle")
+        status.setText(agent + (model.isEmpty() ? "" : " " + model) + "  ·  " + (busy ? "working" : "idle")
             + (cost > 0 ? String.format("  ·  $%.3f", cost) : ""));
         send.setText(busy ? "Stop" : "Send");
     }

@@ -28,7 +28,8 @@ enum { NR_write = 64, NR_exit_group = 94, NR_rt_sigaction = 134, NR_set_tid_addr
        NR_set_robust_list = 99, NR_rseq = 293, NR_prlimit64 = 261, NR_readlinkat = 78,
        NR_getrandom = 278, NR_ioctl = 29, NR_brk = 214, NR_mprotect = 226,
        NR_sched_setaffinity = 122, NR_openat = 56, NR_close = 57, NR_fstat = 80, NR_read = 63,
-       NR_clone3 = 435, NR_faccessat2 = 439, NR_statx = 291, NR_futex_waitv = 449 };
+       NR_clone3 = 435, NR_faccessat2 = 439, NR_statx = 291, NR_futex_waitv = 449,
+       NR_landlock_create_ruleset = 444, NR_seccomp = 277, NR_prctl = 167 };
 
 static volatile int trapped;
 
@@ -51,6 +52,19 @@ static void probe(const char *name, i64 nr, i64 a, i64 b, i64 c, i64 d) {
     out(first ? "\"" : ",\""); first = 0;
     out(name);
     out(trapped ? "\":\"SIGSYS\"" : "\":\"ok\"");
+}
+
+/* Same, but the return value is the answer (e.g. Landlock's ABI version, or -errno). */
+static void probe_v(const char *name, i64 nr, i64 a, i64 b, i64 c, i64 d) {
+    trapped = 0;
+    i64 r = sys6(nr, a, b, c, d, 0, 0);
+    out(",\""); out(name); out("\":");
+    if (trapped) { out("\"SIGSYS\""); return; }
+    char num[24]; int i = 23; num[i] = 0;
+    u64 v = r < 0 ? (u64)-r : (u64)r;
+    do { num[--i] = (char)('0' + v % 10); v /= 10; } while (v);
+    if (r < 0) num[--i] = '-';
+    out(num + i);
 }
 
 void _start(void) {
@@ -76,6 +90,11 @@ void _start(void) {
     probe("faccessat2", NR_faccessat2, -100, (i64)"/", 0, 0);
     probe("statx", NR_statx, -100, (i64)"/", 0, 0x7ff);
     probe("futex_waitv_einval", NR_futex_waitv, 0, 0, 0, 0);
+    /* Agent sandboxes (Codex: Landlock + seccomp + no_new_privs) need these inside the app. */
+    static unsigned action = 0x7fff0000u; /* SECCOMP_RET_ALLOW */
+    probe_v("landlock_abi", NR_landlock_create_ruleset, 0, 0, 1 /* ..._VERSION */, 0);
+    probe_v("seccomp_action_avail", NR_seccomp, 2 /* GET_ACTION_AVAIL */, 0, (i64)&action, 0);
+    probe_v("prctl_get_no_new_privs", NR_prctl, 39, 0, 0, 0);
     out("}\n");
     S(NR_exit_group, 0, 0, 0, 0);
     for (;;) {}

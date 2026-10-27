@@ -42,14 +42,15 @@ final class Root {
     /**
      * The userland environment every process Trough starts gets: the Debian root d/ first on
      * PATH, and the knobs its stock tools offer for their compiled-in /usr and /etc paths
-     * (git's exec path, templates and CA bundle). Clean: nothing inherited from the app process.
+     * (git's exec path and templates, the CA bundle). Clean: nothing inherited from the app process.
      */
     static java.util.Map<String, String> env(Context ctx, File tmp) {
         java.util.Map<String, String> e = new java.util.HashMap<>();
         String d = new File(ctx.getDataDir(), "d").getPath();
         e.put("HOME", new File(ctx.getFilesDir(), "home").getPath());
         e.put("TMPDIR", tmp.getPath());   // Android has no /tmp
-        e.put("SHELL", "/system/bin/sh");
+        e.put("SHELL", d + "/usr/bin/bash");   // agents' shell tools expect bash
+        e.put("SSL_CERT_FILE", d + "/etc/ssl/certs/ca-certificates.crt");
         e.put("PATH", d + "/usr/bin:" + new File(ctx.getDataDir(), "bin").getPath() + ":/system/bin");
         e.put("GIT_EXEC_PATH", d + "/usr/lib/git-core");
         e.put("GIT_TEMPLATE_DIR", d + "/usr/share/git-core/templates");

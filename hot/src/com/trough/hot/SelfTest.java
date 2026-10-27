@@ -16,6 +16,13 @@ import java.util.Map;
 final class SelfTest {
     private SelfTest() {}
 
+    /** native/probe: which syscalls the app filter traps, including the agent-sandbox ones. */
+    static JSONObject probe(Context ctx, File bundle) throws Exception {
+        JSONObject r = exec(ctx.getCacheDir(), ctx, new File(bundle, "bin/probe").getPath());
+        try { r.put("parsed", new JSONObject(r.getString("out").trim())); } catch (Exception ignored) {}
+        return r;
+    }
+
     static JSONObject namespaces(Context ctx, File bundle) throws Exception {
         JSONObject r = exec(ctx.getCacheDir(), ctx, new File(bundle, "bin/nsprobe").getPath());
         android.system.StructUtsname uname = android.system.Os.uname();
@@ -129,15 +136,43 @@ final class SelfTest {
         r.put("c_run", exec(w, ctx, new File(w, "t").getPath()));
         r.put("javac", exec(w, ctx, new File(bin, "javac").getPath(), "Hello.java"));
         r.put("java_run", exec(w, ctx, new File(bin, "java").getPath(), "Hello"));
+        r.put("bash", exec(w, ctx, new File(bin, "bash").getPath(), "-lc", "echo bash $BASH_VERSION; git --version"));
+        return r;
+    }
+
+    /**
+     * Codex on the phone: runs, resolves api.openai.com through Trough's resolv.conf, verifies
+     * TLS with the root's CA bundle, and is refused for a deliberately invalid key. The key is
+     * fake, so no model is reached and nothing can run.
+     */
+    static JSONObject codex(Context ctx, JSONObject payloads) throws Exception {
+        String codex = payloads.getString("codex");
+        File w = new File(ctx.getCacheDir(), "codextest"), home = new File(w, "codex-home");
+        Main.deleteTree(w);
+        home.mkdirs();
+        Map<String, String> extra = new java.util.HashMap<>();
+        extra.put("CODEX_HOME", home.getPath());
+        extra.put("CODEX_API_KEY", "sk-trough-deliberately-invalid");
+        JSONObject r = new JSONObject();
+        r.put("version", exec(w, ctx, extra, codex, "--version"));
+        JSONObject reach = exec(w, ctx, extra, "/system/bin/timeout", "120", codex, "exec", "--json",
+            "--skip-git-repo-check", "--sandbox", "read-only", "say ok");
+        r.put("refused", reach.getString("out").contains("401 Unauthorized")).put("reach", reach);
+        Main.deleteTree(w);
         return r;
     }
 
     private static JSONObject exec(File cwd, Context ctx, String... cmd) throws Exception {
+        return exec(cwd, ctx, null, cmd);
+    }
+
+    private static JSONObject exec(File cwd, Context ctx, Map<String, String> extra, String... cmd) throws Exception {
         ProcessBuilder pb = new ProcessBuilder(cmd).directory(cwd).redirectErrorStream(true)
             .redirectInput(new File("/dev/null"));
         Map<String, String> env = pb.environment();
         env.clear();
         env.putAll(Root.env(ctx, cwd));
+        if (extra != null) env.putAll(extra);
         long t0 = System.nanoTime();
         Process p = pb.start();
         ByteArrayOutputStream buf = new ByteArrayOutputStream();

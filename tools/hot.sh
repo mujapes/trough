@@ -47,6 +47,16 @@ if [ -f "$CLAUDE_BIN" ]; then
     [ -f "$PAYLOAD_DIR/$sha" ] || { cp "$B/claude" "$PAYLOAD_DIR/.$sha.tmp" && mv "$PAYLOAD_DIR/.$sha.tmp" "$PAYLOAD_DIR/$sha"; }
     PAYLOADS="\"claude\":\"$sha\""
 fi
+# Codex: a static musl binary, so no PT_INTERP to point at texec; musl's (and a Rust crate's)
+# /etc/resolv.conf rewritten to Trough's, same length (tools/patch_paths.py --any).
+CODEX_BIN="${CODEX_BIN:-$(ls /usr/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/bin/codex 2>/dev/null || true)}"
+if [ -n "$CODEX_BIN" ] && [ -f "$CODEX_BIN" ]; then
+    cp "$CODEX_BIN" "$B/codex" && python3 "$ROOT/tools/patch_paths.py" --any "$B/codex"
+    sha=$(sha256sum "$B/codex" | cut -d' ' -f1)
+    [ -f "$PAYLOAD_DIR/$sha" ] || { cp "$B/codex" "$PAYLOAD_DIR/.$sha.tmp" && mv "$PAYLOAD_DIR/.$sha.tmp" "$PAYLOAD_DIR/$sha"; }
+    PAYLOADS="$PAYLOADS${PAYLOADS:+,}\"codex\":\"$sha\""
+    rm -f "$B/codex"
+fi
 # Trough's Debian root (self-hosting toolchain, tools/root.sh). Rebuilt with ROOTFS=1.
 ROOT_ZIP="${ROOT_ZIP:-$HOME/.trough/root.zip}"
 if [ "${ROOTFS:-0}" = 1 ]; then "$ROOT/tools/root.sh" "$ROOT_ZIP" >&2; fi

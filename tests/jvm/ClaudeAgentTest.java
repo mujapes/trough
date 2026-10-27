@@ -1,5 +1,6 @@
 import com.trough.hot.Json;
-import com.trough.hot.Session;
+import com.trough.hot.Agent;
+import com.trough.hot.ClaudeAgent;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -9,21 +10,21 @@ import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
-/** Session against a real claude on any JVM. Tools are DENIED, never run.
- *  Usage: java SessionTest <claude> <cwd> */
-public class SessionTest {
+/** ClaudeAgent against a real claude on any JVM. Tools are DENIED, never run.
+ *  Usage: java ClaudeAgentTest <claude> <cwd> */
+public class ClaudeAgentTest {
     static int fails = 0;
     static void check(String name, boolean ok, String detail) {
         System.out.println((ok ? "ok    " : "FAIL  ") + name + (ok ? "" : "  -- " + detail));
         if (!ok) fails++;
     }
 
-    static class Rec implements Session.Listener {
+    static class Rec implements Agent.Listener {
         final StringBuilder deltas = new StringBuilder(), text = new StringBuilder();
         final CountDownLatch done = new CountDownLatch(1);
         String model, permTool, toolResult;
         boolean ok, toolError;
-        Session s;
+        Agent s;
         public void onInit(String id, String m) { model = m; }
         public void onTextDelta(String t) { deltas.append(t); }
         public void onAssistantText(String t) { text.append(t); }
@@ -39,7 +40,7 @@ public class SessionTest {
         Map<String, String> env = new HashMap<>();
         // --setting-sources project: ignore this machine's user settings, whose allow rules
         // pre-approved Bash on the first run (10-27), so no permission request was ever sent.
-        r.s = new Session(new ArrayList<>(Arrays.asList(claude, "--model", "haiku", "--setting-sources", "project")), cwd, env, r);
+        r.s = new ClaudeAgent(new ArrayList<>(Arrays.asList(claude, "--model", "haiku", "--setting-sources", "project")), cwd, env, r);
         r.s.send(prompt);
         r.done.await(120, TimeUnit.SECONDS);
         r.s.close();

@@ -16,8 +16,8 @@ R=/data/data/t.t
 # Trough ships its own patched glibc in l/.
 # git: files/src is a repo (Self.java merges each bundle seed into the agent's edits). Its perl
 # scripts (add -i, send-email, svn) are left out with perl.
-WANT="gcc-14 libc6-dev linux-libc-dev libcrypt-dev openjdk-21-jdk-headless git"
-EXCLUDE='^(libc6|libc-bin|gcc-14-base|debconf|dpkg|perl-base|tar|install-info|rpcsvc-proto|java-common|adduser|passwd|base-passwd|libpam.*|login|util-linux|mount|systemd.*|dbus.*|ca-certificates|perl|perl-modules-.*|libperl.*|liberror-perl|git-man)$'
+WANT="gcc-14 libc6-dev linux-libc-dev libcrypt-dev openjdk-21-jdk-headless git bash"
+EXCLUDE='^(libc6|libc-bin|gcc-14-base|debconf|dpkg|perl-base|tar|install-info|rpcsvc-proto|java-common|adduser|passwd|base-passwd|libpam.*|login|util-linux|mount|systemd.*|dbus.*|ca-certificates|base-files|perl|perl-modules-.*|libperl.*|liberror-perl|git-man)$'
 PKGS=$(apt-cache depends --recurse --no-recommends --no-suggests --no-conflicts --no-breaks \
     --no-replaces --no-enhances --installed $WANT 2>/dev/null | grep -vE '^\s|^<' | sort -u | grep -vE "$EXCLUDE")
 echo "root.sh: $(echo "$PKGS" | wc -l) packages" >&2
