@@ -52,6 +52,12 @@ final class Payloads {
         return out;
     }
 
+    static void writeSmall(File f, String text) throws Exception {
+        File tmp = new File(f.getPath() + ".new");
+        try (OutputStream o = new FileOutputStream(tmp)) { o.write(text.getBytes("UTF-8")); }
+        if (!tmp.renameTo(f)) throw new IllegalStateException("rename " + f);
+    }
+
     static byte[] readSmall(File f) throws Exception {
         try (InputStream in = new FileInputStream(f)) {
             byte[] b = new byte[(int) f.length()];
