@@ -9,6 +9,12 @@
  *     under /system, /apex, ...; e.g. toybox mountpoint from openjdk's postinst) gets an
  *     environment without LD_LIBRARY_PATH/LD_PRELOAD, which bionic's linker would follow
  *     into the root's glibc and fail ("libc.so has bad ELF magic");
+ *     Debian maintainer scripts (dpkg sets DPKG_MAINTSCRIPT_NAME only for them) also get
+ *     Debian's own fakechroot preloaded with the root as its base, so their absolute /etc,
+ *     /var, /usr paths land in the root (openjdk's postinst: mkdir /etc/.java). This is the
+ *     mechanism mmdebstrap's fakechroot mode uses for unprivileged installs; no namespace exists
+ *     here. Host paths (/data, /proc, /system, ...) are excluded. Scripts only: ordinary
+ *     programs keep the zero-translation fast path;
  *  2. hard links: Android's policy denies apps link(2); dpkg backs up its status file with link()
  *     (atomic-file.c) and packages carry hard-linked files. link/linkat that fail with EACCES or
  *     EPERM on a regular file make a copy with the same mode instead -- a correct stand-in for
@@ -48,7 +54,51 @@
 #define TROUGH_PLATFORM "/system/", "/system_ext/", "/apex/", "/vendor/", "/product/", "/odm/"
 #endif
 
+#ifndef TROUGH_FAKECHROOT   /* shipped in the bundle's lib/, installed beside texec */
+#define TROUGH_FAKECHROOT "/data/data/t.t/l/libfakechroot.so"
+#endif
+#ifndef TROUGH_HOST_PATHS
+#define TROUGH_HOST_PATHS "/data:/proc:/dev:/sys:/system:/system_ext:/apex:/vendor:/product:/odm:/storage:/sdcard:/linkerconfig"
+#endif
+
 extern char **environ;
+
+static const char *env_get(char *const envp[], const char *key) {
+    size_t n = strlen(key);
+    for (int i = 0; envp && envp[i]; i++)
+        if (!strncmp(envp[i], key, n) && envp[i][n] == '=') return envp[i] + n + 1;
+    return NULL;
+}
+
+/* A maintainer script's environment plus fakechroot; NULL when not a script or already set.
+ * The strings are leaked on a successful exec (the image is replaced) and freed by free_env. */
+static char **script_env(char *const envp[]) {
+    if (!env_get(envp, "DPKG_MAINTSCRIPT_NAME") || env_get(envp, "FAKECHROOT_BASE") ||
+        access(TROUGH_FAKECHROOT, R_OK)) return NULL;
+    int n = 0;
+    while (envp[n]) n++;
+    char **v = malloc(sizeof(char *) * (n + 4));
+    if (!v) return NULL;
+    const char *pre = env_get(envp, "LD_PRELOAD");
+    int k = 0;
+    for (int i = 0; i < n; i++) if (strncmp(envp[i], "LD_PRELOAD=", 11)) v[k++] = envp[i];
+    if (asprintf(&v[k], "LD_PRELOAD=%s%s%s", pre && *pre ? pre : "", pre && *pre ? ":" : "", TROUGH_FAKECHROOT) < 0) { free(v); return NULL; }
+    v[++k] = "FAKECHROOT_BASE=" TROUGH_ROOT;
+    v[++k] = "FAKECHROOT_EXCLUDE_PATH=" TROUGH_HOST_PATHS;
+    v[++k] = NULL;
+    return v;
+}
+
+static void free_env(char **v, char *const original[]) {
+    if (!v) return;
+    for (int i = 0; v[i]; i++)
+        if (!strncmp(v[i], "LD_PRELOAD=", 11)) {
+            int shared = 0;
+            for (int j = 0; original && original[j]; j++) shared |= original[j] == v[i];
+            if (!shared) free(v[i]);
+        }
+    free(v);
+}
 
 /* envp minus the glibc loader variables when exe is a platform (bionic) binary; else NULL. */
 static char **platform_env(const char *exe, char *const envp[]) {
@@ -150,17 +200,14 @@ int execve(const char *path, char *const argv[], char *const envp[]) {
     const char *p = map(path, buf);
     char **nargv = NULL;
     const char *interp = shebang(p, argv, &nargv, ibuf, mbuf);
-    if (interp) {
-        int r = real_execve()(interp, nargv, envp);
-        int e = errno;
-        free(nargv);
-        errno = e;
-        return r;
-    }
-    char **clean = platform_env(p, envp);
-    int r = real_execve()(p, argv, clean ? clean : envp);
+    char **script = script_env(envp);
+    char *const *env = script ? script : envp;
+    char **clean = platform_env(interp ? interp : p, env);
+    int r = real_execve()(interp ? interp : p, interp ? nargv : argv, clean ? clean : env);
     int e = errno;
+    free(nargv);
     free(clean);
+    free_env(script, envp);
     errno = e;
     return r;
 }
@@ -260,10 +307,13 @@ int posix_spawn(pid_t *pid, const char *path, const posix_spawn_file_actions_t *
     const char *p = map(path, buf);
     char **nargv = NULL;
     const char *interp = shebang(p, argv, &nargv, ibuf, mbuf);
-    char **clean = interp ? NULL : platform_env(p, envp);
-    int r = real_spawn()(pid, interp ? interp : p, fa, attr, interp ? nargv : argv, clean ? clean : envp);
+    char **script = script_env(envp);
+    char *const *env = script ? script : envp;
+    char **clean = platform_env(interp ? interp : p, env);
+    int r = real_spawn()(pid, interp ? interp : p, fa, attr, interp ? nargv : argv, clean ? clean : env);
     free(nargv);
     free(clean);
+    free_env(script, envp);
     return r;
 }
 

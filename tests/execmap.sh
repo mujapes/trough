@@ -58,6 +58,21 @@ printf '#include <stdio.h>\n#include <stdlib.h>\nint main(void){puts(getenv("LD_
 gcc -o "$W/platform/bin/plat" "$W/p.c"
 out="$(LD_LIBRARY_PATH=/x LD_PRELOAD="$W/libexecmap.so" dash -c "$W/platform/bin/plat" 2>&1)"; [ "$out" = platform-env-ok ] && echo "ok    platform binaries get no glibc loader variables" || { echo "FAIL  platform env ($out)"; F=$((F+1)); }
 out="$(LD_LIBRARY_PATH=/x dash -c "$W/platform/bin/plat" 2>&1)"; [ "$out" = platform-env-leak ] && echo "ok    negative control: without the preload they leak" || { echo "FAIL  platform env negative control ($out)"; F=$((F+1)); }
+# Maintainer scripts (and only they) run under Debian's fakechroot with the root as base.
+FC=$(dpkg -L libfakechroot 2>/dev/null | grep '/libfakechroot.so$' | head -1)
+if [ -z "$FC" ]; then echo "FAIL  libfakechroot is not installed (apt install libfakechroot; hot.sh ships it)"; F=$((F+1)); else
+R2="$W/root2"; mkdir -p "$R2/bin" "$R2/usr/bin"
+cp /usr/bin/dash "$R2/bin/sh"; cp /usr/bin/mkdir /usr/bin/touch "$R2/usr/bin/"
+gcc -O2 -Wall -Wextra -shared -fPIC -DTROUGH_ROOT="\"$R2\"" -DTROUGH_FAKECHROOT="\"$FC\"" \
+    -DTROUGH_HOST_PATHS="\"$W:/proc:/dev:/sys:/lib:/usr/lib\"" -o "$W/fc.so" "$ROOT/native/execmap/execmap.c" -ldl
+[ -e /etc/.trough-test ] && { echo "/etc/.trough-test exists here; the test needs it absent"; exit 1; }
+printf '#!/bin/sh\nmkdir -p /etc/.trough-test/x && touch /etc/.trough-test/x/f && echo script-ok\n' > "$W/postinst"; chmod +x "$W/postinst"
+out="$(DPKG_MAINTSCRIPT_NAME=postinst LD_PRELOAD="$W/fc.so" dash -c "$W/postinst" 2>&1)"
+[ "$out" = script-ok ] && [ -f "$R2/etc/.trough-test/x/f" ] && [ ! -e /etc/.trough-test ] && echo "ok    maintainer script's /etc writes land in the root" || { echo "FAIL  maintainer script under fakechroot ($out)"; F=$((F+1)); }
+rm -rf "$R2/etc"
+out="$(LD_PRELOAD="$W/fc.so" dash -c "$W/postinst" 2>&1)"
+[ "$out" != script-ok ] && [ ! -e "$R2/etc" ] && echo "ok    negative control: other programs get no path translation" || { echo "FAIL  translation leaked outside maintainer scripts"; F=$((F+1)); }
+fi
 # Paths the root lacks are never touched: /bin/sh here stays /bin/sh.
 out="$(LD_PRELOAD="$W/libexecmap.so" sh -c 'echo $0' 2>&1)"; [ "$out" = sh ] && echo "ok    paths the root lacks untouched" || { echo "FAIL  existing paths"; F=$((F+1)); }
 echo "== $F failed"; exit $F

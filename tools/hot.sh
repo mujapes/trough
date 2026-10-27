@@ -28,6 +28,10 @@ GLIBC_DIR="${GLIBC_DIR:-/lib/aarch64-linux-gnu}"
 for l in ld-linux-aarch64.so.1 libc.so.6 libm.so.6 librt.so.1 libpthread.so.0 libdl.so.2; do
     cp "$GLIBC_DIR/$l" "$B/z/lib/"
 done
+# Debian's fakechroot, which execmap preloads into maintainer scripts only (execmap.c).
+FAKECHROOT_SO="${FAKECHROOT_SO:-/usr/lib/aarch64-linux-gnu/fakechroot/libfakechroot.so}"
+[ -f "$FAKECHROOT_SO" ] || { echo "missing $FAKECHROOT_SO (apt install libfakechroot)" >&2; exit 1; }
+cp "$FAKECHROOT_SO" "$B/z/lib/"
 python3 "$ROOT/tools/patch_svc.py" "$B/z/lib/"*.so*
 # (lib/libexecmap.so, the exec mapper texec preloads, came from native/build.sh above.)
 python3 "$ROOT/tools/patch_paths.py" "$B/z/lib/libc.so.6"
