@@ -4,7 +4,11 @@
  * starts (LD_PRELOAD, only if this file exists), so their exec calls find Trough's root.
  *
  * Scope is deliberately narrow, two behaviours:
- *  1. exec mapping: the exec family, posix_spawn(p), system and popen/pclose (below);
+ *  1. exec mapping: the exec family, posix_spawn(p), system and popen/pclose (below). The
+ *     reverse direction too: a glibc program exec'ing an Android platform binary (realpath
+ *     under /system, /apex, ...; e.g. toybox mountpoint from openjdk's postinst) gets an
+ *     environment without LD_LIBRARY_PATH/LD_PRELOAD, which bionic's linker would follow
+ *     into the root's glibc and fail ("libc.so has bad ELF magic");
  *  2. hard links: Android's policy denies apps link(2); dpkg backs up its status file with link()
  *     (atomic-file.c) and packages carry hard-linked files. link/linkat that fail with EACCES or
  *     EPERM on a regular file make a copy with the same mode instead -- a correct stand-in for
@@ -40,7 +44,30 @@
 #define TROUGH_SH "/bin/sh"
 #endif
 
+#ifndef TROUGH_PLATFORM   /* tests/execmap.sh points this at a stand-in platform directory */
+#define TROUGH_PLATFORM "/system/", "/system_ext/", "/apex/", "/vendor/", "/product/", "/odm/"
+#endif
+
 extern char **environ;
+
+/* envp minus the glibc loader variables when exe is a platform (bionic) binary; else NULL. */
+static char **platform_env(const char *exe, char *const envp[]) {
+    static const char *const platform[] = {TROUGH_PLATFORM};
+    char real[PATH_MAX];
+    if (!exe || !envp || !realpath(exe, real)) return NULL;
+    unsigned i = 0;
+    while (i < sizeof platform / sizeof *platform && strncmp(real, platform[i], strlen(platform[i]))) i++;
+    if (i == sizeof platform / sizeof *platform) return NULL;
+    int n = 0;
+    while (envp[n]) n++;
+    char **v = malloc(sizeof(char *) * (n + 1));
+    if (!v) return NULL;
+    int k = 0;
+    for (int j = 0; j < n; j++)
+        if (strncmp(envp[j], "LD_LIBRARY_PATH=", 16) && strncmp(envp[j], "LD_PRELOAD=", 11)) v[k++] = envp[j];
+    v[k] = NULL;
+    return v;
+}
 
 static int mapped_prefix(const char *p) {
     static const char *const dirs[] = {"/bin/", "/sbin/", "/lib/", "/usr/"};
@@ -130,7 +157,12 @@ int execve(const char *path, char *const argv[], char *const envp[]) {
         errno = e;
         return r;
     }
-    return real_execve()(p, argv, envp);
+    char **clean = platform_env(p, envp);
+    int r = real_execve()(p, argv, clean ? clean : envp);
+    int e = errno;
+    free(clean);
+    errno = e;
+    return r;
 }
 
 int execv(const char *path, char *const argv[]) { return execve(path, argv, environ); }
@@ -228,8 +260,10 @@ int posix_spawn(pid_t *pid, const char *path, const posix_spawn_file_actions_t *
     const char *p = map(path, buf);
     char **nargv = NULL;
     const char *interp = shebang(p, argv, &nargv, ibuf, mbuf);
-    int r = real_spawn()(pid, interp ? interp : p, fa, attr, interp ? nargv : argv, envp);
+    char **clean = interp ? NULL : platform_env(p, envp);
+    int r = real_spawn()(pid, interp ? interp : p, fa, attr, interp ? nargv : argv, clean ? clean : envp);
     free(nargv);
+    free(clean);
     return r;
 }
 

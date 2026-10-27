@@ -8,7 +8,8 @@ W="$(mktemp -d)"; trap 'rm -rf "$W"' EXIT
 T=/usr/libexec/trough-test
 [ -e "$T" ] && { echo "$T exists here; the test needs it absent"; exit 1; }
 R="$W/root"; mkdir -p "$R$T/bin"
-gcc -O2 -Wall -Wextra -shared -fPIC -DTROUGH_ROOT="\"$R\"" -DTROUGH_SH="\"$T/bin/sh\"" \
+mkdir -p "$W/platform/bin"
+gcc -O2 -Wall -Wextra -shared -fPIC -DTROUGH_ROOT="\"$R\"" -DTROUGH_SH="\"$T/bin/sh\"" -DTROUGH_PLATFORM="\"$W/platform/\"" \
     -o "$W/libexecmap.so" "$ROOT/native/execmap/execmap.c" -ldl || exit 1
 gcc -O2 -Wall -o "$W/drive" "$ROOT/tests/execmap_test.c" || exit 1
 printf '#include <stdio.h>\nint main(int c,char**v){printf("hello-ok %%s %%s\\n",v[0],c>1?v[1]:"-");return 0;}\n' > "$W/h.c"
@@ -52,6 +53,11 @@ n=$(echo "$without" | grep -cE 'FAILED|status 127|pclose 32512')
 if [ "$n" -ge 12 ]; then echo "ok    negative control: without the preload $n calls fail"; else echo "FAIL  negative control: only $n failures without the preload"; echo "$without" | sed 's/^/      /'; F=$((F+1)); fi
 out="$(LD_PRELOAD="$W/libexecmap.so" dash -c '/usr/bin/true' 2>&1)"; [ "$out" = root-first-ok ] && echo "ok    root copy wins over a device path of the same name" || { echo "FAIL  root-first ($out)"; F=$((F+1)); }
 out="$(dash -c '/usr/bin/true; echo $?' 2>&1)"; [ "$out" = 0 ] && echo "ok    negative control: without the preload the device's copy runs" || { echo "FAIL  root-first negative control"; F=$((F+1)); }
+# A platform (bionic) binary must not inherit glibc's loader variables.
+printf '#include <stdio.h>\n#include <stdlib.h>\nint main(void){puts(getenv("LD_PRELOAD")||getenv("LD_LIBRARY_PATH")?"platform-env-leak":"platform-env-ok");return 0;}\n' > "$W/p.c"
+gcc -o "$W/platform/bin/plat" "$W/p.c"
+out="$(LD_LIBRARY_PATH=/x LD_PRELOAD="$W/libexecmap.so" dash -c "$W/platform/bin/plat" 2>&1)"; [ "$out" = platform-env-ok ] && echo "ok    platform binaries get no glibc loader variables" || { echo "FAIL  platform env ($out)"; F=$((F+1)); }
+out="$(LD_LIBRARY_PATH=/x dash -c "$W/platform/bin/plat" 2>&1)"; [ "$out" = platform-env-leak ] && echo "ok    negative control: without the preload they leak" || { echo "FAIL  platform env negative control ($out)"; F=$((F+1)); }
 # Paths the root lacks are never touched: /bin/sh here stays /bin/sh.
 out="$(LD_PRELOAD="$W/libexecmap.so" sh -c 'echo $0' 2>&1)"; [ "$out" = sh ] && echo "ok    paths the root lacks untouched" || { echo "FAIL  existing paths"; F=$((F+1)); }
 echo "== $F failed"; exit $F
