@@ -1,5 +1,25 @@
 # Current handoff: unified design and hot replacement, 2026-10-27
 
+## Device evidence, 2026-10-27 night (Opus, building on Astra's tree)
+
+Astra's tree is committed (83d6701) and running on the phone (Pixel 7a, SDK 37) from a fresh
+install. `tools/loop.sh` publishes a bundle, waits for that exact bundle to answer over the
+signed control channel, runs every advertised scenario and files signed receipts in
+Download/trough/evidence/<bundle sha>/. core.publication, core.resources and core.replacement
+all pass on the device (about 105 ms each), including immediately after two publishes 3 s apart.
+
+Found by the loop and fixed (ea0273e): a bundle replaced while still booting entered late and ran
+a stale Chat + control poller beside its successor (build-mismatch replies from an old bundle,
+IOExceptions from its deleted directory). The APK host now owns recovery: newest verified bundle
+first, last-known-good (settled 15 s) fallback, a bundle that kills the process before settling
+is never reactivated (marker keyed by pid), crashes copied to Download/trough/crash-*.txt,
+bundle checks continue behind other apps, split-view resizes no longer recreate the activity.
+
+Next construction dependency (unchanged from below): durable meaning and effects
+(docs/CONSTRUCTION.md stage 2) on top of the stage-1 kernel, each with a phone scenario in the
+same registry so loop.sh proves it on the device.
+
+
 Read [DESIGN.md](DESIGN.md), [construction](docs/CONSTRUCTION.md), and
 [hot replacement](docs/HOT_RELOAD.md) before continuing. The namespace investigation below is
 preserved evidence, not the current task. The old chronological DESIGN.md is preserved in
