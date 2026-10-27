@@ -138,3 +138,14 @@ optimisation loop does not depend on it:
    bottleneck per instruction block. Runs anywhere (VM, Oracle, Actions).
 4. Hardware PMU (instructions, cache/branch misses): only when a Wi-Fi moment allows, used to
    calibrate 1-3, never required by the loop.
+
+## Device findings (Pixel 7a, GS201/Tensor G2, Android 17 / SDK 37), 2026-10-27
+- exec of a binary shipped in the APK works (process started) -- but static glibc died with
+  SIGSYS (exit 159) before main: a startup syscall is trapped by the app seccomp filter.
+  native/probe (no libc) names the trapped calls; suspects: rseq, set_robust_list.
+- All 31 power monitors are readable by a plain app with no adb: per-rail CPU BIG/MID/LITTLE,
+  GPU, TPU, DDR, SLC, display, modem... Readings did not move over an 8 ms window; measure
+  over seconds.
+- GitHub's free arm64 runner (Cobalt 100) measured 3.39 GHz with the same bench; its
+  CNTFRQ is 1 GHz (phone: 24.576 MHz). bench handles both.
+- The APK is now only HotLoader; everything else ships as signed bundles via tools/hot.sh.

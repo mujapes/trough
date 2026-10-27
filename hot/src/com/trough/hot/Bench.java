@@ -1,4 +1,4 @@
-package com.trough.app;
+package com.trough.hot;
 
 import android.content.Context;
 import android.os.Build;
@@ -32,7 +32,7 @@ import java.util.concurrent.TimeUnit;
 final class Bench {
     private Bench() {}
 
-    static String run(Context ctx) {
+    static String run(Context ctx, File binDir) {
         JSONObject r = new JSONObject();
         try {
             r.put("device", Build.MODEL);
@@ -43,16 +43,15 @@ final class Bench {
             List<PowerMonitor> monitors = monitors(ctx);
             PowerMonitorReadings before = readings(ctx, monitors);
 
-            String bin = ctx.getApplicationInfo().nativeLibraryDir + "/libtroughbench.so";
             long t0 = System.nanoTime();
-            Process p = new ProcessBuilder(bin).redirectErrorStream(true).start();
-            String stdout = drain(p.getInputStream());
-            int exit = p.waitFor();
+            // The first device run died with SIGSYS before printing: the probe names the trapped
+            // syscalls, then the bench runs as-is and with glibc's rseq registration disabled.
+            r.put("probe", exec(new File(binDir, "probe"), null));
+            r.put("bench_plain", exec(new File(binDir, "bench"), null));
+            r.put("bench_no_rseq", exec(new File(binDir, "bench"), "glibc.pthread.rseq=0"));
             long ms = (System.nanoTime() - t0) / 1_000_000;
-
             PowerMonitorReadings after = readings(ctx, monitors);
-            r.put("exec", new JSONObject().put("path", bin).put("exit", exit).put("ms", ms));
-            try { r.put("bench", new JSONObject(stdout)); } catch (Exception e) { r.put("bench_raw", stdout); }
+            r.put("window_ms", ms);
 
             JSONArray energy = new JSONArray();
             for (PowerMonitor m : monitors) {
@@ -82,6 +81,20 @@ final class Bench {
             text = "not saved (" + e + ")\n\n" + text;
         }
         return text;
+    }
+
+    /** {exit, ms, json|raw}; exit 159 = SIGSYS (seccomp). */
+    private static JSONObject exec(File bin, String tunables) throws Exception {
+        ProcessBuilder pb = new ProcessBuilder(bin.getPath()).redirectErrorStream(true);
+        if (tunables != null) pb.environment().put("GLIBC_TUNABLES", tunables);
+        long t0 = System.nanoTime();
+        Process p = pb.start();
+        String stdout = drain(p.getInputStream());
+        int exit = p.waitFor();
+        JSONObject o = new JSONObject().put("exit", exit).put("ms", (System.nanoTime() - t0) / 1_000_000);
+        if (tunables != null) o.put("tunables", tunables);
+        try { o.put("json", new JSONObject(stdout)); } catch (Exception e) { o.put("raw", stdout); }
+        return o;
     }
 
     private static final Executor DIRECT = new Executor() {

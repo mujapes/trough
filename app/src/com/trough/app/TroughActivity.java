@@ -7,47 +7,71 @@ import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.os.Bundle;
-import android.widget.ScrollView;
+import android.os.Handler;
+import android.os.Looper;
+import android.widget.FrameLayout;
 import android.widget.TextView;
 
-/** First Trough screen: runs the on-device bench and shows its JSON. Plain Views, no WebView. */
+/**
+ * Host only: a root view and a HotLoader. Every visible behaviour comes from the bundle.
+ * While visible, it checks for a new bundle once a second (one stat when nothing changed).
+ */
 public class TroughActivity extends Activity {
-    private TextView out;
+    private static final long POLL_MS = 1000;
+    private final Handler handler = new Handler(Looper.getMainLooper());
+    private FrameLayout root;
+    private HotLoader loader;
+    private boolean visible;
+
+    private final Runnable poll = new Runnable() {
+        @Override public void run() {
+            if (!visible || loader == null) return;
+            if (!loader.check() && (root.getChildCount() == 0 || root.findViewWithTag("trough-status") != null))
+                showStatus(loader.status);
+            handler.postDelayed(this, POLL_MS);
+        }
+    };
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
-        out = new TextView(this);
-        out.setTypeface(Typeface.MONOSPACE);
-        out.setTextSize(12);
-        out.setTextColor(0xFFE8EFE6);
-        out.setPadding(32, 96, 32, 64);
-        out.setTextIsSelectable(true);
-        ScrollView scroll = new ScrollView(this);
-        scroll.setBackgroundColor(Color.BLACK);
-        scroll.addView(out);
-        setContentView(scroll);
-
+        root = new FrameLayout(this);
+        root.setBackgroundColor(Color.BLACK);
+        setContentView(root);
         startForegroundService(new Intent(this, TroughService.class));
-        if (checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE,
-                Manifest.permission.READ_EXTERNAL_STORAGE}, 1);
-        } else {
-            runBench();
+        try { loader = new HotLoader(this, root); } catch (Exception e) { showStatus("loader: " + e); }
+        if (checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED)
+            requestPermissions(new String[]{Manifest.permission.READ_EXTERNAL_STORAGE,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE}, 1);
+    }
+
+    @Override protected void onResume() {
+        super.onResume();
+        visible = true;
+        handler.removeCallbacks(poll);
+        handler.post(poll);
+    }
+
+    @Override protected void onPause() {
+        visible = false;
+        handler.removeCallbacks(poll);
+        super.onPause();
+    }
+
+    @Override protected void onDestroy() {
+        if (loader != null) loader.stopCurrent();
+        super.onDestroy();
+    }
+
+    private void showStatus(String text) {
+        TextView t = (TextView) root.findViewWithTag("trough-status");
+        if (t == null) {
+            t = new TextView(this);
+            t.setTag("trough-status");
+            t.setTypeface(Typeface.MONOSPACE);
+            t.setTextColor(0xFFE8EFE6);
+            t.setPadding(32, 96, 32, 32);
+            root.addView(t);
         }
-    }
-
-    @Override public void onRequestPermissionsResult(int code, String[] perms, int[] results) {
-        runBench();  // the bench still runs and shows on screen if storage was refused
-    }
-
-    private void runBench() {
-        out.setText("Running bench on every core (~10s)...\n");
-        final Activity self = this;
-        new Thread(new Runnable() {
-            @Override public void run() {
-                final String result = Bench.run(self);
-                runOnUiThread(new Runnable() { @Override public void run() { out.setText(result); } });
-            }
-        }, "trough-bench").start();
+        t.setText("Trough loader\n\n" + text + "\n\nWaiting for Download/trough/hot/bundle.zip");
     }
 }

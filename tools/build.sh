@@ -1,23 +1,20 @@
 #!/bin/bash
-# Build out/trough.apk with no Gradle: native bench -> aapt2 -> javac -> d8 -> zip -> sign.
+# Build out/trough.apk with no Gradle: aapt2 -> javac -> d8 -> zip -> sign.
+# The APK is only the hot loader; behaviour ships as signed bundles (tools/hot.sh).
 # Every tool is overridable so the same script runs in the Forge VM and in CI.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ANDROID_JAR="${ANDROID_JAR:-$HOME/android-sdk/platforms/android-35/android.jar}"
 D8_JAR="${D8_JAR:-$HOME/android-sdk/build-tools/35.0.0/lib/d8.jar}"
 AAPT2="${AAPT2:-aapt2}" ZIPALIGN="${ZIPALIGN:-zipalign}" APKSIGNER="${APKSIGNER:-apksigner}"
-CC_ARM64="${CC_ARM64:-$( [ "$(uname -m)" = aarch64 ] && echo gcc || echo aarch64-linux-gnu-gcc )}"
 KEYSTORE="${KEYSTORE:-$HOME/.trough/debug.keystore}"
 SDK_MIN=28 SDK_TARGET=28   # 28: exec from app storage (DESIGN.md "Android hurdles")
 
 B="$(mktemp -d)"; trap 'rm -rf "$B"' EXIT
-mkdir -p "$ROOT/out" "$B/apk/lib/arm64-v8a" "$B/obj" "$B/dex"
-
-# Native: static executables, named lib*.so so Android extracts them executable.
-"$CC_ARM64" -O2 -static -o "$B/apk/lib/arm64-v8a/libtroughbench.so" "$ROOT/native/bench/bench.c"
+mkdir -p "$ROOT/out" "$B/apk" "$B/obj" "$B/dex"
 
 "$AAPT2" compile --dir "$ROOT/app/res" -o "$B/res.zip"
-"$AAPT2" link -o "$B/base.apk" -I "${FRAMEWORK_RES:-$ANDROID_JAR}" --manifest "$ROOT/app/AndroidManifest.xml" \
+"$AAPT2" link -o "$B/base.apk" -I "${FRAMEWORK_RES:-$ANDROID_JAR}" --manifest "$ROOT/app/AndroidManifest.xml" -A "$ROOT/app/assets" \
     --min-sdk-version $SDK_MIN --target-sdk-version $SDK_TARGET \
     --version-code "${VERSION_CODE:-$(date +%s)}" --version-name "${VERSION_NAME:-$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo dev)}" \
     --java "$B/gen" "$B/res.zip"
