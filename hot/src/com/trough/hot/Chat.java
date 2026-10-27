@@ -35,6 +35,7 @@ final class Chat implements Session.Listener {
 
     private final Activity a;
     private final File home;
+    private final Runnable reload;   // the boot's: rebuild Trough from files/src and swap it in
     private final LinearLayout feed;
     private final ScrollView scroll;
     private final TextView status;
@@ -46,9 +47,10 @@ final class Chat implements Session.Listener {
     private String model = "", sessionId;
     private double cost;
 
-    Chat(Activity activity, FrameLayout root, File home) {
+    Chat(Activity activity, FrameLayout root, File home, Runnable reload) {
         a = activity;
         this.home = home;
+        this.reload = reload;
         a.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         LinearLayout col = new LinearLayout(a);
         col.setOrientation(LinearLayout.VERTICAL);
@@ -116,6 +118,12 @@ final class Chat implements Session.Listener {
 
     private void submit() {
         String text = input.getText().toString().trim();
+        if (text.equals("/reload")) {
+            input.setText("");
+            note("rebuilding Trough from files/src");
+            reload.run();
+            return;
+        }
         if (text.isEmpty() || session == null) return;
         input.setText("");
         TextView u = text(USER, 16);

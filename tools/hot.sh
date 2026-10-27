@@ -12,7 +12,7 @@ PUBLISH="${PUBLISH:-/mnt/shared/Download/trough/hot}"
 ENTRY="${ENTRY:-com.trough.hot.Main}"
 
 B="$(mktemp -d)"; trap 'rm -rf "$B"' EXIT
-mkdir -p "$B/z/bin" "$B/obj" "$B/dex"
+mkdir -p "$B/z/bin"
 
 "$CC_ARM64" -O2 -static -o "$B/z/bin/bench" "$ROOT/native/bench/bench.c"
 FREESTANDING="-O2 -static -nostdlib -ffreestanding -fno-builtin -fno-stack-protector"
@@ -56,15 +56,16 @@ if [ -f "$ROOT_ZIP" ]; then
     PAYLOADS="$PAYLOADS${PAYLOADS:+,}\"root\":\"$sha\""
 fi
 
-find "$ROOT/hot/src" -name '*.java' > "$B/sources.txt"
-if ! javac -nowarn -source 8 -target 8 -bootclasspath "$ANDROID_JAR" -classpath "$ANDROID_JAR" \
-    -d "$B/obj" @"$B/sources.txt" > "$B/javac.log" 2>&1; then
-    grep -v 'warning: \[options\]' "$B/javac.log" >&2; echo "javac failed" >&2; exit 1
-fi
-find "$B/obj" -name '*.class' > "$B/classes.txt"
-java -Xmx384m -cp "$D8_JAR" com.android.tools.r8.D8 --output "$B/dex" --lib "$ANDROID_JAR" \
-    --min-api 28 @"$B/classes.txt"
-cp "$B/dex/classes.dex" "$B/z/"
+# Trough holds its own source and rebuilds itself from it on the phone (hot/.../Self.java), with
+# the same script, so the bundle carries src/, build.sh and the two SDK jars build.sh needs.
+"$ROOT/hot/build.sh" "$ROOT/hot/src" "$B/java" "$ANDROID_JAR" "$D8_JAR"
+cp "$B/java/classes.dex" "$B/z/"
+cp -r "$ROOT/hot/src" "$B/z/src" && cp "$ROOT/hot/build.sh" "$B/z/build.sh"
+for jar in "$ANDROID_JAR" "$D8_JAR"; do
+    sha=$(sha256sum "$jar" | cut -d' ' -f1)
+    [ -f "$PAYLOAD_DIR/$sha" ] || { cp "$jar" "$PAYLOAD_DIR/.$sha.tmp" && mv "$PAYLOAD_DIR/.$sha.tmp" "$PAYLOAD_DIR/$sha"; }
+    PAYLOADS="$PAYLOADS${PAYLOADS:+,}\"$(basename "$jar")\":\"$sha\""
+done
 printf '{"entry":"%s","built_at":%s,"git":"%s","payloads":{%s}}\n' "$ENTRY" "$(date +%s)" \
     "$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo dev)" "$PAYLOADS" > "$B/z/manifest.json"
 (cd "$B/z" && zip -q -X -r "$B/bundle.zip" .)

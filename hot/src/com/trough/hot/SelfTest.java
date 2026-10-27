@@ -50,6 +50,35 @@ final class SelfTest {
         return r;
     }
 
+    /**
+     * The reload path end to end, without touching the live files/src: copy it, add a class whose
+     * answer is a fresh nonce, build with Self.build (cold, so this is the real compile time on
+     * the phone), load the result beside the bundle and call it.
+     */
+    static JSONObject selfEdit(Context ctx, File bundle, JSONObject payloads) throws Exception {
+        File w = new File(ctx.getCacheDir(), "selfedit"), src = new File(w, "src"), out = new File(w, "out");
+        Main.deleteTree(w);
+        copy(Self.src(ctx), src);
+        String nonce = Long.toHexString(System.nanoTime());
+        Payloads.writeSmall(new File(src, "com/trough/hot/EditProbe.java"),
+            "package com.trough.hot;\npublic final class EditProbe { public static String id() { return \"" + nonce + "\"; } }\n");
+        JSONObject r = new JSONObject();
+        Self.build(ctx, src, bundle, payloads, out, r);
+        File[] built = out.listFiles();
+        Object got = Self.load(ctx, built[0], bundle, "com.trough.hot.EditProbe").getMethod("id").invoke(null);
+        r.put("want", nonce).put("got", got).put("ok", nonce.equals(got));
+        Main.deleteTree(w);
+        return r;
+    }
+
+    private static void copy(File from, File to) throws Exception {
+        if (from.isDirectory()) {
+            to.mkdirs();
+            File[] kids = from.listFiles();
+            if (kids != null) for (File k : kids) copy(k, new File(to, k.getName()));
+        } else Payloads.writeSmall(to, new String(Payloads.readSmall(from), "UTF-8"));
+    }
+
     static JSONObject run(Context ctx) throws Exception {
         JSONObject r = new JSONObject();
         File d = new File(ctx.getDataDir(), "d"), bin = new File(d, "usr/bin");
