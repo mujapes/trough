@@ -97,3 +97,13 @@ user's own sessions; keep WebView fallback for any site that starts refusing us.
 - AI-written ports are only as good as their oracle (an AI Rust port of ScanCode benchmarked
   faster but returned wrong results). Every engine piece is gated on its conformance suite:
   test262 for JS, web-platform-tests for HTML/CSS/DOM, golden screenshots per site view.
+
+## Sandboxing policy (2026-10-27)
+Most real use is web scrolling, so arbitrary web content is first-class, not a fallback.
+- Trusted code (our UI, L0 site renderers that parse data and never run site JS): no sandbox,
+  single process, zero IPC.
+- Arbitrary third-party JS: ONE lightweight isolated process for all of it (not Chrome's
+  process-per-site). Trough holds Claude credentials, the userland and Shizuku shell-level
+  power, so an engine exploit without isolation would own all of that.
+- Bigger wins than dropping isolation: block ads/trackers (often half a page's JS), cache
+  compiled code across visits, and give the most-scrolled sites L0 native renderers.
