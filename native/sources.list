@@ -14,6 +14,10 @@ core/resources.c
 core/resources.h
 core/modules.c
 core/modules.h
+store/store.c
+store/store.h
+scenarios/store.c
+packages.list
 scenarios/publication.c
 scenarios/resources.c
 scenarios/replacement.c

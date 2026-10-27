@@ -19,7 +19,7 @@ mkdir -p "$B/z/bin"
 # Native code, by the same script Trough runs on the phone (native/build.sh). Sources ship too,
 # so the phone can rebuild them (Self.buildNative) and compare (SelfTest.nativeRepro).
 CC="$CC_ARM64" sh "$ROOT/native/build.sh" "$ROOT/native" "$B/z"
-python3 "$ROOT/tools/set_interp.py" "$B/z/bin/threadtest" "$B/z/bin/dnstest" "$B/z/bin/nsprobe" "$B/z/bin/core-publication" "$B/z/bin/core-resources" "$B/z/bin/core-replacement"
+python3 "$ROOT/tools/set_interp.py" "$B/z/bin/threadtest" "$B/z/bin/dnstest" "$B/z/bin/nsprobe" "$B/z/bin/core-publication" "$B/z/bin/core-resources" "$B/z/bin/core-replacement" "$B/z/bin/core-store"
 mkdir -p "$B/native"
 tar -C "$ROOT/native" -cf - -T "$ROOT/native/sources.list" | tar -C "$B/native" -xf -
 
@@ -61,6 +61,11 @@ if [ "${ROOTFS:-0}" = 1 ]; then "$ROOT/tools/root.sh" "$ROOT_ZIP" >&2; fi
 # Trough's own files in d/ + the package list (small, signed): what a phone that already has a
 # root converges to (DebRoot.converge); the root zip itself only bootstraps.
 if [ -f "${ROOT_ZIP%.zip}files.zip" ]; then mkdir -p "$B/z/rootfiles" && (cd "$B/z/rootfiles" && unzip -q "${ROOT_ZIP%.zip}files.zip"); fi
+# Native build dependencies join the root's package list; the phone's apt installs them.
+if [ -f "$B/z/rootfiles/packages.txt" ]; then
+    cat "$B/z/rootfiles/packages.txt" "$ROOT/native/packages.list" | awk 'NF && !seen[$0]++' > "$B/packages.txt"
+    mv "$B/packages.txt" "$B/z/rootfiles/packages.txt"
+fi
 if [ -f "$ROOT_ZIP" ]; then
     sha=$(sha256sum "$ROOT_ZIP" | cut -d' ' -f1)
     [ -f "$PAYLOAD_DIR/$sha" ] || { cp "$ROOT_ZIP" "$PAYLOAD_DIR/.$sha.tmp" && mv "$PAYLOAD_DIR/.$sha.tmp" "$PAYLOAD_DIR/$sha"; }

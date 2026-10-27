@@ -30,6 +30,8 @@ rm -f "$O/lib/core-world.o" "$O/lib/core-resources.o" "$O/lib/core-modules.o"
 for scenario in publication resources replacement; do
     $CC $CORE $DYN -I"$S/core" "$S/scenarios/$scenario.c" "$O/lib/libtroughcore.a" -ldl -o "$O/bin/core-$scenario"
 done
+# Durable store: SQLite from the root's own Debian packages (native/packages.list).
+$CC $CORE $DYN -I"$S/store" "$S/store/store.c" "$S/scenarios/store.c" -lsqlite3 -o "$O/bin/core-store"
 mkdir -p "$O/fixtures"
 for version in 1 2; do
     $CC $CORE -shared -DVERSION=$version "$S/scenarios/fixtures/implementation.c" -o "$O/fixtures/module-$version.so"

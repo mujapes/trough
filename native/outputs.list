@@ -9,5 +9,6 @@ lib/libtroughcore.a
 bin/core-publication
 bin/core-resources
 bin/core-replacement
+bin/core-store
 fixtures/module-1.so
 fixtures/module-2.so

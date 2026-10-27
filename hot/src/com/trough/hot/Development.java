@@ -26,7 +26,7 @@ final class Development implements AutoCloseable, ScenarioProtocol.Handler {
     public void close() { closed=true; worker.interrupt(); }
     public boolean supports(String name) {
         return "app.observe".equals(name) || "core.publication".equals(name) ||
-            "core.resources".equals(name) || "core.replacement".equals(name);
+            "core.resources".equals(name) || "core.replacement".equals(name) || "core.store".equals(name);
     }
     public Map<String,Object> execute(String name) throws Exception {
         if(closed) throw new InterruptedException();
@@ -39,7 +39,7 @@ final class Development implements AutoCloseable, ScenarioProtocol.Handler {
                         "density",activity.getResources().getDisplayMetrics().density,
                         "sdk",android.os.Build.VERSION.SDK_INT,"device",android.os.Build.MODEL,
                         "multi_window",activity.isInMultiWindowMode(),
-                        "scenarios",Arrays.asList("app.observe","core.publication","core.resources","core.replacement"));
+                        "scenarios",Arrays.asList("app.observe","core.publication","core.resources","core.replacement","core.store"));
                 }
             });
             activity.runOnUiThread(result);
@@ -50,6 +50,12 @@ final class Development implements AutoCloseable, ScenarioProtocol.Handler {
         Map<String,String> env=Root.env(activity,activity.getCacheDir());
         if("core.replacement".equals(name)) return ScenarioProcess.run(activity.getCacheDir(),env,20,executable,
             new File(bundle,"fixtures/module-1.so").getPath(),new File(bundle,"fixtures/module-2.so").getPath());
+        if("core.store".equals(name)) {   // a fresh private directory per run; the store owns its contents
+            File data=new File(activity.getCacheDir(),"scenario-store");
+            Main.deleteTree(data);
+            try { return ScenarioProcess.run(activity.getCacheDir(),env,60,executable,data.getPath()); }
+            finally { Main.deleteTree(data); }
+        }
         return ScenarioProcess.run(activity.getCacheDir(),env,20,executable);
     }
     private void serve() {
