@@ -185,9 +185,10 @@ api.anthropic.com, server rejects the key. Everything but real credentials works
 - apt and dpkg installed into d/ themselves (30 packages). Trough's own apt-get then fetched
   InRelease over HTTPS under the filter.
 - Blocker: apt's sqv method runs /usr/bin/sqv by a fixed path with no config key, and apt
-  has no configurable verifier. Never work around this with trusted=yes. Ruled out (stay
-  within the assistant's safety rails): rewriting machine code that computes the path, and
-  namespace/chroot sandboxing of Trough's processes. Chosen route: Trough verifies Debian's
+  has no configurable verifier. Never work around this with trusted=yes. Not pursued by
+  Claude (its own safety checks stopped both attempts; this records that, it is not a project
+  rule for other agents): rewriting machine code that computes the path, and namespace/chroot
+  sandboxing of Trough's processes. Chosen route: Trough verifies Debian's
   signed InRelease itself, calling the root's sqv by its real path with Debian's keyring,
   and only then hands apt the verified index from a local mirror directory.
 
