@@ -295,3 +295,30 @@ its own bundle from its own source and reloads it.
   gcc built a threaded C program in 181 ms and it ran; javac 628 ms, java ran. Trough's own
   toolchain works natively on the device. Next: Trough builds its own code from its own source
   and reloads itself.
+
+## Self-hosted reload (2026-10-27)
+Trough holds its own Java source and rebuilds itself from it on the phone; the signed bundle is
+the seed and the fallback, not the architecture (Working rules).
+- Bundle carries src/ + build.sh; android.jar and d8.jar ship as payloads. hot/build.sh is the
+  ONE build definition: tools/hot.sh uses it in the VM, Self.java runs it on the phone with
+  /system/bin/sh and the root's javac + java (d8).
+- Boot (Main.start, always the signed copy): root + payloads, seed files/src from the bundle
+  when the bundle's source changed (local edits moved to files/src.<time>, never deleted),
+  build into files/self/<key> (key = hash of source tree + build inputs; unchanged tree = no
+  compile), load beside the bundle (parent = APK loader, so the built classes replace the
+  bundle's) and enter Main.run. Any failure -> the bundle's own run, so Trough always comes up.
+- Reload: `/reload` in the chat dock, or anything holding the boot's Runnable. The boot builds
+  files/src; on success it stops what runs and enters the new build; on failure it keeps the
+  old one and says so. Claude resumes its session (.trough-session), so a reload keeps context.
+- The boot/loader itself only changes through a signed bundle, like HotLoader through an APK.
+- Trust: files/src and files/self are app-private; only Trough and what it runs can write them.
+- Oracle: tests/selfbuild.sh (VM, javac/java under the simulated filter, plus a broken-source
+  negative control). Device proof: SelfTest.selfEdit copies files/src, adds a class returning a
+  fresh nonce, cold-builds, loads it and calls it.
+- Lambdas are out: javac against android.jar has no LambdaMetafactory.
+- ON THE PHONE (10-27, status-1793110967871.json): boot seeded files/src, cold self build
+  4210 ms (javac + d8, root's JDK under the real filter), and Trough is now running the code it
+  built ("running": "self a281fa10c69b"). selfEdit: edited copy built in 4466 ms, loaded, and
+  returned the expected nonce. gcc/C/javac/Java selftests still pass.
+Next: reload on Claude's edits without a typed command (Trough's claude editing files/src is
+the normal way Trough changes); native code (bin/) rebuilt the same way with the root's gcc.
