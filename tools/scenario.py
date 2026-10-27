@@ -17,6 +17,10 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, padding
 
 
+class BuildChanged(Exception):
+    pass
+
+
 def atomic(path, data):
     temp = path.with_name(path.name + '.new')
     with temp.open('wb') as f:
@@ -77,6 +81,8 @@ def main():
                 if result.get('scenario') != name:
                     raise ValueError('result scenario mismatch')
                 if name != 'app.observe' and (result.get('bundle') != bundle or result.get('runtime') != runtime):
+                    if result.get('status') == 'rejected' and result.get('error') == 'build mismatch':
+                        raise BuildChanged()
                     raise ValueError('result build mismatch')
                 return result, body, proof
             except (FileNotFoundError, json.JSONDecodeError, __import__('cryptography.exceptions', fromlist=['InvalidSignature']).InvalidSignature):
@@ -93,10 +99,19 @@ def main():
         if args.scenario == 'app.observe':
             result, body, proof = run('app.observe')
         else:
-            observation, _, _ = run('app.observe')
-            if observation.get('status') != 'done':
-                raise RuntimeError('identity discovery failed: '+str(observation.get('status')))
-            result, body, proof = run(args.scenario, observation['bundle'], observation['runtime'])
+            # A reload can land between discovery and the request; the device then rejects the
+            # request without executing it, so rediscovering and retrying is safe.
+            for attempt in range(5):
+                observation, _, _ = run('app.observe')
+                if observation.get('status') != 'done':
+                    raise RuntimeError('identity discovery failed: '+str(observation.get('status')))
+                try:
+                    result, body, proof = run(args.scenario, observation['bundle'], observation['runtime'])
+                    break
+                except BuildChanged:
+                    time.sleep(2)
+            else:
+                raise RuntimeError('running build kept changing; no stable target')
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         atomic(args.out, body)

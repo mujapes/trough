@@ -38,7 +38,8 @@ import java.util.zip.ZipInputStream;
  *
  * Recovery state, app-private under files/hot/:
  *   good      sha of the last bundle that stayed up for SETTLE_MS; cold start runs it directly
- *   starting  sha being activated; still present at the next process start = it never settled
+ *   starting  "<sha> <pid>" being activated; found by a LATER process = it died before settling
+ *             (an activity recreated inside the same process is not a crash)
  *   bad/<sha> bundles that died before settling; never activated again (a new publish has a new sha)
  * Crashes are also copied to Download/trough/crash-<ms>.txt so the VM can observe them.
  * Knobs, never policy: the loader does not know what a bundle does.
@@ -60,11 +61,10 @@ final class HotLoader {
         byte[] der = readAll(activity.getAssets().open("hot-pubkey.der"));
         key = KeyFactory.getInstance("EC").generatePublic(new X509EncodedKeySpec(der));
         state = new File(activity.getFilesDir(), "hot");
-        String unsettled = read(new File(state, "starting"));
-        if (!unsettled.isEmpty()) {
-            write(new File(new File(state, "bad"), unsettled), "died before settling");
-            new File(state, "starting").delete();
-        }
+        String[] unsettled = read(new File(state, "starting")).split(" ");
+        if (unsettled.length == 2 && !unsettled[1].equals(String.valueOf(android.os.Process.myPid())))
+            write(new File(new File(state, "bad"), unsettled[0]), "died before settling");
+        new File(state, "starting").delete();
         final Thread.UncaughtExceptionHandler next = Thread.getDefaultUncaughtExceptionHandler();
         Thread.setDefaultUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler() {
             @Override public void uncaughtException(Thread t, Throwable e) {
@@ -83,7 +83,7 @@ final class HotLoader {
         return new File(new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "trough"), "hot");
     }
 
-    /** Cold start: run the last settled bundle from app storage, before shared storage is read. */
+    /** Cold start fallback: the last settled bundle from app storage, with no shared storage. */
     boolean resume() {
         String sha = read(new File(state, "good"));
         File dir = new File(state, sha);
@@ -131,7 +131,7 @@ final class HotLoader {
         Class<?> entry = loader.loadClass(manifest.getString("entry"));
         stopCurrent();
         root.removeAllViews();
-        write(new File(state, "starting"), sha);
+        write(new File(state, "starting"), sha + " " + android.os.Process.myPid());
         current = entry;
         currentSha = sha;
         entry.getMethod("start", Activity.class, FrameLayout.class, File.class).invoke(null, activity, root, dir);
@@ -140,7 +140,7 @@ final class HotLoader {
 
     /** Called SETTLE_MS after an activation: the bundle stayed up, so it becomes last-known-good. */
     void settle(String sha) {
-        if (!sha.equals(currentSha) || !sha.equals(read(new File(state, "starting")))) return;
+        if (!sha.equals(currentSha) || !read(new File(state, "starting")).startsWith(sha + " ")) return;
         try {
             write(new File(state, "good"), sha);
             new File(state, "starting").delete();

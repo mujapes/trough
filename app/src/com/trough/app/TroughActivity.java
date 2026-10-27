@@ -42,7 +42,9 @@ public class TroughActivity extends Activity {
         startForegroundService(new Intent(this, TroughService.class));
         try {
             loader = new HotLoader(this, root);
-            if (loader.resume()) settleLater();
+            // Newest verified bundle first; the last good one only when that cannot start.
+            // Never both: a bundle replaced mid-boot cannot be relied on to stay stopped.
+            if (loader.check() || loader.resume()) settleLater();
         } catch (Exception e) { showStatus("loader: " + e); }
         if (checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED)
             requestPermissions(new String[]{Manifest.permission.READ_EXTERNAL_STORAGE,

@@ -25,6 +25,9 @@ public final class Main {
 
     // Boot state (signed-bundle copy only): what is running now, so it can be stopped or replaced.
     private static Method runningStop;
+    // Set when HotLoader replaces this bundle. Boot and reload threads that finish afterwards
+    // must not enter: a superseded bundle starting late would run beside its successor.
+    private static boolean superseded, stoppingRun;
     // A string literal is interned once per VM, so this is the same object in every bundle's and
     // every self build's class loader: a lock that spans them.
     private static final Object BOOT_LOCK = "com.trough.hot.boot";
@@ -80,6 +83,7 @@ public final class Main {
                 step(boot, "enter");
                 final Class<?> entry = self != null ? self : Main.class;
                 activity.runOnUiThread(new Runnable() { @Override public void run() {
+                    if (superseded) return;
                     root.removeAllViews();
                     enter(entry, boot);
                 } });
@@ -118,6 +122,7 @@ public final class Main {
                         final Class<?> entry = Self.load(bootActivity, built, bootDir, Main.class.getName());
                         boot.put("running", "self " + built.getName().substring(0, 12));
                         bootActivity.runOnUiThread(new Runnable() { @Override public void run() {
+                            if (superseded) { reloading.set(false); return; }
                             stopRunning();
                             bootRoot.removeAllViews();
                             runningKey = built.getName();
@@ -166,7 +171,9 @@ public final class Main {
     private static void stopRunning() {
         Method m = runningStop;
         runningStop = null;   // first: when run is the boot's own copy, its stop lands back here
+        stoppingRun = true;
         if (m != null) try { m.invoke(null); } catch (Throwable ignored) {}
+        stoppingRun = false;
     }
 
     /**
@@ -335,6 +342,7 @@ public final class Main {
 
     /** Called by HotLoader on the boot copy (forwards to what runs), and by the boot on run's copy. */
     public static void stop() {
+        if (!stoppingRun) superseded = true;   // HotLoader, not our own reload, is stopping us
         if (runningStop != null) { stopRunning(); return; }
         if (development != null) development.close();
         development = null;

@@ -75,6 +75,10 @@ final class ScenarioProtocol {
         } catch(Exception e) {
             result.put("status",e instanceof InterruptedException?"interrupted":"failed");
             result.put("error",e.getClass().getSimpleName());
+            // Bounded failure location for the builder: message and throwing frame, no request body.
+            String message=String.valueOf(e.getMessage());
+            result.put("detail",message.length()>200?message.substring(0,200):message);
+            if(e.getStackTrace().length>0) result.put("at",String.valueOf(e.getStackTrace()[0]));
             if(e instanceof InterruptedException) Thread.currentThread().interrupt();
         }
         result.put("elapsed_ns",System.nanoTime()-started);
