@@ -29,5 +29,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: gcc -O2 -static -o bench native/bench/bench.c && ./bench | tee bench-arm64.json
+      - name: texec oracle (Android's app seccomp filter + /data/data/t.t, simulated)
+        run: tests/run.sh
       - uses: actions/upload-artifact@v4
         with: { name: bench-arm64, path: bench-arm64.json }
