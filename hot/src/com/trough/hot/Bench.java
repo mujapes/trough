@@ -58,32 +58,23 @@ final class Bench {
             env.put("TROUGH_LD", new File(lib, "ld-linux-aarch64.so.1").getPath());
             env.put("LD_LIBRARY_PATH", lib.getPath());
             r.put("threadtest_texec", exec(new String[]{texec, new File(binDir, "threadtest").getPath()}, env));
+
+            // Run 4 passed threadtest on the phone. Next: the real claude binary (294 MB, stock
+            // glibc), installed as a payload. Offline only: --version needs no network or login.
+            JSONObject payloads = Payloads.ensure(ctx, binDir.getParentFile());
+            r.put("payloads", payloads);
+            if (payloads.has("claude")) {
+                File home = new File(ctx.getFilesDir(), "home");
+                home.mkdirs();
+                env.put("HOME", home.getPath());
+                env.put("TMPDIR", ctx.getCacheDir().getPath());  // Android has no writable /tmp
+                r.put("claude_version", exec(new String[]{texec, payloads.getString("claude"), "--version"}, env));
+            }
             long ms = (System.nanoTime() - t0) / 1_000_000;
             PowerMonitorReadings after = readings(ctx, monitors);
             r.put("window_ms", ms);
-            // Run 3: every rail read 0 J over 4s, so learn the update cadence: poll until the
-            // big-cluster rail's timestamp moves (max 30s).
-            JSONArray cadence = new JSONArray();
-            PowerMonitor big = null;
-            for (PowerMonitor m : monitors) if (m.getName().contains("CPU(BIG)")) big = m;
-            if (big != null && after != null) {
-                long ts0 = after.getTimestampMillis(big), e0 = after.getConsumedEnergy(big);
-                long until = System.currentTimeMillis() + 30000;
-                while (System.currentTimeMillis() < until) {
-                    Thread.sleep(500);
-                    PowerMonitorReadings x = readings(ctx, monitors);
-                    if (x == null) continue;
-                    long ts = x.getTimestampMillis(big), e = x.getConsumedEnergy(big);
-                    if (ts != ts0 || e != e0) {
-                        cadence.put(new JSONObject().put("wall_ms", System.currentTimeMillis())
-                            .put("ts_ms", ts).put("ts_delta_ms", ts - ts0).put("energy_delta_uJ", e - e0));
-                        ts0 = ts; e0 = e;
-                        if (cadence.length() >= 4) break;
-                    }
-                }
-                r.put("big_rail_first_ts_ms", after.getTimestampMillis(big));
-            }
-            r.put("big_rail_updates", cadence);
+            // Rails refresh only every ~20 s for apps (run 4: CPU(BIG) moved once in 30 s,
+            // 1.14 J over 20.5 s), so short windows read 0; energy needs runs spanning refreshes.
 
             JSONArray energy = new JSONArray();
             for (PowerMonitor m : monitors) {

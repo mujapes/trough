@@ -156,3 +156,8 @@ optimisation loop does not depend on it:
   those svc sites in Trough's own glibc to an inline -ENOSYS -- needed because threads that
   block all signals, e.g. node's libuv pool, are killed before any handler runs).
   Under the simulated filter: ls, git, python3, node 20 and claude 2.1.311 all run.
+- Run 4: threadtest PASSED on the phone (dynamic glibc 2.41, 4 threads, all signals blocked)
+  -> the glibc-direct layer works on device. Power rails refresh every ~20 s for apps
+  (CPU(BIG): 1.14 J over 20.5 s idle-ish); energy needs windows spanning refreshes.
+- Large binaries ship as payloads: Download/trough/payload/<sha256>, hash listed in the
+  signed manifest, verified while streaming into app storage (hot/Payloads.java).

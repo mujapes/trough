@@ -23,8 +23,22 @@ FREESTANDING="-O2 -static -nostdlib -ffreestanding -fno-builtin -fno-stack-prote
 # Trough's own glibc: the VM's arm64 copy, with trapped syscalls rewritten to -ENOSYS.
 GLIBC_DIR="${GLIBC_DIR:-/lib/aarch64-linux-gnu}"
 mkdir -p "$B/z/lib"
-cp "$GLIBC_DIR/ld-linux-aarch64.so.1" "$GLIBC_DIR/libc.so.6" "$B/z/lib/"
-python3 "$ROOT/tools/patch_svc.py" "$B/z/lib/ld-linux-aarch64.so.1" "$B/z/lib/libc.so.6"
+for l in ld-linux-aarch64.so.1 libc.so.6 libm.so.6 librt.so.1 libpthread.so.0 libdl.so.2; do
+    cp "$GLIBC_DIR/$l" "$B/z/lib/"
+done
+python3 "$ROOT/tools/patch_svc.py" "$B/z/lib/"*
+
+# Payloads: too big for the bundle. Content-addressed in shared storage; their hashes go in
+# the signed manifest, so they are verified on the phone as they stream in.
+PAYLOAD_DIR="$(dirname "$PUBLISH")/payload"
+CLAUDE_BIN="${CLAUDE_BIN:-$(readlink -f "$HOME/.local/bin/claude")}"
+PAYLOADS=""
+if [ -f "$CLAUDE_BIN" ]; then
+    sha=$(sha256sum "$CLAUDE_BIN" | cut -d' ' -f1)
+    mkdir -p "$PAYLOAD_DIR"
+    [ -f "$PAYLOAD_DIR/$sha" ] || { cp "$CLAUDE_BIN" "$PAYLOAD_DIR/.$sha.tmp" && mv "$PAYLOAD_DIR/.$sha.tmp" "$PAYLOAD_DIR/$sha"; }
+    PAYLOADS="\"claude\":\"$sha\""
+fi
 
 find "$ROOT/hot/src" -name '*.java' > "$B/sources.txt"
 if ! javac -nowarn -source 8 -target 8 -bootclasspath "$ANDROID_JAR" -classpath "$ANDROID_JAR" \
@@ -35,8 +49,8 @@ find "$B/obj" -name '*.class' > "$B/classes.txt"
 java -Xmx384m -cp "$D8_JAR" com.android.tools.r8.D8 --output "$B/dex" --lib "$ANDROID_JAR" \
     --min-api 28 @"$B/classes.txt"
 cp "$B/dex/classes.dex" "$B/z/"
-printf '{"entry":"%s","built_at":%s,"git":"%s"}\n' "$ENTRY" "$(date +%s)" \
-    "$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo dev)" > "$B/z/manifest.json"
+printf '{"entry":"%s","built_at":%s,"git":"%s","payloads":{%s}}\n' "$ENTRY" "$(date +%s)" \
+    "$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo dev)" "$PAYLOADS" > "$B/z/manifest.json"
 (cd "$B/z" && zip -q -X -r "$B/bundle.zip" .)
 openssl dgst -sha256 -sign "$KEY" -out "$B/bundle.sig" "$B/bundle.zip"
 
