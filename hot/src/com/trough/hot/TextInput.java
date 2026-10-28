@@ -47,7 +47,9 @@ final class TextInput extends BaseInputConnection {
         int at = cursor > 0 ? cursor + b - 1 : cursor + a;
         if (at < 0) at = 0;
         if (at > len) at = len;
-        int caret = point(at, a, b, t.length());
+        /* Android keeps a cursor placed at the start of a pure insertion before it
+         * (newCursorPosition 0); otherwise the point rule applies. */
+        int caret = cursor == 0 && a == b ? at : point(at, a, b, t.length());
         boolean comp = composing && t.length() > 0;
         apply(new int[]{a, b}, new String[]{t}, caret, caret, comp ? a : -1, comp ? a + t.length() : -1);
         return true;
@@ -74,7 +76,8 @@ final class TextInput extends BaseInputConnection {
     }
 
     @Override public boolean deleteSurroundingText(int beforeLength, int afterLength) {
-        if (beforeLength < 0 || afterLength < 0) return false;
+        /* Negative lengths delete nothing on that side (BaseInputConnection; the IME framework,
+         * not the connection, rejects them). */
         long[] v = state();
         int len = (int) v[0], a = (int) Math.min(v[1], v[2]), b = (int) Math.max(v[1], v[2]);
         int cs = (int) v[3], ce = (int) v[4];
