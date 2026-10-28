@@ -27,6 +27,13 @@ struct ps_gpu {
     VkSampler sampler;
     VkImage atlas; VkDeviceMemory atlas_mem; VkImageView atlas_view; uint32_t atlas_w, atlas_h;
     VkBuffer glyphs; VkDeviceMemory glyphs_mem; void *glyphs_map; size_t glyph_capacity;
+    /* Presentation (ps_open_surface). */
+    int presenting;
+    uint32_t family;
+    VkSurfaceKHR surface; VkSwapchainKHR swapchain; VkExtent2D extent;
+    uint32_t images; VkImage image[8]; VkImageView image_view[8]; VkFramebuffer image_fb[8];
+    VkSemaphore acquired, rendered[8];
+    VkBuffer shot; VkDeviceMemory shot_mem; void *shot_map; VkDeviceSize shot_size;
     /* Sized on demand. */
     uint32_t w, h;
     VkImage target; VkDeviceMemory target_mem; VkImageView view; VkFramebuffer framebuffer;
@@ -81,9 +88,14 @@ static VkResult pipeline(ps_gpu *g) {
         VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL};
     VkAttachmentReference ref = {0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
     VkSubpassDescription sub = {0, VK_PIPELINE_BIND_POINT_GRAPHICS, 0, NULL, 1, &ref, NULL, NULL, 0, NULL};
-    VkSubpassDependency after = {0, VK_SUBPASS_EXTERNAL, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT, 0};
-    VkRenderPassCreateInfo rp = {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO, NULL, 0, 1, &color, 1, &sub, 1, &after};
+    /* Before: the image's layout transition waits for the acquire semaphore's stage (colour
+     * output). After: transfer (readback or the present barrier) waits for the pass. */
+    VkSubpassDependency deps[2] = {
+        {VK_SUBPASS_EXTERNAL, 0, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+         0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, 0},
+        {0, VK_SUBPASS_EXTERNAL, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+         VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT, 0}};
+    VkRenderPassCreateInfo rp = {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO, NULL, 0, 1, &color, 1, &sub, 2, deps};
     VkResult r = vkCreateRenderPass(g->device, &rp, NULL, &g->pass);
     if (r) return r;
     VkPushConstantRange push = {VK_SHADER_STAGE_VERTEX_BIT, 0, 8};
@@ -144,12 +156,14 @@ out:
     return r;
 }
 
-int ps_open(ps_gpu **out, char *info, size_t capacity) {
+static int open_gpu(ps_gpu **out, const char *platform, char *info, size_t capacity) {
     *out = NULL;
     ps_gpu *g = calloc(1, sizeof *g);
     if (!g) return VK_ERROR_OUT_OF_HOST_MEMORY;
     VkApplicationInfo app = {VK_STRUCTURE_TYPE_APPLICATION_INFO, NULL, "trough", 1, "trough", 1, VK_API_VERSION_1_1};
-    VkInstanceCreateInfo ici = {VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO, NULL, 0, &app, 0, NULL, 0, NULL};
+    const char *ext[2] = {VK_KHR_SURFACE_EXTENSION_NAME, platform};
+    VkInstanceCreateInfo ici = {VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO, NULL, 0, &app, 0, NULL, platform ? 2 : 0, platform ? ext : NULL};
+    g->presenting = platform != NULL;
     VkResult r = vkCreateInstance(&ici, NULL, &g->instance);
     uint32_t n = 1, family = UINT32_MAX;
     if (!r) { r = vkEnumeratePhysicalDevices(g->instance, &n, &g->gpu); if (r == VK_INCOMPLETE) r = VK_SUCCESS; }
@@ -169,7 +183,9 @@ int ps_open(ps_gpu **out, char *info, size_t capacity) {
     if (family == UINT32_MAX) { ps_close(g); return -(int)-VK_ERROR_FEATURE_NOT_PRESENT; }
     float priority = 1;
     VkDeviceQueueCreateInfo dq = {VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO, NULL, 0, family, 1, &priority};
-    VkDeviceCreateInfo dci = {VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, NULL, 0, 1, &dq, 0, NULL, 0, NULL, NULL};
+    const char *swap = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
+    g->family = family;
+    VkDeviceCreateInfo dci = {VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, NULL, 0, 1, &dq, 0, NULL, g->presenting ? 1 : 0, g->presenting ? &swap : NULL, NULL};
     if (!(r = vkCreateDevice(g->gpu, &dci, NULL, &g->device))) {
         vkGetDeviceQueue(g->device, family, 0, &g->queue);
         VkCommandPoolCreateInfo cp = {VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, NULL, VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT, family};
@@ -185,6 +201,13 @@ int ps_open(ps_gpu **out, char *info, size_t capacity) {
     *out = g;
     return 0;
 }
+
+int ps_open(ps_gpu **out, char *info, size_t capacity) { return open_gpu(out, NULL, info, capacity); }
+int ps_open_surface(ps_gpu **out, const char *platform, char *info, size_t capacity) {
+    if (!platform) return -(int)-VK_ERROR_INITIALIZATION_FAILED;
+    return open_gpu(out, platform, info, capacity);
+}
+void *ps_instance(ps_gpu *g) { return g ? (void *)g->instance : NULL; }
 
 static void drop_target(ps_gpu *g) {
     if (g->framebuffer) vkDestroyFramebuffer(g->device, g->framebuffer, NULL);
@@ -303,24 +326,11 @@ int ps_atlas(ps_gpu *g, const uint8_t *coverage, uint32_t w, uint32_t h) {
     return r ? fail(r) : 0;
 }
 
-int ps_render(ps_gpu *g, const ps_rect *rects, size_t count, uint32_t w, uint32_t h, uint8_t *rgba, double *gpu_ms) {
-    return ps_render_text(g, rects, count, NULL, 0, w, h, rgba, gpu_ms);
-}
-
-int ps_render_text(ps_gpu *g, const ps_rect *rects, size_t count, const ps_glyph *glyphs, size_t nglyphs,
-                   uint32_t w, uint32_t h, uint8_t *rgba, double *gpu_ms) {
-    if (!g || !w || !h || (count && !rects) || (nglyphs && (!glyphs || !g->atlas_w)) || !rgba)
-        return fail(VK_ERROR_INITIALIZATION_FAILED);
-    VkResult r;
-    if ((r = ensure_target(g, w, h)) || (r = ensure_vertices(g, count ? count : 1)) ||
-        (r = ensure_glyphs(g, nglyphs ? nglyphs : 1))) return fail(r);
-    if (count) memcpy(g->vertices_map, rects, count * sizeof *rects);
-    if (nglyphs) memcpy(g->glyphs_map, glyphs, nglyphs * sizeof *glyphs);
-    vkResetCommandBuffer(g->cmd, 0);
-    VkCommandBufferBeginInfo bi = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, NULL, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT, NULL};
-    vkBeginCommandBuffer(g->cmd, &bi);
+/* The scene pass into a framebuffer of the shared render pass (ends in TRANSFER_SRC layout).
+ * Vertex data must already be in the instance buffers. */
+static void record(ps_gpu *g, VkFramebuffer framebuffer, uint32_t w, uint32_t h, size_t count, size_t nglyphs) {
     VkClearValue clear = {{{0, 0, 0, 0}}};
-    VkRenderPassBeginInfo rb = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO, NULL, g->pass, g->framebuffer, {{0, 0}, {w, h}}, 1, &clear};
+    VkRenderPassBeginInfo rb = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO, NULL, g->pass, framebuffer, {{0, 0}, {w, h}}, 1, &clear};
     vkCmdBeginRenderPass(g->cmd, &rb, VK_SUBPASS_CONTENTS_INLINE);
     VkViewport viewport = {0, 0, (float)w, (float)h, 0, 1};
     VkRect2D scissor = {{0, 0}, {w, h}};
@@ -342,6 +352,25 @@ int ps_render_text(ps_gpu *g, const ps_rect *rects, size_t count, const ps_glyph
         vkCmdDraw(g->cmd, 6, (uint32_t)nglyphs, 0, 0);
     }
     vkCmdEndRenderPass(g->cmd);
+}
+
+int ps_render(ps_gpu *g, const ps_rect *rects, size_t count, uint32_t w, uint32_t h, uint8_t *rgba, double *gpu_ms) {
+    return ps_render_text(g, rects, count, NULL, 0, w, h, rgba, gpu_ms);
+}
+
+int ps_render_text(ps_gpu *g, const ps_rect *rects, size_t count, const ps_glyph *glyphs, size_t nglyphs,
+                   uint32_t w, uint32_t h, uint8_t *rgba, double *gpu_ms) {
+    if (!g || !w || !h || (count && !rects) || (nglyphs && (!glyphs || !g->atlas_w)) || !rgba)
+        return fail(VK_ERROR_INITIALIZATION_FAILED);
+    VkResult r;
+    if ((r = ensure_target(g, w, h)) || (r = ensure_vertices(g, count ? count : 1)) ||
+        (r = ensure_glyphs(g, nglyphs ? nglyphs : 1))) return fail(r);
+    if (count) memcpy(g->vertices_map, rects, count * sizeof *rects);
+    if (nglyphs) memcpy(g->glyphs_map, glyphs, nglyphs * sizeof *glyphs);
+    vkResetCommandBuffer(g->cmd, 0);
+    VkCommandBufferBeginInfo bi = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, NULL, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT, NULL};
+    vkBeginCommandBuffer(g->cmd, &bi);
+    record(g, g->framebuffer, w, h, count, nglyphs);
     VkBufferImageCopy copy = {0, 0, 0, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, {0, 0, 0}, {w, h, 1}};
     vkCmdCopyImageToBuffer(g->cmd, g->target, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, g->readback, 1, &copy);
     VkBufferMemoryBarrier host = {VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER, NULL, VK_ACCESS_TRANSFER_WRITE_BIT,
@@ -358,11 +387,139 @@ int ps_render_text(ps_gpu *g, const ps_rect *rects, size_t count, const ps_glyph
     return 0;
 }
 
+static void drop_swapchain(ps_gpu *g) {
+    for (uint32_t i = 0; i < g->images; i++) {
+        if (g->image_fb[i]) vkDestroyFramebuffer(g->device, g->image_fb[i], NULL);
+        if (g->image_view[i]) vkDestroyImageView(g->device, g->image_view[i], NULL);
+        if (g->rendered[i]) vkDestroySemaphore(g->device, g->rendered[i], NULL);
+        g->image_fb[i] = VK_NULL_HANDLE; g->image_view[i] = VK_NULL_HANDLE; g->rendered[i] = VK_NULL_HANDLE;
+    }
+    g->images = 0;
+    if (g->swapchain) vkDestroySwapchainKHR(g->device, g->swapchain, NULL);
+    g->swapchain = VK_NULL_HANDLE;
+}
+
+int ps_swapchain(ps_gpu *g, uint64_t handle, uint32_t w, uint32_t h) {
+    if (!g || !g->presenting) return fail(VK_ERROR_INITIALIZATION_FAILED);
+    VkSurfaceKHR surface = (VkSurfaceKHR)(uintptr_t)handle;
+    vkDeviceWaitIdle(g->device);
+    if (surface != g->surface) {
+        drop_swapchain(g);
+        if (g->surface) vkDestroySurfaceKHR(g->instance, g->surface, NULL);
+        g->surface = surface;
+    }
+    VkBool32 supported = VK_FALSE;
+    vkGetPhysicalDeviceSurfaceSupportKHR(g->gpu, g->family, g->surface, &supported);
+    if (!supported) return fail(VK_ERROR_FEATURE_NOT_PRESENT);
+    VkSurfaceCapabilitiesKHR caps;
+    VkResult r = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g->gpu, g->surface, &caps);
+    if (r) return fail(r);
+    uint32_t nf = 0;
+    vkGetPhysicalDeviceSurfaceFormatsKHR(g->gpu, g->surface, &nf, NULL);
+    VkSurfaceFormatKHR formats[32];
+    if (nf > 32) nf = 32;
+    vkGetPhysicalDeviceSurfaceFormatsKHR(g->gpu, g->surface, &nf, formats);
+    int found = -1;
+    for (uint32_t i = 0; i < nf; i++) if (formats[i].format == FORMAT) found = (int)i;
+    /* The scene's render pass is RGBA8 UNORM; a surface without it is not supported yet. */
+    if (found < 0) return fail(VK_ERROR_FORMAT_NOT_SUPPORTED);
+    VkExtent2D extent = caps.currentExtent;
+    if (extent.width == UINT32_MAX) extent = (VkExtent2D){w, h};
+    if (!extent.width || !extent.height) return fail(VK_ERROR_OUT_OF_DATE_KHR);
+    uint32_t want = caps.minImageCount + 1;
+    if (caps.maxImageCount && want > caps.maxImageCount) want = caps.maxImageCount;
+    if (want > 8) want = 8;
+    VkImageUsageFlags usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | (caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
+    VkCompositeAlphaFlagBitsKHR alpha = caps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR ?
+        VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR : VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    VkSwapchainKHR old = g->swapchain;
+    VkSwapchainCreateInfoKHR si = {VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR, NULL, 0, g->surface, want, FORMAT,
+        formats[found].colorSpace, extent, 1, usage, VK_SHARING_MODE_EXCLUSIVE, 0, NULL, caps.currentTransform, alpha,
+        VK_PRESENT_MODE_FIFO_KHR, VK_TRUE, old};
+    VkSwapchainKHR fresh;
+    if ((r = vkCreateSwapchainKHR(g->device, &si, NULL, &fresh))) return fail(r);
+    drop_swapchain(g);
+    g->swapchain = fresh; g->extent = extent;
+    uint32_t n = 8;
+    if ((r = vkGetSwapchainImagesKHR(g->device, g->swapchain, &n, g->image)) < 0) return fail(r);
+    g->images = n;
+    VkSemaphoreCreateInfo semi = {VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, NULL, 0};
+    if (!g->acquired && (r = vkCreateSemaphore(g->device, &semi, NULL, &g->acquired))) return fail(r);
+    for (uint32_t i = 0; i < n; i++) {
+        VkImageViewCreateInfo vi = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, NULL, 0, g->image[i], VK_IMAGE_VIEW_TYPE_2D, FORMAT,
+            {0, 0, 0, 0}, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
+        if ((r = vkCreateImageView(g->device, &vi, NULL, &g->image_view[i]))) return fail(r);
+        VkFramebufferCreateInfo fi = {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO, NULL, 0, g->pass, 1, &g->image_view[i], extent.width, extent.height, 1};
+        if ((r = vkCreateFramebuffer(g->device, &fi, NULL, &g->image_fb[i]))) return fail(r);
+        if ((r = vkCreateSemaphore(g->device, &semi, NULL, &g->rendered[i]))) return fail(r);
+    }
+    VkDeviceSize need = (VkDeviceSize)extent.width * extent.height * 4;
+    if (need != g->shot_size && (usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT)) {
+        if (g->shot) vkDestroyBuffer(g->device, g->shot, NULL);
+        if (g->shot_mem) vkFreeMemory(g->device, g->shot_mem, NULL);
+        g->shot = VK_NULL_HANDLE; g->shot_mem = VK_NULL_HANDLE; g->shot_size = 0;
+        if ((r = host_buffer(g, need, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT,
+                             &g->shot, &g->shot_mem, &g->shot_map))) return fail(r);
+        g->shot_size = need;
+    }
+    return 0;
+}
+
+int ps_present(ps_gpu *g, const ps_rect *rects, size_t count, const ps_glyph *glyphs, size_t nglyphs, uint8_t *rgba, double *cpu_ms) {
+    if (!g || !g->swapchain || (count && !rects) || (nglyphs && (!glyphs || !g->atlas_w)) || (rgba && !g->shot))
+        return fail(VK_ERROR_INITIALIZATION_FAILED);
+    double t = now_ms();
+    VkResult r;
+    if ((r = ensure_vertices(g, count ? count : 1)) || (r = ensure_glyphs(g, nglyphs ? nglyphs : 1))) return fail(r);
+    uint32_t index;
+    r = vkAcquireNextImageKHR(g->device, g->swapchain, UINT64_MAX, g->acquired, VK_NULL_HANDLE, &index);
+    if (r == VK_ERROR_OUT_OF_DATE_KHR) return 1;
+    if (r < 0) return fail(r);
+    if (count) memcpy(g->vertices_map, rects, count * sizeof *rects);
+    if (nglyphs) memcpy(g->glyphs_map, glyphs, nglyphs * sizeof *glyphs);
+    uint32_t w = g->extent.width, h = g->extent.height;
+    vkResetCommandBuffer(g->cmd, 0);
+    VkCommandBufferBeginInfo bi = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, NULL, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT, NULL};
+    vkBeginCommandBuffer(g->cmd, &bi);
+    record(g, g->image_fb[index], w, h, count, nglyphs);
+    VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    if (rgba) {
+        VkBufferImageCopy copy = {0, 0, 0, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, {0, 0, 0}, {w, h, 1}};
+        vkCmdCopyImageToBuffer(g->cmd, g->image[index], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, g->shot, 1, &copy);
+        VkBufferMemoryBarrier host = {VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER, NULL, VK_ACCESS_TRANSFER_WRITE_BIT,
+            VK_ACCESS_HOST_READ_BIT, VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, g->shot, 0, VK_WHOLE_SIZE};
+        vkCmdPipelineBarrier(g->cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 0, NULL, 1, &host, 0, NULL);
+    }
+    VkImageMemoryBarrier to_present = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, NULL,
+        VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_TRANSFER_READ_BIT, 0,
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED,
+        g->image[index], range};
+    vkCmdPipelineBarrier(g->cmd, VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                         VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, NULL, 0, NULL, 1, &to_present);
+    vkEndCommandBuffer(g->cmd);
+    VkPipelineStageFlags wait = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    VkSubmitInfo si = {VK_STRUCTURE_TYPE_SUBMIT_INFO, NULL, 1, &g->acquired, &wait, 1, &g->cmd, 1, &g->rendered[index]};
+    vkResetFences(g->device, 1, &g->fence);
+    if ((r = vkQueueSubmit(g->queue, 1, &si, g->fence))) return fail(r);
+    VkPresentInfoKHR pi = {VK_STRUCTURE_TYPE_PRESENT_INFO_KHR, NULL, 1, &g->rendered[index], 1, &g->swapchain, &index, NULL};
+    VkResult pr = vkQueuePresentKHR(g->queue, &pi);
+    /* One frame in flight: the command buffer, acquire semaphore and shot buffer are reused. */
+    if ((r = vkWaitForFences(g->device, 1, &g->fence, VK_TRUE, UINT64_MAX))) return fail(r);
+    if (rgba) memcpy(rgba, g->shot_map, (size_t)w * h * 4);
+    if (cpu_ms) *cpu_ms = now_ms() - t;
+    if (pr == VK_ERROR_OUT_OF_DATE_KHR || pr == VK_SUBOPTIMAL_KHR) return 1;
+    return pr < 0 ? fail(pr) : 0;
+}
+
 void ps_close(ps_gpu *g) {
     if (!g) return;
     if (g->device) {
         vkDeviceWaitIdle(g->device);
         drop_target(g);
+        drop_swapchain(g);
+        if (g->acquired) vkDestroySemaphore(g->device, g->acquired, NULL);
+        if (g->shot) vkDestroyBuffer(g->device, g->shot, NULL);
+        if (g->shot_mem) vkFreeMemory(g->device, g->shot_mem, NULL);
         if (g->vertices) vkDestroyBuffer(g->device, g->vertices, NULL);
         if (g->vertices_mem) vkFreeMemory(g->device, g->vertices_mem, NULL);
         if (g->glyphs) vkDestroyBuffer(g->device, g->glyphs, NULL);
@@ -380,6 +537,7 @@ void ps_close(ps_gpu *g) {
         if (g->pool) vkDestroyCommandPool(g->device, g->pool, NULL);
         vkDestroyDevice(g->device, NULL);
     }
+    if (g->surface) vkDestroySurfaceKHR(g->instance, g->surface, NULL);
     if (g->instance) vkDestroyInstance(g->instance, NULL);
     free(g);
 }

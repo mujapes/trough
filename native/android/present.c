@@ -201,3 +201,92 @@ done:;
         setup, presented, p50, p95, max, total);
     return (*env)->NewStringUTF(env, out);
 }
+
+/* The presenter on an Android Surface (docs/PRESENT.md): scene.c's swapchain path. */
+#include "scene.h"
+typedef struct { ps_gpu *g; ANativeWindow *window; VkSurfaceKHR surface; } presenter;
+static int upload(JNIEnv *env, ps_gpu *g, jbyteArray atlas, jint aw, jint ah) {
+    if (!atlas) return 0;
+    if (aw <= 0 || ah <= 0 || (*env)->GetArrayLength(env, atlas) != aw * ah) return -1;
+    jbyte *a = (*env)->GetByteArrayElements(env, atlas, NULL);
+    int st = a ? ps_atlas(g, (const uint8_t *)a, (uint32_t)aw, (uint32_t)ah) : -1;
+    if (a) (*env)->ReleaseByteArrayElements(env, atlas, a, JNI_ABORT);
+    return st;
+}
+/* Returns a handle (> 0) or -status. */
+JNIEXPORT jlong JNICALL CLASS(surfaceOpen)(JNIEnv *env, jclass c, jobject surface, jint w, jint h) {
+    (void)c;
+    presenter *p = calloc(1, sizeof *p);
+    if (!p) return -1;
+    int st = ps_open_surface(&p->g, VK_KHR_ANDROID_SURFACE_EXTENSION_NAME, NULL, 0);
+    if (!st && !(p->window = ANativeWindow_fromSurface(env, surface))) st = -1;
+    if (!st) {
+        VkAndroidSurfaceCreateInfoKHR sci = {VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR, NULL, 0, p->window};
+        VkResult r = vkCreateAndroidSurfaceKHR((VkInstance)ps_instance(p->g), &sci, NULL, &p->surface);
+        st = r ? (int)r : 0;
+    }
+    if (!st) st = ps_swapchain(p->g, (uint64_t)(uintptr_t)p->surface, (uint32_t)w, (uint32_t)h);
+    if (st) {
+        if (p->g) ps_close(p->g);   /* owns the surface once handed to ps_swapchain */
+        if (p->window) ANativeWindow_release(p->window);
+        free(p);
+        return st < 0 ? st : -st;
+    }
+    return (jlong)(intptr_t)p;
+}
+JNIEXPORT jint JNICALL CLASS(surfaceResize)(JNIEnv *env, jclass c, jlong handle, jint w, jint h) {
+    (void)env; (void)c;
+    presenter *p = (presenter *)(intptr_t)handle;
+    return ps_swapchain(p->g, (uint64_t)(uintptr_t)p->surface, (uint32_t)w, (uint32_t)h);
+}
+/* Presents rects (12 floats each) then glyphs (16 floats each); the atlas, if given, replaces
+ * the previous one. result[0] = status (0, 1 = rebuild the swapchain, < 0 error), result[1] =
+ * CPU ms. With shot, returns the presented pixels (RGBA), else null. */
+JNIEXPORT jbyteArray JNICALL CLASS(surfacePresent)(JNIEnv *env, jclass c, jlong handle, jfloatArray rects, jfloatArray glyphs,
+                                                    jbyteArray atlas, jint aw, jint ah, jint w, jint h, jboolean shot, jdoubleArray result) {
+    (void)c;
+    presenter *p = (presenter *)(intptr_t)handle;
+    double out[2] = {-1, 0};
+    jbyteArray pixels = NULL;
+    jsize nr = rects ? (*env)->GetArrayLength(env, rects) : 0, ng = glyphs ? (*env)->GetArrayLength(env, glyphs) : 0;
+    uint8_t *rgba = shot ? malloc((size_t)w * h * 4) : NULL;
+    int st = nr % 12 || ng % 16 || (shot && !rgba) ? -1 : upload(env, p->g, atlas, aw, ah);
+    jfloat *r = !st && nr ? (*env)->GetFloatArrayElements(env, rects, NULL) : NULL;
+    jfloat *g = !st && ng ? (*env)->GetFloatArrayElements(env, glyphs, NULL) : NULL;
+    if (!st) st = ps_present(p->g, (const ps_rect *)r, (size_t)nr / 12, (const ps_glyph *)g, (size_t)ng / 16, rgba, &out[1]);
+    if (r) (*env)->ReleaseFloatArrayElements(env, rects, r, JNI_ABORT);
+    if (g) (*env)->ReleaseFloatArrayElements(env, glyphs, g, JNI_ABORT);
+    out[0] = st;
+    if (!st && rgba && (pixels = (*env)->NewByteArray(env, w * h * 4)))
+        (*env)->SetByteArrayRegion(env, pixels, 0, w * h * 4, (const jbyte *)rgba);
+    free(rgba);
+    if (result) (*env)->SetDoubleArrayRegion(env, result, 0, 2, out);
+    return pixels;
+}
+JNIEXPORT void JNICALL CLASS(surfaceClose)(JNIEnv *env, jclass c, jlong handle) {
+    (void)env; (void)c;
+    presenter *p = (presenter *)(intptr_t)handle;
+    ps_close(p->g);
+    ANativeWindow_release(p->window);
+    free(p);
+}
+/* Offscreen reference for the same scene. */
+JNIEXPORT jbyteArray JNICALL CLASS(sceneRender)(JNIEnv *env, jclass c, jint w, jint h, jfloatArray rects, jfloatArray glyphs,
+                                                 jbyteArray atlas, jint aw, jint ah) {
+    (void)c;
+    ps_gpu *g;
+    if (ps_open(&g, NULL, 0)) return NULL;
+    jsize nr = rects ? (*env)->GetArrayLength(env, rects) : 0, ng = glyphs ? (*env)->GetArrayLength(env, glyphs) : 0;
+    uint8_t *rgba = malloc((size_t)w * h * 4);
+    int st = nr % 12 || ng % 16 || !rgba ? -1 : upload(env, g, atlas, aw, ah);
+    jfloat *r = !st && nr ? (*env)->GetFloatArrayElements(env, rects, NULL) : NULL;
+    jfloat *q = !st && ng ? (*env)->GetFloatArrayElements(env, glyphs, NULL) : NULL;
+    if (!st) st = ps_render_text(g, (const ps_rect *)r, (size_t)nr / 12, (const ps_glyph *)q, (size_t)ng / 16, (uint32_t)w, (uint32_t)h, rgba, NULL);
+    if (r) (*env)->ReleaseFloatArrayElements(env, rects, r, JNI_ABORT);
+    if (q) (*env)->ReleaseFloatArrayElements(env, glyphs, q, JNI_ABORT);
+    ps_close(g);
+    jbyteArray out = NULL;
+    if (!st && (out = (*env)->NewByteArray(env, w * h * 4))) (*env)->SetByteArrayRegion(env, out, 0, w * h * 4, (const jbyte *)rgba);
+    free(rgba);
+    return out;
+}

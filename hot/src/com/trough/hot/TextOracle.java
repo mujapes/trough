@@ -20,7 +20,7 @@ final class TextOracle {
         "Ελληνικά κείμενο ΑΒΓΔ", "עברית מימין לשמאל טקסט"};
     private static final boolean[] RTL = {false, false, true, false, false, false, true};
     private static final int[] COLORS = {0xff000000, 0xff1a73e8, 0xc0d93025, 0xff188038, 0x80202124, 0xfff9ab00, 0xff6f42c1};
-    private static final int W = 1080, AW = 1024, AH = 1024, LINE = 64;
+    static final int W = 1080, AW = 1024, AH = 1024, LINE = 64;
 
     static Map<String, Object> run(File bundle) {
         NativeCore.load(bundle);
@@ -96,7 +96,7 @@ final class TextOracle {
     }
 
     /** Rasterises one glyph's coverage into the atlas; {ax, ay, w, h, left, top} or null if empty. */
-    private static int[] rasterise(Font font, int id, Paint base, int opaque, byte[] atlas, int[] shelf) {
+    static int[] rasterise(Font font, int id, Paint base, int opaque, byte[] atlas, int[] shelf) {
         RectF b = new RectF();
         font.getGlyphBounds(id, base, b);
         if (b.isEmpty()) return null;

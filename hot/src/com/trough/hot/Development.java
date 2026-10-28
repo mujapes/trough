@@ -32,7 +32,7 @@ final class Development implements AutoCloseable, ScenarioProtocol.Handler {
         all.add("core.processes"); all.add("build.native");
         if(new File(bundle,"lib/libtrough-android.so").isFile()) {
             for(String s:STORE) all.add("android."+s);
-            all.add("android.jni"); all.add("android.ime"); all.add("android.editor"); all.add("android.vulkan"); all.add("android.scene"); all.add("android.glyphs"); all.add("android.text");
+            all.add("android.jni"); all.add("android.ime"); all.add("android.editor"); all.add("android.vulkan"); all.add("android.scene"); all.add("android.glyphs"); all.add("android.text"); all.add("android.surface");
             all.add("android.retire.setup"); all.add("android.retire.check");
         }
         return all;
@@ -60,6 +60,7 @@ final class Development implements AutoCloseable, ScenarioProtocol.Handler {
         if("android.editor".equals(name)) return EditorOracle.run(activity,bundle);
         if("android.vulkan".equals(name)) return PresentOracle.run(activity,root,bundle);
         if("android.text".equals(name)) return TextOracle.run(bundle);
+        if("android.surface".equals(name)) return SurfaceOracle.run(activity,root,bundle);
         if("android.scene".equals(name) || "android.glyphs".equals(name)) {
             NativeCore.load(bundle);
             org.json.JSONObject o=new org.json.JSONObject("android.scene".equals(name)?NativeCore.sceneOracle():NativeCore.glyphOracle());
