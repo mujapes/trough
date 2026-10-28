@@ -107,6 +107,7 @@ for jar in "$ANDROID_JAR" "$D8_JAR"; do
 done
 printf '{"entry":"%s","built_at":%s,"git":"%s","diagnostics":%s,"payloads":{%s}}\n' "$ENTRY" "$(date +%s)" \
     "$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo dev)" "$DIAGNOSTICS" "$PAYLOADS" > "$B/z/manifest.json"
+[ -z "${RETIRE_MARK:-}" ] || printf '%s\n' "$RETIRE_MARK" > "$B/z/retire-mark"   # tests/retire.sh: a distinct bundle
 (cd "$B/z" && zip -q -X -r "$B/bundle.zip" .)
 openssl dgst -sha256 -sign "$KEY" -out "$B/bundle.sig" "$B/bundle.zip"
 

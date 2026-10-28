@@ -31,12 +31,14 @@ except Exception: pass')  # a request caught by the reload comes back "interrupt
     sleep 5
 done
 
+[ -z "${NO_SCENARIOS:-}" ] || { echo "running $have"; exit 0; }   # publish and wait only
 out="$SHARED/evidence/$have"
 mkdir -p "$out"
 printf '%s' "$obs" > "$out/app.observe.json"
 fail=0
 for name in $(printf '%s' "$obs" | python3 -c 'import json,sys; print(" ".join(json.load(sys.stdin)["outcome"]["scenarios"]))'); do
     [ "$name" = app.observe ] && continue
+    case "$name" in android.retire.*) continue;; esac   # a two-bundle pair: tests/retire.sh
     limit=120
     [ "$name" != build.native ] || limit=600
     if python3 "$S" "$name" --timeout "$limit" --out "$out/$name.json" >/dev/null 2>"$out/$name.err"; then

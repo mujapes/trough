@@ -349,9 +349,10 @@ public final class Main {
     /** Called by HotLoader on the boot copy (forwards to what runs), and by the boot on run's copy. */
     public static void stop() {
         if (!stoppingRun) superseded = true;   // HotLoader, not our own reload, is stopping us
-        if (runningStop != null) { stopRunning(); return; }
+        if (runningStop != null) { stopRunning(); Drafts.retire(); return; }
         if (development != null) development.close();
         development = null;
+        Drafts.retire();   // before the successor starts: drafts saved, store released
         if (chat != null) chat.close();
         chat = null;
     }
