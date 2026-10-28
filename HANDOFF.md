@@ -2,18 +2,10 @@
 
 ## Active continuation (2026-10-28)
 
-OPEN DECISION before the input adapter (found 2026-10-28 night): DESIGN.md wants "a small
-Java/native boundary exchanging batches/handles", i.e. in-process. But every native component
-is built by the root's glibc gcc and exec'd as its own process; a glibc .so cannot be loaded
-into the bionic app process, and there is no NDK/bionic toolchain in the pipeline. Options:
-(a) keeper as a native process; Java keeps an IME-side mirror of the live text and streams edit
-batches over a socket or shared ring (the IME needs synchronous text queries);
-(b) a bionic build of store/text/draft/keeper plus a static SQLite, loaded with System.load
-(needs bionic headers and libs: NDK sysroot, or the device's own libc with a hand-made sysroot;
-see Termux's approach);
-(c) a freestanding core (texec-style -nostdlib) with allocator/threads supplied over JNI.
-Research prior art (Termux, NDK sysroot licensing, glibc-in-bionic-process attempts) before
-choosing; record the choice in DESIGN.md.
+DECIDED (2026-10-28): the Java/native boundary is a bionic build of the same sources, loaded
+in-process (docs/BIONIC.md). All store oracles pass as bionic programs on the Pixel; android.jni
+types 3000 edits from Java at 10.9 us p50 per call. Next: clang + bionic inputs in the phone
+root (self-hosting), keeper retirement on hot reload, then the InputConnection adapter.
 
 Latest (late night): `native/store/keeper`, the storage owner thread ([contract](docs/KEEPER.md)):
 attach/poke/flush/run/stop over draft queues, backoff, external-revision rebasing after tk_run.

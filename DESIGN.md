@@ -329,7 +329,8 @@ are disposable realisations, not the source of document or interaction truth.
 
 The native renderer targets Vulkan with explicit buffer ownership and presentation fences.
 Android remains the surface, input, IME, accessibility and compositor host. A small Java/native
-boundary exchanges batches/handles; no per-draw reflective calls. An Android text-input adapter
+boundary exchanges batches/handles; no per-draw reflective calls. (2026-10-28: native code
+Java calls in-process is built against bionic as well as glibc; see docs/BIONIC.md.) An Android text-input adapter
 preserves IME composition, selection, bidi, clipboard and accessibility contracts even when
 the text itself is rendered by Trough.
 

@@ -103,3 +103,21 @@ jobs:
             loader-disassembly.txt
             loader-ld.so
           retention-days: 3
+
+  bionic-arm64:
+    # The store built against bionic (native/bionic.sh): catches glibc-only API use in shared
+    # sources and checks the build is deterministic. Running it needs Android (the phone loop).
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain and verified inputs
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq clang-19 lld-19 tcl dpkg-dev
+          tools/bionic-deps.sh > deps.env
+      - name: Deterministic bionic build
+        run: |
+          set -a; . ./deps.env; set +a
+          sh native/bionic.sh native out1 && sh native/bionic.sh native out2
+          (cd out1 && sha256sum bin/* lib/*) | tee hashes.txt
+          (cd out2 && sha256sum bin/* lib/*) | diff - hashes.txt
