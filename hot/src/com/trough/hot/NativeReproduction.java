@@ -73,7 +73,7 @@ final class NativeReproduction {
         File supervisor=new File(bundle,"bin/trough-run");
         Map<String,Object> result=Json.map("ok",false);
         try {
-            Map<String,Object> build=ScenarioProcess.run(supervisor,work,env,180,shell,
+            Map<String,Object> build=ScenarioProcess.run(supervisor,work,env,420,shell,
                 new File(source,"build.sh").getAbsolutePath(),source.getAbsolutePath(),candidate.getAbsolutePath());
             result.put("build",build);
             if(!Boolean.TRUE.equals(build.get("ok"))) return result;

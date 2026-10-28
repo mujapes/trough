@@ -18,19 +18,22 @@ mkdir -p "$B/z/bin"
 
 # Native code, by the same script Trough runs on the phone (native/build.sh). Sources ship too,
 # so the phone can rebuild them (Self.buildNative) and compare (SelfTest.nativeRepro).
-CC="$CC_ARM64" sh "$ROOT/native/build.sh" "$ROOT/native" "$B/z"
-# The same store sources against bionic, for in-process use from Java (native/bionic.sh).
+mkdir -p "$B/native"
+tar -C "$ROOT/native" -cf - -T "$ROOT/native/sources.list" | tar -C "$B/native" -xf -
+# Bionic inputs travel with the sources so the phone's rebuild covers the bionic outputs too
+# (native/build.sh runs native/bionic.sh when they are present). Verified by tools/bionic-deps.sh.
 if command -v "${CLANG:-clang-19}" >/dev/null && DEPS="$("$ROOT/tools/bionic-deps.sh" 2>/dev/null)"; then
-    eval "$DEPS"; export BIONIC_SYSROOT SQLITE_SRC
-    sh "$ROOT/native/bionic.sh" "$ROOT/native" "$B/z"
+    eval "$DEPS"
+    mkdir -p "$B/native/bionic-inputs"
+    cp "${TROUGH_CACHE:-$HOME/.cache/trough-sysroot}/deb/ndk-sysroot_30_aarch64.deb" "$B/native/bionic-inputs/ndk-sysroot.deb"
+    cp "$SQLITE_SRC/sqlite3.c" "$SQLITE_SRC/sqlite3.h" "$B/native/bionic-inputs/"
 else
     echo "hot.sh: no bionic toolchain/inputs; bundle has no android-* outputs" >&2
 fi
+CC="$CC_ARM64" sh "$B/native/build.sh" "$B/native" "$B/z"
 # Inspect every executable so a newly added scenario cannot miss the phone interpreter fix.
 # Static executables are recognised and left byte-for-byte unchanged.
 python3 "$ROOT/tools/set_interp.py" "$B/z/bin/"*
-mkdir -p "$B/native"
-tar -C "$ROOT/native" -cf - -T "$ROOT/native/sources.list" | tar -C "$B/native" -xf -
 
 # Trough's own glibc: the VM's arm64 copy, with trapped syscalls rewritten to -ENOSYS.
 GLIBC_DIR="${GLIBC_DIR:-/lib/aarch64-linux-gnu}"

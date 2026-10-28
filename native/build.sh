@@ -52,3 +52,12 @@ for version in 1 2; do
     $CC $CORE -shared -DVERSION=$version "$S/scenarios/fixtures/implementation.c" -o "$O/fixtures/module-$version.so"
 done
 cp "$S/outputs.list" "$O/outputs.list"
+# Bionic outputs (native/bionic.sh, docs/BIONIC.md) when their verified inputs travel with the
+# sources: the bundle carries bionic-inputs/ (tools/hot.sh), so the phone rebuilds these too.
+if [ -d "$S/bionic-inputs" ]; then
+    X=$(mktemp -d)
+    dpkg-deb -x "$S/bionic-inputs/ndk-sysroot.deb" "$X"
+    BIONIC_SYSROOT="$X/data/data/com.termux/files" SQLITE_SRC="$S/bionic-inputs" sh "$S/bionic.sh" "$S" "$O"
+    rm -rf "$X"
+    cat "$S/outputs-bionic.list" >> "$O/outputs.list"
+fi

@@ -1,5 +1,6 @@
 build.sh
 bionic.sh
+outputs-bionic.list
 android/jni.c
 sources.list
 outputs.list

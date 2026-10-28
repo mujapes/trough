@@ -38,7 +38,7 @@ fail=0
 for name in $(printf '%s' "$obs" | python3 -c 'import json,sys; print(" ".join(json.load(sys.stdin)["outcome"]["scenarios"]))'); do
     [ "$name" = app.observe ] && continue
     limit=120
-    [ "$name" != build.native ] || limit=240
+    [ "$name" != build.native ] || limit=600
     if python3 "$S" "$name" --timeout "$limit" --out "$out/$name.json" >/dev/null 2>"$out/$name.err"; then
         rm -f "$out/$name.err"; echo "ok   $name"
     else

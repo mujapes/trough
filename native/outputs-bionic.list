@@ -1,0 +1,9 @@
+bin/android-core-store
+bin/android-core-documents
+bin/android-core-streams
+bin/android-core-tasks
+bin/android-core-workspace
+bin/android-core-drafts
+bin/android-core-text
+bin/android-core-keeper
+lib/libtrough-android.so
