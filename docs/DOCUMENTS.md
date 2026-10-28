@@ -19,8 +19,9 @@ a more recent revision. Its successful snapshot identifies that specific durable
 and commit; an unchanged save returns the existing commit rather than manufacturing a save.
 The eventual input adapter must correlate its local revision with this receipt, retain
 unacknowledged edits, and advance its Saved marker only for the acknowledged revision.
-It must not replace the live draft with the returning storage snapshot. Queue admission,
-backpressure, rebasing pending local batches and Android InputConnection are still to build.
+It must not replace the live draft with the returning storage snapshot. The queue that does
+this (coalescing, acknowledgement, rebasing) is [DRAFTS.md](DRAFTS.md); Android
+InputConnection is still to build.
 
 Text, selection direction and composition form one deliberate document transaction domain.
 UTF-16 code units preserve Java/IME text losslessly, including NUL and isolated surrogates;

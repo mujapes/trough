@@ -2,6 +2,15 @@
 
 ## Active continuation (2026-10-28)
 
+Latest (15:40 UTC): `native/store/draft`, the input persistence queue ([contract](docs/DRAFTS.md)).
+Interaction side never waits on SQLite; one in-flight capture coalesces later edits; acks never
+replace live text; external revisions rebase through retained batch ranges or become explicit
+conflicts. `core.drafts` passes locally (ASan/UBSan + invariant, TSan, 8/8 mutants) and on the
+Pixel: bundle `5eadad0bf702...` passed every scenario including `build.native` (now 23 outputs).
+The VM's /data/data/t.t/d root lacks libsqlite3-dev, so tests/native_repro.sh fails at store.c
+in the VM; the phone's own rebuild is authoritative. Next: indexed text/range storage (per-edit
+cost independent of document size), then work planning (stage 3).
+
 ARM CI crash root cause: texec zeroed the final file-backed page only to `p_memsz`. Linux's
 `padzero` clears the whole tail. Ubuntu glibc 2.39's minimal calloc allocates after `_end`
 assuming zeros, so ELF note bytes became link_map pointers (`0x696e6900646c7472`). Runner

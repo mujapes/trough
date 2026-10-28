@@ -232,6 +232,10 @@ work. Passing these semantic oracles does not establish a complete document engi
 one durable publication ([contract](TASKS.md)). Dispatch authority, provider execution and
 output/artifact ownership remain downstream work; the task store itself cannot send requests.
 
+`native/store/draft` is the input persistence queue between the live draft and the storage
+owner: coalesced saves, exact acknowledgement, rebase or explicit conflict on external
+revisions ([contract](DRAFTS.md)). No IME adapter or storage worker drives it yet.
+
 `native/store/workspace` supplies stable roots that publish a draft and stream atomically,
 and recover their current state without view/module-owned IDs ([contract](WORKSPACES.md)).
 
