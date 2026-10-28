@@ -47,6 +47,10 @@ thread and are published under the keeper's lock.
 - **Mutants:** 7 of 8 caught. The survivor (one save per wake) is equivalent under the
   contract that every edit is followed by a poke.
 
+Pixel bundle `bc6a0eb3f4ecd1fe38519ce05ac652e6e310b077d1b01e3ad17e765bd1a133ba`: all
+checks pass in 3.0 s. The 4000 edits coalesce into 23 saves and the quota case fails after 3
+backed-off attempts. Receipt in `out/evidence/core.keeper.json`.
+
 ## Not yet built
 
 The Android `InputConnection` adapter and Java binding; lifecycle hooks (flush on pause,
