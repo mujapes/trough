@@ -5,7 +5,8 @@
 DECIDED (2026-10-28): the Java/native boundary is a bionic build of the same sources, loaded
 in-process (docs/BIONIC.md). All store oracles pass as bionic programs on the Pixel; android.jni
 types 3000 edits from Java at 10.9 us p50 per call. Next: clang + bionic inputs in the phone
-root (self-hosting), keeper retirement on hot reload, then the InputConnection adapter.
+root (self-hosting), keeper retirement on hot reload. The InputConnection adapter exists
+(docs/INPUT.md): android.ime matches SDK 37's BaseInputConnection over 16000 random IME ops.
 
 Latest (late night): `native/store/keeper`, the storage owner thread ([contract](docs/KEEPER.md)):
 attach/poke/flush/run/stop over draft queues, backoff, external-revision rebasing after tk_run.
