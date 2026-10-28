@@ -7,6 +7,9 @@ td_load_text; v1 still read everywhere; 8 SIGKILL cycles recover exact text). Th
 live value is a tx_text: O(log n) edits, O(1) captures and snapshots, a chunk-aware rebase diff
 (mutants 5/5 after adding periodic and leaf-boundary cases). Next: chunk retention/GC tracing
 manifests from history and captures, then stage-3 work planning.
+Pixel bundle `3da4e42327b3...`: all 12 scenarios pass, including indexed SIGKILL recovery and
+the chunk-aware draft cases. Two phone-only test-timing faults were fixed on the way (the
+kill clock now starts after the first durable revision; child saves are incremental).
 
 Latest (16:30 UTC): `native/store/text`, indexed text ([contract](docs/TEXT.md)): immutable
 chunk tree, O(log n) edits, O(1) snapshots, line index, chunk-level durable manifest. `core.text`
