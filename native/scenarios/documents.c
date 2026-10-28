@@ -335,18 +335,23 @@ static void indexed_death(void) {
     uint64_t least = UINT64_MAX, most = 0;
     for (int cycle = 0; cycle < 8; cycle++) {
         char name[32]; snprintf(name, sizeof name, "indexed-death-%d", cycle);
+        int ready[2]; MUST(pipe(ready) == 0);
         pid_t child = fork(); MUST(child >= 0);
         if (!child) {
+            close(ready[0]);
             ts_store *s; MUST(ts_open(path(name), &s) == TS_OK);
             tx_text *t = indexed_tree(0, scratch); td_text_value v = {t, 0, 0, -1, -1}; td_snapshot snap;
             MUST(td_save_text(s, (ts_read){0, 0}, &v, &snap) == TS_OK);
+            MUST(write(ready[1], "r", 1) == 1);     /* revision 1 is durable; start the kill clock */
             for (unsigned k = 1;; k++) {
                 tx_text *n = indexed_tree(k, scratch); v.text = n;
                 MUST(td_save_text(s, (ts_read){snap.record.id, snap.record.revision}, &v, &snap) == TS_OK);
                 tx_release(t); t = n;
             }
         }
-        nanosleep(&(struct timespec){0, 200000000L + 60000000L * cycle}, NULL);
+        close(ready[1]);
+        char byte; MUST(read(ready[0], &byte, 1) == 1); close(ready[0]);
+        nanosleep(&(struct timespec){0, 100000000L + 60000000L * cycle}, NULL);
         MUST(kill(child, SIGKILL) == 0); int status; MUST(waitpid(child, &status, 0) == child && WIFSIGNALED(status));
         ts_store *s; MUST(ts_open(path(name), &s) == TS_OK);
         td_snapshot snap; tx_text *t;
