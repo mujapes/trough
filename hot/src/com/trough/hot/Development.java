@@ -32,7 +32,7 @@ final class Development implements AutoCloseable, ScenarioProtocol.Handler {
         all.add("core.processes"); all.add("build.native");
         if(new File(bundle,"lib/libtrough-android.so").isFile()) {
             for(String s:STORE) all.add("android."+s);
-            all.add("android.jni");
+            all.add("android.jni"); all.add("android.ime");
         }
         return all;
     }
@@ -56,6 +56,13 @@ final class Development implements AutoCloseable, ScenarioProtocol.Handler {
         }
         if(!supports(name)) throw new IllegalArgumentException("scenario");
         if("android.jni".equals(name)) return NativeCore.scenario(bundle,activity.getCacheDir());
+        if("android.ime".equals(name)) {
+            final FutureTask<Map<String,Object>> ime=new FutureTask<>(new Callable<Map<String,Object>>() {
+                public Map<String,Object> call() throws Exception { return ImeOracle.run(activity,bundle); }
+            });
+            activity.runOnUiThread(ime);
+            try { return ime.get(100,TimeUnit.SECONDS); } finally { ime.cancel(false); }
+        }
         String executable=new File(bundle,"bin/"+(name.startsWith("android.")?"android-core-"+name.substring(8):name.replace('.','-'))).getPath();
         File supervisor=new File(bundle,"bin/trough-run");
         Map<String,String> env=Root.env(activity,activity.getCacheDir());

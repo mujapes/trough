@@ -130,3 +130,63 @@ JNIEXPORT jlongArray JNICALL CLASS(stats)(JNIEnv *env, jclass c, jlong k) {
     if (out) (*env)->SetLongArrayRegion(env, out, 0, 5, v);
     return out;
 }
+
+/* Input adapter support. value: {length, anchor, caret, composing start, composing end, local}. */
+JNIEXPORT jlongArray JNICALL CLASS(value)(JNIEnv *env, jclass c, jlong q) {
+    (void)c;
+    td_text_value v;
+    ti_state st;
+    if (ti_snapshot((ti_queue *)(intptr_t)q, &v, &st)) return NULL;
+    jlong out[6] = {(jlong)tx_length(v.text), v.anchor, v.caret, v.composing_start, v.composing_end, (jlong)st.local};
+    tx_release(v.text);
+    jlongArray a = (*env)->NewLongArray(env, 6);
+    if (a) (*env)->SetLongArrayRegion(env, a, 0, 6, out);
+    return a;
+}
+/* [start, end) of the live text, clamped; from an O(1) snapshot, so no full copy. */
+JNIEXPORT jstring JNICALL CLASS(slice)(JNIEnv *env, jclass c, jlong q, jint start, jint end) {
+    (void)c;
+    td_text_value v;
+    if (ti_snapshot((ti_queue *)(intptr_t)q, &v, NULL)) return NULL;
+    size_t n = tx_length(v.text), a = start < 0 ? 0 : (size_t)start, b = end < 0 ? 0 : (size_t)end;
+    if (a > n) a = n;
+    if (b > n) b = n;
+    if (b < a) b = a;
+    jchar *units = malloc((b - a ? b - a : 1) * sizeof *units);
+    jstring out = NULL;
+    if (units && !tx_read(v.text, a, b - a, units)) out = (*env)->NewString(env, units, (jsize)(b - a));
+    free(units);
+    tx_release(v.text);
+    return out;
+}
+/* One IME operation as one atomic batch: ranges[2i], ranges[2i+1] replaced by texts[i], each in
+ * the coordinates left by the previous edit, then the final selection and composition. */
+JNIEXPORT jlong JNICALL CLASS(batch)(JNIEnv *env, jclass c, jlong k, jlong q, jintArray ranges,
+                                      jobjectArray texts, jint anchor, jint caret, jint cs, jint ce) {
+    (void)c;
+    jsize count = texts ? (*env)->GetArrayLength(env, texts) : 0;
+    if (count > TD_EDIT_LIMIT || (count && (!ranges || (*env)->GetArrayLength(env, ranges) != 2 * count)) ||
+        anchor < 0 || caret < 0) return -TS_INVALID;
+    td_edit edits[TD_EDIT_LIMIT];
+    jstring strings[TD_EDIT_LIMIT];
+    const jchar *units[TD_EDIT_LIMIT];
+    jint r[2 * TD_EDIT_LIMIT];
+    if (count) (*env)->GetIntArrayRegion(env, ranges, 0, 2 * count, r);
+    ts_status st = TS_OK;
+    jsize got = 0;
+    for (; got < count; got++) {
+        strings[got] = (jstring)(*env)->GetObjectArrayElement(env, texts, got);
+        jsize n = strings[got] ? (*env)->GetStringLength(env, strings[got]) : 0;
+        units[got] = n ? (*env)->GetStringChars(env, strings[got], NULL) : NULL;
+        if ((n && !units[got]) || r[2 * got] < 0 || r[2 * got + 1] < r[2 * got]) { st = TS_INVALID; got++; break; }
+        edits[got] = (td_edit){(size_t)r[2 * got], (size_t)r[2 * got + 1], units[got], (size_t)n};
+    }
+    uint64_t local = 0;
+    if (!st) st = ti_edit((ti_queue *)(intptr_t)q, edits, (size_t)count, (uint32_t)anchor, (uint32_t)caret, cs, ce, &local);
+    for (jsize i = 0; i < got; i++) {
+        if (units[i]) (*env)->ReleaseStringChars(env, strings[i], units[i]);
+        if (strings[i]) (*env)->DeleteLocalRef(env, strings[i]);
+    }
+    if (!st) tk_poke((tk_owner *)(intptr_t)k);
+    return st ? -(jlong)st : (jlong)local;
+}

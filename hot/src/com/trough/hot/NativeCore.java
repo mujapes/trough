@@ -18,6 +18,9 @@ final class NativeCore {
     static native String durable(long keeper, long document, long revision);
     static native long[] stats(long keeper);
     static native long[] queueState(long queue);
+    static native long[] value(long queue);
+    static native String slice(long queue, int start, int end);
+    static native long batch(long keeper, long queue, int[] ranges, String[] texts, int anchor, int caret, int cs, int ce);
 
     private static boolean loaded;
     static synchronized long load(File bundle) {
