@@ -51,6 +51,21 @@ Pixel bundle `bc6a0eb3f4ecd1fe38519ce05ac652e6e310b077d1b01e3ad17e765bd1a133ba`:
 checks pass in 3.0 s. The 4000 edits coalesce into 23 saves and the quota case fails after 3
 backed-off attempts. Receipt in `out/evidence/core.keeper.json`.
 
+## Retirement across hot replacement
+
+`Drafts.java` owns the app's long-lived keeper over `files/drafts`. `HotLoader.activate`
+calls the outgoing bundle's `Main.stop()` synchronously before starting the successor, and
+`Main.stop()` calls `Drafts.retire()`. That is `tk_stop`: pending drafts are saved and the
+store's single-owner lock is released. The successor's keeper then opens the same store and
+reattaches drafts. In-memory queues never cross bundles; drafts cross durably. Each bundle
+loads its own copy of the library, and old copies stay mapped until the process restarts.
+
+`tests/retire.sh` publishes a bundle, types 500 edits into the app store without flushing,
+publishes a different bundle, and requires the successor to find every edit. It passed on the
+Pixel (setup bundle `df977bac6fe1...`). Without retirement, the successor's `tk_start` gets
+`TS_CONFLICT` from the owner lock, which core-keeper checks. A live negative run is avoided
+because it would leave an orphaned keeper holding the lock until the app restarts.
+
 ## Not yet built
 
 The Android `InputConnection` adapter and Java binding; lifecycle hooks (flush on pause,
