@@ -77,6 +77,12 @@ if [ "${ROOTFS:-0}" = 1 ]; then "$ROOT/tools/root.sh" "$ROOT_ZIP" >&2; fi
 # Trough's own files in d/ + the package list (small, signed): what a phone that already has a
 # root converges to (DebRoot.converge); the root zip itself only bootstraps.
 if [ -f "${ROOT_ZIP%.zip}files.zip" ]; then mkdir -p "$B/z/rootfiles" && (cd "$B/z/rootfiles" && unzip -q "${ROOT_ZIP%.zip}files.zip"); fi
+# The root's tfix is built from native/tfix/tfix.c here, as root.sh builds it, so the fixer the
+# phone runs (DebRoot.converge installs it) never lags its source in a stale rootfiles.zip.
+if [ -f "$B/z/rootfiles/files/usr/libexec/trough/tfix" ]; then
+    "$CC_ARM64" -O2 -Wall -o "$B/z/rootfiles/files/usr/libexec/trough/tfix" "$ROOT/native/tfix/tfix.c"
+    python3 "$ROOT/tools/set_interp.py" "$B/z/rootfiles/files/usr/libexec/trough/tfix" >/dev/null
+fi
 # Native build dependencies join the root's package list; the phone's apt installs them.
 if [ -f "$B/z/rootfiles/packages.txt" ]; then
     cat "$B/z/rootfiles/packages.txt" "$ROOT/native/packages.list" | awk 'NF && !seen[$0]++' > "$B/packages.txt"
