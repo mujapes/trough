@@ -3,7 +3,9 @@
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/eventfd.h>
 #include <time.h>
+#include <unistd.h>
 
 enum { RETRY_FIRST_MS = 50, RETRY_MAX_MS = 5000, DRAIN_ATTEMPTS = 8 };
 typedef enum { CALL_NONE, CALL_ATTACH, CALL_DETACH, CALL_RUN } call_kind;
@@ -25,7 +27,7 @@ struct tk_owner {
     ts_store *store;
     const char *dir;
     ts_status opened;
-    int started, stopping;
+    int started, stopping, notify;
     uint64_t pokes, progress;
     slot *slots;
     tk_stats stats;
@@ -44,6 +46,10 @@ static uint64_t now_ms(void) {
     struct timespec t;
     clock_gettime(CLOCK_MONOTONIC, &t);
     return (uint64_t)t.tv_sec * 1000 + (uint64_t)t.tv_nsec / 1000000;
+}
+static void signal_change(tk_owner *k) {
+    uint64_t one = 1;
+    if (k->notify >= 0 && write(k->notify, &one, sizeof one) < 0) {}   /* EAGAIN: already pending */
 }
 static void advanced(tk_owner *k) {
     pthread_mutex_lock(&k->lock);
@@ -75,6 +81,7 @@ static ts_status rebase(tk_owner *k, slot *s) {
     else if (st == TS_CONFLICT) k->stats.conflicts++;
     pthread_mutex_unlock(&k->lock);
     record_clean(k, s);
+    if (st == TS_OK || st == TS_CONFLICT) signal_change(k);
     return st;
 }
 
@@ -117,6 +124,7 @@ static ts_status drive(tk_owner *k, slot *s, uint64_t now) {
         s->retry_at = now + (delay < RETRY_MAX_MS ? delay : RETRY_MAX_MS);
         s->failures++;
         k->stats.failures++;
+        signal_change(k);
     }
     s->last = st;
     pthread_mutex_unlock(&k->lock);
@@ -246,12 +254,17 @@ ts_status tk_start(const char *dir, tk_owner **out) {
     pthread_cond_init(&k->wake, &attr); pthread_cond_init(&k->done, &attr);
     pthread_condattr_destroy(&attr);
     k->dir = dir;
-    if (pthread_create(&k->thread, NULL, run, k)) { free(k); return TS_IO; }
+    k->notify = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+    if (k->notify < 0 || pthread_create(&k->thread, NULL, run, k)) {
+        if (k->notify >= 0) close(k->notify);
+        free(k);
+        return TS_IO;
+    }
     pthread_mutex_lock(&k->lock);
     while (!k->started) pthread_cond_wait(&k->done, &k->lock);
     ts_status st = k->opened;
     pthread_mutex_unlock(&k->lock);
-    if (st) { pthread_join(k->thread, NULL); free(k); return st; }
+    if (st) { pthread_join(k->thread, NULL); close(k->notify); free(k); return st; }
     *out = k;
     return TS_OK;
 }
@@ -265,6 +278,7 @@ void tk_stop(tk_owner *k) {
     pthread_join(k->thread, NULL);
     pthread_mutex_destroy(&k->lock); pthread_mutex_destroy(&k->call);
     pthread_cond_destroy(&k->wake); pthread_cond_destroy(&k->done);
+    close(k->notify);
     free(k);
 }
 
@@ -354,3 +368,5 @@ void tk_stats_get(tk_owner *k, tk_stats *out) {
     *out = k->stats;
     pthread_mutex_unlock(&k->lock);
 }
+
+int tk_notify_fd(tk_owner *k) { return k ? k->notify : -1; }

@@ -32,7 +32,7 @@ final class Development implements AutoCloseable, ScenarioProtocol.Handler {
         all.add("core.processes"); all.add("build.native");
         if(new File(bundle,"lib/libtrough-android.so").isFile()) {
             for(String s:STORE) all.add("android."+s);
-            all.add("android.jni"); all.add("android.ime");
+            all.add("android.jni"); all.add("android.ime"); all.add("android.editor");
             all.add("android.retire.setup"); all.add("android.retire.check");
         }
         return all;
@@ -57,6 +57,7 @@ final class Development implements AutoCloseable, ScenarioProtocol.Handler {
         }
         if(!supports(name)) throw new IllegalArgumentException("scenario");
         if("android.jni".equals(name)) return NativeCore.scenario(bundle,activity.getCacheDir());
+        if("android.editor".equals(name)) return EditorOracle.run(activity,bundle);
         if("android.retire.setup".equals(name)) return Retirement.setup(activity,bundle);
         if("android.retire.check".equals(name)) return Retirement.check(activity,bundle);
         if("android.ime".equals(name)) {

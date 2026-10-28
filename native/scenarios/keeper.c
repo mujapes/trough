@@ -140,12 +140,15 @@ static void agents(void) {
     MUST(ti_edit(q, &(td_edit){0, 0, hello, 5}, 1, 5, 5, -1, -1, &local) == TS_OK);
     tk_poke(k);
     ts_read d; MUST(tk_flush(k, q, local, 0, &d) == TS_OK);
+    int fd = tk_notify_fd(k); uint64_t events;
+    CHECK(fd >= 0 && read(fd, &events, sizeof events) < 0);    /* own saves do not notify */
     /* Local typing at the start (not yet saved) and an agent append at the end. */
     MUST(ti_edit(q, &(td_edit){0, 0, (uint16_t[]){'>'}, 1}, 1, 1, 1, -1, -1, &local) == TS_OK);
     agent_edit append = {doc, SIZE_MAX, SIZE_MAX, '!'};
     MUST(tk_run(k, agent, &append) == TS_OK);
     tk_poke(k);
     MUST(tk_flush(k, q, local, 0, &d) == TS_OK);
+    CHECK(read(fd, &events, sizeof events) == sizeof events && events >= 1);   /* the merge did */
     uint16_t want[] = {'>', 'h', 'e', 'l', 'l', 'o', '!'}, got[16]; td_value v; ti_state st;
     MUST(ti_view(q, got, 16, &v, &st) == TS_OK);
     CHECK(v.length == 7 && !memcmp(got, want, 14) && v.caret == 1 && st.external >= 1);
@@ -157,6 +160,7 @@ static void agents(void) {
     local = r.local;
     tk_poke(k);
     CHECK(tk_flush(k, q, local, 2000, &d) == TS_CONFLICT);
+    CHECK(read(fd, &events, sizeof events) == sizeof events && events >= 1);   /* so did the conflict */
     MUST(ti_view(q, got, 16, &v, &st) == TS_OK);
     CHECK(st.phase == TI_CONFLICT && got[2] == 'E');
     ts_store *peek;
@@ -174,7 +178,7 @@ static void agents(void) {
     tk_stop(k);
     uint16_t kept[] = {'>', 'h', 'E', 'l', 'l', 'o', '!'};
     CHECK(durable_is(path("agents"), doc, 0, kept, 7));
-    puts("ok keeper agents: disjoint agent edit merged into the live draft; overlap conflicts until the owner keeps its text");
+    puts("ok keeper agents: disjoint agent edit merged into the live draft; overlap conflicts until the owner keeps its text; both signal the notify fd, own saves do not");
 }
 
 /* Storage failure: saves back off instead of spinning, flush reports the failure, and the

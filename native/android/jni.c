@@ -131,16 +131,18 @@ JNIEXPORT jlongArray JNICALL CLASS(stats)(JNIEnv *env, jclass c, jlong k) {
     return out;
 }
 
-/* Input adapter support. value: {length, anchor, caret, composing start, composing end, local}. */
+/* Input adapter support. value: {length, anchor, caret, composing start, composing end, local,
+ * external (count of merged external revisions)}. */
 JNIEXPORT jlongArray JNICALL CLASS(value)(JNIEnv *env, jclass c, jlong q) {
     (void)c;
     td_text_value v;
     ti_state st;
     if (ti_snapshot((ti_queue *)(intptr_t)q, &v, &st)) return NULL;
-    jlong out[6] = {(jlong)tx_length(v.text), v.anchor, v.caret, v.composing_start, v.composing_end, (jlong)st.local};
+    jlong out[7] = {(jlong)tx_length(v.text), v.anchor, v.caret, v.composing_start, v.composing_end,
+                    (jlong)st.local, (jlong)st.external};
     tx_release(v.text);
-    jlongArray a = (*env)->NewLongArray(env, 6);
-    if (a) (*env)->SetLongArrayRegion(env, a, 0, 6, out);
+    jlongArray a = (*env)->NewLongArray(env, 7);
+    if (a) (*env)->SetLongArrayRegion(env, a, 0, 7, out);
     return a;
 }
 /* [start, end) of the live text, clamped; from an O(1) snapshot, so no full copy. */
@@ -189,4 +191,41 @@ JNIEXPORT jlong JNICALL CLASS(batch)(JNIEnv *env, jclass c, jlong k, jlong q, ji
     }
     if (!st) tk_poke((tk_owner *)(intptr_t)k);
     return st ? -(jlong)st : (jlong)local;
+}
+
+JNIEXPORT jint JNICALL CLASS(notifyFd)(JNIEnv *env, jclass c, jlong k) {
+    (void)env; (void)c;
+    return tk_notify_fd((tk_owner *)(intptr_t)k);
+}
+/* An edit made by someone other than the draft's interaction owner (an agent): a new durable
+ * revision of the document, which the keeper then merges into the attached draft. */
+typedef struct { uint64_t id; size_t start, end; const jchar *units; size_t length; } external;
+static ts_status apply_external(ts_store *s, void *arg) {
+    external *x = arg;
+    td_snapshot cur;
+    tx_text *t, *n;
+    ts_status st = td_load_text(s, x->id, 0, &cur, &t);
+    if (st) return st;
+    if (!(st = tx_edit(t, x->start, x->end, x->units, x->length, &n))) {
+        td_text_value v = {n, cur.anchor, cur.caret, -1, -1};
+        size_t len = tx_length(n);
+        if (v.anchor > len) v.anchor = (uint32_t)len;
+        if (v.caret > len) v.caret = (uint32_t)len;
+        td_snapshot r;
+        st = td_save_text(s, (ts_read){x->id, cur.record.revision}, &v, &r);
+        tx_release(n);
+    }
+    tx_release(t);
+    return st;
+}
+JNIEXPORT jlong JNICALL CLASS(externalEdit)(JNIEnv *env, jclass c, jlong k, jlong document, jint start, jint end, jstring text) {
+    (void)c;
+    if (start < 0 || end < start) return -TS_INVALID;
+    jsize n = text ? (*env)->GetStringLength(env, text) : 0;
+    const jchar *units = n ? (*env)->GetStringChars(env, text, NULL) : NULL;
+    if (n && !units) return -TS_IO;
+    external x = {(uint64_t)document, (size_t)start, (size_t)end, units, (size_t)n};
+    ts_status st = tk_run((tk_owner *)(intptr_t)k, apply_external, &x);
+    if (units) (*env)->ReleaseStringChars(env, text, units);
+    return -(jlong)st;
 }

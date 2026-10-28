@@ -32,6 +32,12 @@ typedef ts_status (*tk_task)(ts_store *, void *);
 ts_status tk_run(tk_owner *, tk_task, void *);
 
 /* poke_contended: pokes that found the keeper's lock held (interaction-latency diagnostics). */
+/* An eventfd (non-blocking, close-on-exec) the keeper signals whenever an attached draft changes
+ * other than through its interaction owner: an external revision merged or put in conflict, or
+ * a save failure. A UI thread watches it in its event loop instead of polling. Owned by the
+ * keeper; valid until tk_stop. */
+int tk_notify_fd(tk_owner *);
+
 typedef struct { uint64_t saves, failures, rebases, conflicts, poke_contended; } tk_stats;
 void tk_stats_get(tk_owner *, tk_stats *);
 #endif
