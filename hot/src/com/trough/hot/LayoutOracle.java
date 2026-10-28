@@ -66,7 +66,11 @@ final class LayoutOracle {
                 List<Integer> rs = new ArrayList<>(), os = new ArrayList<>();
                 for (int i = 0; i < ref.getLineCount(); i++) rs.add(ref.getLineStart(i));
                 for (TextLayout.Line l : ours.lines) os.add(l.start);
-                failures.add(Json.map("text", text.substring(0, Math.min(24, text.length())), "width", width,
+                List<Object> lb = new ArrayList<>();
+                for (int i = 0; i < Math.min(ref.getLineCount(), ours.lines.size()); i++)
+                    lb.add(ref.getLineBaseline(i) + "/" + ours.lines.get(i).baseline + " top " + ref.getLineTop(i) + "/" + ours.lines.get(i).top
+                        + " desc " + ref.getLineDescent(i));
+                failures.add(Json.map("baselines", lb, "text", text.substring(0, Math.min(24, text.length())), "width", width,
                     "ref_starts", rs, "our_starts", os, "bad_pixels", bad,
                     "ref_baseline0", ref.getLineCount() > 0 ? ref.getLineBaseline(0) : -1,
                     "our_baseline0", ours.lines.isEmpty() ? -1 : ours.lines.get(0).baseline));
