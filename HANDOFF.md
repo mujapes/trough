@@ -6,8 +6,11 @@ DECIDED (2026-10-28): the Java/native boundary is a bionic build of the same sou
 in-process (docs/BIONIC.md). All store oracles pass as bionic programs on the Pixel; android.jni
 types 3000 edits from Java at 10.9 us p50 per call. Self-hosted: the phone's clang rebuilds all
 34 outputs byte-identically (bundle fd1a907464b2). Hot reload retires the app's draft keeper
-(Drafts.java, tests/retire.sh passes). Next: host View for TextInput on the native surface, or
-stage-3 work planning. The InputConnection adapter exists
+(Drafts.java, tests/retire.sh passes). EditorView hosts IME input with eventfd change
+notification (android.editor). Native presentation substrate: Vulkan swapchain on a Surface
+from the bionic library, Mali-G710 / Vulkan 1.4 / 165 extensions, 60 Hz pacing
+(docs/PRESENT.md). Next: the presenter proper (swapchain lifetime, scene pipelines, glyphs,
+damage), or stage-3 work planning. The InputConnection adapter exists
 (docs/INPUT.md): android.ime matches SDK 37's BaseInputConnection over 16000 random IME ops.
 
 Latest (late night): `native/store/keeper`, the storage owner thread ([contract](docs/KEEPER.md)):

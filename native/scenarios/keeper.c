@@ -196,9 +196,15 @@ static void failing(void) {
     MUST(ti_edit(q, &(td_edit){0, 0, big, 200000}, 1, 0, 0, -1, -1, &local) == TS_OK);
     tk_poke(k);
     ts_read d;
-    CHECK(tk_flush(k, q, local, 400, &d) == TS_FULL);
-    tk_stats a; tk_stats_get(k, &a);
-    CHECK(a.failures >= 1 && a.failures <= 6);           /* 50, 100, 200 ms backoff: no spinning */
+    /* The first attempt puts every chunk (fsynced) before the commit fails, which can take a
+     * while on a busy phone: wait for the backoff state rather than assume its timing. After 3
+     * failures the next retry is at least 400 ms away. */
+    tk_stats a; uint64_t waited = 0;
+    for (tk_stats_get(k, &a); a.failures < 3 && waited < 20000; waited += 10, tk_stats_get(k, &a))
+        nanosleep(&(struct timespec){0, 10000000L}, NULL);
+    CHECK(a.failures >= 3 && a.failures <= 5);
+    CHECK(tk_flush(k, q, local, 200, &d) == TS_FULL);
+    tk_stats_get(k, &a);
     /* Pokes (typing) do not bypass backoff: 20 wakes over 100 ms add at most one attempt. */
     for (int i = 0; i < 20; i++) { tk_poke(k); nanosleep(&(struct timespec){0, 5000000L}, NULL); }
     tk_stats b; tk_stats_get(k, &b);
