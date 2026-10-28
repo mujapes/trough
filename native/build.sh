@@ -42,6 +42,11 @@ rm -f "$@"
 for scenario in store documents streams tasks workspace; do
     $CC $CORE $DYN -I"$S/store" "$S/scenarios/$scenario.c" "$O/lib/libtroughstore.a" -lsqlite3 -o "$O/bin/core-$scenario"
 done
+$CC $CORE -c "$S/runtime/process.c" -o "$O/lib/process.o"
+${AR:-ar} rcsD "$O/lib/libtroughprocess.a" "$O/lib/process.o"
+rm -f "$O/lib/process.o"
+$CC $CORE $DYN "$S/runtime/run.c" "$O/lib/libtroughprocess.a" -o "$O/bin/trough-run"
+$CC $CORE $DYN -I"$S/runtime" "$S/scenarios/processes.c" "$O/lib/libtroughprocess.a" -o "$O/bin/core-processes"
 mkdir -p "$O/fixtures"
 for version in 1 2; do
     $CC $CORE -shared -DVERSION=$version "$S/scenarios/fixtures/implementation.c" -o "$O/fixtures/module-$version.so"

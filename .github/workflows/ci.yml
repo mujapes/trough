@@ -1,10 +1,16 @@
 name: ci
 on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   apk:
     # x86 runner: Google's aapt2 reads the API 35 resource table (Debian's arm64 aapt2 cannot).
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -27,6 +33,7 @@ jobs:
 
   semantic-core:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Publication kernel oracle and memory checks
@@ -39,15 +46,15 @@ jobs:
           CORE_CFLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer' tests/core_streams.sh
           CORE_CFLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer' tests/core_tasks.sh
           CORE_CFLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer' tests/core_workspace.sh
+          CORE_CFLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer' tests/core_processes.sh
 
   bench-arm64:
     # Free arm64 runner (public repo): the same static bench, run natively on Neoverse.
     runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - run: gcc -O2 -static -o bench native/bench/bench.c && ./bench | tee bench-arm64.json
-      - name: texec oracle (Android's app seccomp filter + /data/data/t.t, simulated)
-        run: tests/run.sh
       - name: Semantic publication kernel oracle
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq libsqlite3-dev
@@ -56,7 +63,16 @@ jobs:
           tests/core_streams.sh
           tests/core_tasks.sh
           tests/core_workspace.sh
+          tests/core_processes.sh
       - name: Namespace capability probe oracle
         run: python3 tests/namespaces.py
       - uses: actions/upload-artifact@v4
         with: { name: bench-arm64, path: bench-arm64.json }
+
+  loader-arm64:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: texec oracle (Android's app seccomp filter + /data/data/t.t, simulated)
+        run: tests/run.sh

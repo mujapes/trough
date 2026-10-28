@@ -29,6 +29,10 @@ scenarios/documents.c
 scenarios/streams.c
 scenarios/tasks.c
 scenarios/workspace.c
+runtime/process.h
+runtime/process.c
+runtime/run.c
+scenarios/processes.c
 packages.list
 scenarios/publication.c
 scenarios/resources.c

@@ -2,6 +2,32 @@
 
 ## Active continuation (2026-10-28)
 
+Resumed again at 14:09 UTC on the user's `continue`, followed by confirmation to use GitHub's
+free compute. The earlier five-hour window below is historical, not an instruction to abandon
+the resumed work. No subagents are authorised by the current session instructions.
+
+Latest source: owned process supervision ([contract](docs/PROCESSES.md)). All native signed
+scenarios now use `trough-run`: deadline/cancellation, subreaper adoption, process-group cleanup,
+kernel-checked child enumeration, bounded output and a separate private result report.
+Phone testing found inherited Android signal state breaking child signal behaviour; command
+startup now resets signal actions/mask, with a regression oracle. `core.processes` passed on
+Pixel bundle `a1ae3a6134c80267bb78ec2d8877bb3067ebd308301d3ddd9b6e2b25ce79e2c3`, including
+escaped descendants and parent death; Android exercises the `/proc` scan fallback. Local
+ASan/UBSan passes both enumeration paths; JVM protocol/process suite passes 25 checks.
+Task/workspace phone checks also passed on bundle
+`1519281040acf179b9b2e721cb8e76546cb8385237dc80df11efeb314e947657`.
+Signed receipts are in ignored `out/evidence/`; source and reproduction commands are committed.
+
+GitHub was behind at `8ddd95e` (latest old run 40516699566): APK job passed, ARM loader oracle
+failed with SIGSEGV in dynamic execution. The new core changes had only VM/phone evidence.
+Current CI separates loader ARM tests from the core ARM tests, includes sanitizer/process
+oracles and uses only standard public-repository runners. Publish the checkpoint and inspect
+fresh CI results; do not claim the old loader failure is fixed without evidence.
+Next automation work: expose native build reproduction in the signed registry using the new
+supervisor, then continue stage-2 text/work planning ownership. Full app remains unfinished.
+
+Historical checkpoints from earlier in this continuation:
+
 The user resumed after a VM interruption and authorised continuing the full Trough build.
 At 06:58:35 UTC they said they were going to sleep and to continue until the five-hour limit
 (11:58:35 UTC). Keep constructing/testing autonomously within the design; no routine user

@@ -59,10 +59,32 @@ public final class ScenarioProtocolTest {
         count=runs; result=submit(p,request("core.test"));
         check("rejected".equals(result.get("status")) && runs==count,"live replay ledger has hard admission limit");
         Map<String,String> env=new HashMap<>(); env.put("PATH","/usr/bin:/bin");
-        result=ScenarioProcess.run(new File(args[0]),env,2,"/bin/sh","-c","printf scenario-ok");
+        File supervisor=new File(args[0],"trough-run");
+        result=ScenarioProcess.run(supervisor,new File(args[0]),env,2,"/bin/sh","-c","printf scenario-ok");
         check(Boolean.TRUE.equals(result.get("ok")) && "scenario-ok".equals(result.get("output")),"subprocess outcome checks actual exit and output");
-        result=ScenarioProcess.run(new File(args[0]),env,1,"/bin/sh","-c","exec sleep 10");
+        result=ScenarioProcess.run(supervisor,new File(args[0]),env,1,"/bin/sh","-c","sleep 10 & wait");
         check(Boolean.TRUE.equals(result.get("timed_out")) && Boolean.FALSE.equals(result.get("ok")),"hung scenario times out and is not success");
+        check(Boolean.TRUE.equals(result.get("cleanup_complete")) && Boolean.TRUE.equals(result.get("reader_complete")),"timeout reaps descendant retaining output pipe");
+        result=ScenarioProcess.run(supervisor,new File(args[0]),env,2,"/bin/sh","-c","exit 124");
+        check(Boolean.FALSE.equals(result.get("timed_out")) && Boolean.FALSE.equals(result.get("ok")),"child exit 124 is distinguished from supervisor timeout");
+        result=ScenarioProcess.run(new File("/bin/true"),new File(args[0]),env,2,"/bin/true");
+        check(Boolean.FALSE.equals(result.get("ok")) && Boolean.FALSE.equals(result.get("cleanup_complete")),"missing supervisor report cannot claim success");
+        result=ScenarioProcess.run(supervisor,new File(args[0]),env,2,"/bin/sh","-c","head -c 70000 /dev/zero");
+        check(Boolean.TRUE.equals(result.get("truncated")) && Boolean.FALSE.equals(result.get("ok")) &&
+            ((String)result.get("output")).length()==65536,"excess output is drained with bounded storage and fails evidence");
+        File pidfile=new File(args[0],"interrupted-child"); final Throwable[] error={null};
+        Thread worker=new Thread(() -> {
+            try { ScenarioProcess.run(supervisor,new File(args[0]),env,20,"/bin/sh","-c",
+                "sleep 30 & echo $! > \"$1\"; wait","fixture",pidfile.getAbsolutePath());
+                error[0]=new AssertionError("interruption was swallowed");
+            } catch(InterruptedException expected) {} catch(Throwable e) { error[0]=e; }
+        });
+        worker.start(); long deadline=System.nanoTime()+5000000000L;
+        while((!pidfile.isFile() || pidfile.length()==0) && System.nanoTime()<deadline) Thread.sleep(10);
+        check(pidfile.isFile() && pidfile.length()>0,"interruption fixture descendant started");
+        long pid=Long.parseLong(new String(Files.readAllBytes(pidfile.toPath()),"UTF-8").trim());
+        worker.interrupt(); worker.join(5000);
+        check(!worker.isAlive() && error[0]==null && !ProcessHandle.of(pid).isPresent(),"Java interruption waits for owned descendant cleanup");
         System.out.println(checks+" scenario protocol checks passed");
     }
 }
