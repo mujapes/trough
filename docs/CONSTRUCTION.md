@@ -236,6 +236,10 @@ output/artifact ownership remain downstream work; the task store itself cannot s
 owner: coalesced saves, exact acknowledgement, rebase or explicit conflict on external
 revisions ([contract](DRAFTS.md)). No IME adapter or storage worker drives it yet.
 
+`native/store/text` is indexed text: a persistent balanced chunk tree with line index, O(1)
+snapshots and chunk-level durable storage ([contract](TEXT.md)). Documents and drafts do not use
+it yet.
+
 `native/store/workspace` supplies stable roots that publish a draft and stream atomically,
 and recover their current state without view/module-owned IDs ([contract](WORKSPACES.md)).
 

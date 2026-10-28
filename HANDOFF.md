@@ -2,6 +2,13 @@
 
 ## Active continuation (2026-10-28)
 
+Latest (16:30 UTC): `native/store/text`, indexed text ([contract](docs/TEXT.md)): immutable
+chunk tree, O(log n) edits, O(1) snapshots, line index, chunk-level durable manifest. `core.text`
+passes locally (ASan/UBSan, TSan, 10/12 mutants, survivors equivalent) and on Pixel bundle
+`ee9f13e5c01b...` with all 12 scenarios; 13.4 us/edit at 4M units vs 262 us flat.
+Next: adopt it in documents (TDOC v2 manifest) and the draft queue (O(1) captures), then
+chunk retention/GC, then stage-3 work planning.
+
 Latest (15:40 UTC): `native/store/draft`, the input persistence queue ([contract](docs/DRAFTS.md)).
 Interaction side never waits on SQLite; one in-flight capture coalesces later edits; acks never
 replace live text; external revisions rebase through retained batch ranges or become explicit
