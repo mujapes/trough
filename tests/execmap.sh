@@ -9,8 +9,9 @@ T=/usr/libexec/trough-test
 [ -e "$T" ] && { echo "$T exists here; the test needs it absent"; exit 1; }
 R="$W/root"; mkdir -p "$R$T/bin"
 mkdir -p "$W/platform/bin"
+mkdir -p "$W/sl" && ln -s /lib/ld-linux-aarch64.so.1 "$W/sl/linker64"   # stands in for /system/bin/linker64
 gcc -O2 -Wall -Wextra -shared -fPIC -DTROUGH_ROOT="\"$R\"" -DTROUGH_SH="\"$T/bin/sh\"" -DTROUGH_PLATFORM="\"$W/platform/\"" \
-    -o "$W/libexecmap.so" "$ROOT/native/execmap/execmap.c" -ldl || exit 1
+    -DTROUGH_LINKER="\"$W/sl/linker\"" -o "$W/libexecmap.so" "$ROOT/native/execmap/execmap.c" -ldl || exit 1
 gcc -O2 -Wall -o "$W/drive" "$ROOT/tests/execmap_test.c" || exit 1
 printf '#include <stdio.h>\nint main(int c,char**v){printf("hello-ok %%s %%s\\n",v[0],c>1?v[1]:"-");return 0;}\n' > "$W/h.c"
 gcc -o "$R$T/bin/hello" "$W/h.c"
@@ -58,6 +59,12 @@ printf '#include <stdio.h>\n#include <stdlib.h>\nint main(void){puts(getenv("LD_
 gcc -o "$W/platform/bin/plat" "$W/p.c"
 out="$(LD_LIBRARY_PATH=/x LD_PRELOAD="$W/libexecmap.so" dash -c "$W/platform/bin/plat" 2>&1)"; [ "$out" = platform-env-ok ] && echo "ok    platform binaries get no glibc loader variables" || { echo "FAIL  platform env ($out)"; F=$((F+1)); }
 out="$(LD_LIBRARY_PATH=/x dash -c "$W/platform/bin/plat" 2>&1)"; [ "$out" = platform-env-leak ] && echo "ok    negative control: without the preload they leak" || { echo "FAIL  platform env negative control ($out)"; F=$((F+1)); }
+# A bionic program outside the platform directories (Trough's own bionic builds) is recognised
+# by its interpreter, Android's linker.
+mkdir -p "$W/bundle/bin" && gcc -o "$W/bundle/bin/bionic" "$W/p.c" -Wl,-dynamic-linker,"$W/sl/linker64"
+out="$(LD_LIBRARY_PATH=/x LD_PRELOAD="$W/libexecmap.so" dash -c "$W/bundle/bin/bionic" 2>&1)"; [ "$out" = platform-env-ok ] && echo "ok    bionic programs anywhere (by PT_INTERP) get no glibc loader variables" || { echo "FAIL  bionic-by-interp env ($out)"; F=$((F+1)); }
+gcc -o "$W/bundle/bin/glibc" "$W/p.c"
+out="$(LD_LIBRARY_PATH=/x LD_PRELOAD="$W/libexecmap.so" dash -c "$W/bundle/bin/glibc" 2>&1)"; [ "$out" = platform-env-leak ] && echo "ok    glibc programs beside them keep their loader variables" || { echo "FAIL  glibc env stripped ($out)"; F=$((F+1)); }
 # Maintainer scripts (and only they) run under Debian's fakechroot with the root as base.
 FC=$(dpkg -L libfakechroot 2>/dev/null | grep '/libfakechroot.so$' | head -1)
 if [ -z "$FC" ]; then echo "FAIL  libfakechroot is not installed (apt install libfakechroot; hot.sh ships it)"; F=$((F+1)); else

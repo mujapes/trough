@@ -41,6 +41,7 @@ static int set_interp(const char *path) {
         char old[4096];
         if (pread(fd, old, ph.p_filesz, ph.p_offset) != (ssize_t)ph.p_filesz) break;
         if (strncmp(old, NEW, ph.p_filesz) == 0 && old[sizeof NEW - 1] == 0) break;   /* already set */
+        if (!strncmp(old, "/system/bin/linker", 18)) break;   /* bionic: Android's linker loads it */
         char slot[4096] = {0};
         memcpy(slot, NEW, sizeof NEW - 1);
         done = pwrite(fd, slot, ph.p_filesz, ph.p_offset) == (ssize_t)ph.p_filesz;

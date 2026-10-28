@@ -19,6 +19,13 @@ mkdir -p "$B/z/bin"
 # Native code, by the same script Trough runs on the phone (native/build.sh). Sources ship too,
 # so the phone can rebuild them (Self.buildNative) and compare (SelfTest.nativeRepro).
 CC="$CC_ARM64" sh "$ROOT/native/build.sh" "$ROOT/native" "$B/z"
+# The same store sources against bionic, for in-process use from Java (native/bionic.sh).
+if command -v "${CLANG:-clang-19}" >/dev/null && DEPS="$("$ROOT/tools/bionic-deps.sh" 2>/dev/null)"; then
+    eval "$DEPS"; export BIONIC_SYSROOT SQLITE_SRC
+    sh "$ROOT/native/bionic.sh" "$ROOT/native" "$B/z"
+else
+    echo "hot.sh: no bionic toolchain/inputs; bundle has no android-* outputs" >&2
+fi
 # Inspect every executable so a newly added scenario cannot miss the phone interpreter fix.
 # Static executables are recognised and left byte-for-byte unchanged.
 python3 "$ROOT/tools/set_interp.py" "$B/z/bin/"*

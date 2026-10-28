@@ -37,6 +37,8 @@ def set_interp(path):
             old = f.read(p_filesz)
             if old.rstrip(b"\0") == NEW:
                 return "already set"
+            if old.startswith(b"/system/bin/linker"):
+                return "bionic (Android's linker, left alone)"
             if len(NEW) + 1 > p_filesz:
                 return f"slot too small ({p_filesz})"
             f.seek(p_offset)

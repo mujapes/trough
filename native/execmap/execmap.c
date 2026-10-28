@@ -36,6 +36,7 @@
 #include <signal.h>
 #include <spawn.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -50,6 +51,9 @@
 #define TROUGH_SH "/bin/sh"
 #endif
 
+#ifndef TROUGH_LINKER    /* prefix of a bionic program's PT_INTERP; tests use a stand-in */
+#define TROUGH_LINKER "/system/bin/linker"
+#endif
 #ifndef TROUGH_PLATFORM   /* tests/execmap.sh points this at a stand-in platform directory */
 #define TROUGH_PLATFORM "/system/", "/system_ext/", "/apex/", "/vendor/", "/product/", "/odm/"
 #endif
@@ -109,6 +113,32 @@ static void *libc_symbol(const char *name) {
     return f ? f : dlsym(RTLD_NEXT, name);
 }
 
+/* 1 if the ELF at path names Android's linker as its interpreter: a bionic program anywhere
+ * (e.g. Trough's own bionic builds in the bundle), not only under the platform directories. */
+static int bionic_elf(const char *path) {
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return 0;
+    unsigned char eh[64];
+    int found = 0;
+    if (pread(fd, eh, sizeof eh, 0) == (ssize_t)sizeof eh && !memcmp(eh, "\177ELF", 4) && eh[4] == 2) {
+        uint64_t phoff; uint16_t phentsize, phnum;
+        memcpy(&phoff, eh + 0x20, 8); memcpy(&phentsize, eh + 0x36, 2); memcpy(&phnum, eh + 0x38, 2);
+        for (unsigned i = 0; i < phnum && phentsize >= 56; i++) {
+            unsigned char ph[56];
+            if (pread(fd, ph, sizeof ph, (off_t)(phoff + (uint64_t)i * phentsize)) != (ssize_t)sizeof ph) break;
+            uint32_t type; uint64_t offset;
+            memcpy(&type, ph, 4); memcpy(&offset, ph + 8, 8);
+            if (type != 3) continue;   /* PT_INTERP */
+            char interp[sizeof TROUGH_LINKER] = {0};
+            size_t n = sizeof TROUGH_LINKER - 1;
+            found = pread(fd, interp, n, (off_t)offset) == (ssize_t)n && !memcmp(interp, TROUGH_LINKER, n);
+            break;
+        }
+    }
+    close(fd);
+    return found;
+}
+
 /* envp minus the glibc loader variables when exe is a platform (bionic) binary; else NULL. */
 static char **platform_env(const char *exe, char *const envp[]) {
     static const char *const platform[] = {TROUGH_PLATFORM};
@@ -117,7 +147,7 @@ static char **platform_env(const char *exe, char *const envp[]) {
     if (!exe || !envp || !resolve || !resolve(exe, real)) return NULL;
     unsigned i = 0;
     while (i < sizeof platform / sizeof *platform && strncmp(real, platform[i], strlen(platform[i]))) i++;
-    if (i == sizeof platform / sizeof *platform) return NULL;
+    if (i == sizeof platform / sizeof *platform && !bionic_elf(real)) return NULL;
     int n = 0;
     while (envp[n]) n++;
     char **v = malloc(sizeof(char *) * (n + 1));

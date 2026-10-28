@@ -24,11 +24,19 @@ final class Development implements AutoCloseable, ScenarioProtocol.Handler {
         worker.setDaemon(true); worker.start();
     }
     public void close() { closed=true; worker.interrupt(); }
-    public boolean supports(String name) {
-        return "app.observe".equals(name) || "core.publication".equals(name) ||
-            "core.resources".equals(name) || "core.replacement".equals(name) || "core.store".equals(name) ||
-            "core.documents".equals(name) || "core.streams".equals(name) || "core.tasks".equals(name) || "core.workspace".equals(name) || "core.drafts".equals(name) || "core.text".equals(name) || "core.keeper".equals(name) || "core.processes".equals(name) || "build.native".equals(name);
+    /** Store oracles that take a data directory; each is also built against bionic (android.*). */
+    private static final List<String> STORE=Arrays.asList("store","documents","streams","tasks","workspace","drafts","text","keeper");
+    private List<String> scenarios() {
+        List<String> all=new ArrayList<>(Arrays.asList("app.observe","core.publication","core.resources","core.replacement"));
+        for(String s:STORE) all.add("core."+s);
+        all.add("core.processes"); all.add("build.native");
+        if(new File(bundle,"lib/libtrough-android.so").isFile()) {
+            for(String s:STORE) all.add("android."+s);
+            all.add("android.jni");
+        }
+        return all;
     }
+    public boolean supports(String name) { return scenarios().contains(name); }
     public Map<String,Object> execute(String name) throws Exception {
         if(closed) throw new InterruptedException();
         if("app.observe".equals(name)) {
@@ -40,21 +48,22 @@ final class Development implements AutoCloseable, ScenarioProtocol.Handler {
                         "density",activity.getResources().getDisplayMetrics().density,
                         "sdk",android.os.Build.VERSION.SDK_INT,"device",android.os.Build.MODEL,
                         "multi_window",activity.isInMultiWindowMode(),
-                        "scenarios",Arrays.asList("app.observe","core.publication","core.resources","core.replacement","core.store","core.documents","core.streams","core.tasks","core.workspace","core.drafts","core.text","core.keeper","core.processes","build.native"));
+                        "scenarios",scenarios());
                 }
             });
             activity.runOnUiThread(result);
             try { return result.get(3,TimeUnit.SECONDS); } finally { result.cancel(false); }
         }
         if(!supports(name)) throw new IllegalArgumentException("scenario");
-        String executable=new File(bundle,"bin/"+name.replace('.','-')).getPath();
+        if("android.jni".equals(name)) return NativeCore.scenario(bundle,activity.getCacheDir());
+        String executable=new File(bundle,"bin/"+(name.startsWith("android.")?"android-core-"+name.substring(8):name.replace('.','-'))).getPath();
         File supervisor=new File(bundle,"bin/trough-run");
         Map<String,String> env=Root.env(activity,activity.getCacheDir());
         if("build.native".equals(name)) return NativeReproduction.run(bundle,activity.getCacheDir(),env,
             "/system/bin/sh",new File(activity.getDataDir(),"d/usr/libexec/trough/tfix").getAbsolutePath());
         if("core.replacement".equals(name)) return ScenarioProcess.run(supervisor,activity.getCacheDir(),env,20,executable,
             new File(bundle,"fixtures/module-1.so").getPath(),new File(bundle,"fixtures/module-2.so").getPath());
-        if("core.store".equals(name) || "core.documents".equals(name) || "core.streams".equals(name) || "core.tasks".equals(name) || "core.workspace".equals(name) || "core.drafts".equals(name) || "core.text".equals(name) || "core.keeper".equals(name) || "core.processes".equals(name)) {
+        if(name.startsWith("android.") || STORE.contains(name.substring(5)) || "core.processes".equals(name)) {
             File data=new File(activity.getCacheDir(),"scenario-"+name.replace('.','-'));
             Main.deleteTree(data);
             try { return ScenarioProcess.run(supervisor,activity.getCacheDir(),env,60,executable,data.getPath()); }

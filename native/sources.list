@@ -1,4 +1,6 @@
 build.sh
+bionic.sh
+android/jni.c
 sources.list
 outputs.list
 bench/bench.c
