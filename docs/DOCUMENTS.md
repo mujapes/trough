@@ -86,3 +86,16 @@ unchanged receipts, immutable history, 40 reopens, capture redelivery after sour
 changes and deletion, maximum-size/full-store cases and SIGKILL with active composition
 and an issued request. ASan/UBSan runs cover the native implementation. This is semantic
 and storage evidence; it is not actual Android IME, visual continuity or power-cut evidence.
+
+## Indexed documents (TDOC v2)
+
+2026-10-28. `td_save_text` / `td_load_text` store a document as v1's 32-byte header with
+version 2, followed by a [tx_text](TEXT.md) chunk manifest. The same schema ID, revision rules,
+stale/unchanged-save receipts and history apply. A save puts only chunks without a durable
+identity, then commits the record; a crash between the two leaves unreferenced objects, never a
+revision with missing chunks (8 SIGKILL cycles at revisions 78..255 each recover exact text).
+`td_load` serves v2 to flat callers and `td_load_text` reads v1 as a tree, so existing tasks,
+workspaces and captures are unchanged. `td_create`/`td_save` still write v1. The v2 length is
+bounded by the manifest record (about 53M units), not `TD_TEXT_LIMIT`. Equal text with
+different chunk boundaries counts as a changed revision.
+

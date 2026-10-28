@@ -1,6 +1,6 @@
 #ifndef TROUGH_DOCUMENT_H
 #define TROUGH_DOCUMENT_H
-#include "store.h"
+#include "text.h"
 
 /* Durable document owner, construction stage 2. UTF-16 code units are lossless (including
  * isolated surrogates and NUL); offsets are code units, not graphemes or UTF-8 bytes.
@@ -41,6 +41,21 @@ ts_status td_load(ts_store *, uint64_t id, uint64_t revision, td_snapshot *, uin
 /* expected identifies the exact durable input. No blind or stale save. TS_OK's snapshot
  * names the acknowledged revision even for unchanged data; later UI edits stay owned by UI. */
 ts_status td_save(ts_store *, ts_read expected, const td_value *, td_snapshot *);
+
+/* Indexed form (TDOC v2): the same selection/composition header followed by a tx_text chunk
+ * manifest (docs/TEXT.md), so a save writes only changed chunks and a load shares chunks.
+ * td_load reads both versions. td_create/td_save still write v1 snapshots. */
+enum { TD_INDEXED_LIMIT = TX_UNIT_LIMIT };
+typedef struct {
+    tx_text *text;
+    uint32_t anchor, caret;
+    int32_t composing_start, composing_end;
+} td_text_value;
+/* expected.id == 0 creates. Same revision and receipt rules as td_save. Chunks are put before
+ * the record commit; a failed commit can leave unreferenced chunk objects, never a partial save. */
+ts_status td_save_text(ts_store *, ts_read expected, const td_text_value *, td_snapshot *);
+/* Either version; *text is a new reference (NULL for empty text). */
+ts_status td_load_text(ts_store *, uint64_t id, uint64_t revision, td_snapshot *, tx_text **);
 
 /* Ask captures one document plus ordered dependencies (source, route, model/policy records)
  * and bounded canonical options. It prepares an effect; it cannot authorise or dispatch it.

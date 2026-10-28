@@ -108,6 +108,24 @@ static ts_status read_wire(ts_store *s, uint64_t id, uint64_t revision, ts_recor
     return st;
 }
 
+/* v2: v1's header with version 2, then a TTXT manifest whose total matches the header. */
+static ts_status header2(const uint8_t *p, size_t size, td_snapshot *out) {
+    if (size < TD_HEADER_SIZE + TX_MANIFEST_HEADER || memcmp(p, "TDOC", 4) || u32(p + 4) != 2 || u32(p + 28) ||
+        u64(p + TD_HEADER_SIZE + 16) != u32(p + 8)) return TS_INVALID;
+    uint32_t n = u32(p + 8), a = u32(p + 20), b = u32(p + 24);
+    if ((a > INT32_MAX && a != UINT32_MAX) || (b > INT32_MAX && b != UINT32_MAX)) return TS_INVALID;
+    td_value v = { (const uint16_t *)"", 0, u32(p + 12), u32(p + 16),
+        a == UINT32_MAX ? -1 : (int32_t)a, b == UINT32_MAX ? -1 : (int32_t)b };
+    /* valid() bounds v1 lengths; check the selection against the indexed length directly. */
+    if (v.anchor > n || v.caret > n) return TS_INVALID;
+    if (!((v.composing_start == -1 && v.composing_end == -1) ||
+          (v.composing_start >= 0 && v.composing_end >= v.composing_start && (uint32_t)v.composing_end <= n))) return TS_INVALID;
+    metadata(out, &v);
+    out->length = n;
+    return TS_OK;
+}
+static int version(const uint8_t *wire, size_t size) { return size >= 8 ? (int)u32(wire + 4) : 0; }
+
 ts_status td_load(ts_store *s, uint64_t id, uint64_t revision, td_snapshot *out, uint16_t *text, size_t capacity) {
     if (!out) return TS_INVALID;
     memset(out, 0, sizeof *out);
@@ -116,44 +134,113 @@ ts_status td_load(ts_store *s, uint64_t id, uint64_t revision, td_snapshot *out,
     uint8_t *wire;
     ts_status st = read_wire(s, id, revision, &r, &wire);
     if (st) return st;
-    st = td_decode(wire, r.size, out, text, capacity);
+    if (version(wire, r.size) == 2) {
+        st = header2(wire, r.size, out);
+        if (!st && out->length > capacity) st = TS_CAPACITY;
+        tx_text *t = NULL;
+        if (!st && (st = tx_load(s, wire + TD_HEADER_SIZE, r.size - TD_HEADER_SIZE, &t)) == TS_OK)
+            st = tx_read(t, 0, out->length, text);
+        tx_release(t);
+        if (st && st != TS_CAPACITY) { memset(out, 0, sizeof *out); free(wire); return st; }
+    } else st = td_decode(wire, r.size, out, text, capacity);
     if (st == TS_OK || st == TS_CAPACITY) out->record = r;
     free(wire);
     return st;
 }
 
+ts_status td_load_text(ts_store *s, uint64_t id, uint64_t revision, td_snapshot *out, tx_text **text) {
+    if (!out || !text) return TS_INVALID;
+    memset(out, 0, sizeof *out);
+    *text = NULL;
+    if (!s || !id || id > INT64_MAX || revision > INT64_MAX) return TS_INVALID;
+    ts_record r;
+    uint8_t *wire;
+    ts_status st = read_wire(s, id, revision, &r, &wire);
+    if (st) return st;
+    if (version(wire, r.size) == 2) {
+        if (!(st = header2(wire, r.size, out))) st = tx_load(s, wire + TD_HEADER_SIZE, r.size - TD_HEADER_SIZE, text);
+    } else if (!(st = td_decode(wire, r.size, out, NULL, 0)) || st == TS_CAPACITY) {
+        uint16_t *flat = malloc((out->length ? out->length : 1) * sizeof *flat);
+        st = flat ? td_decode(wire, r.size, out, flat, out->length) : TS_IO;
+        if (!st) st = tx_build(flat, out->length, text);
+        free(flat);
+    }
+    free(wire);
+    if (st) { memset(out, 0, sizeof *out); return st; }
+    out->record = r;
+    return TS_OK;
+}
+
+static ts_status expect(ts_store *s, ts_read expected, ts_record *current) {
+    memset(current, 0, sizeof *current);
+    if (!expected.id) return TS_OK;
+    if (expected.id > INT64_MAX || !expected.revision || expected.revision > INT64_MAX) return TS_INVALID;
+    ts_status st = ts_get(s, expected.id, current, NULL, 0);
+    if (st != TS_OK && st != TS_CAPACITY) return st;
+    if (current->revision != expected.revision) return TS_CONFLICT;
+    return current->schema == TD_SCHEMA ? TS_OK : TS_INVALID;
+}
+static ts_status commit(ts_store *s, ts_read expected, const ts_record *current, uint8_t *wire, size_t size,
+                        const td_value *v, td_snapshot *out) {
+    ts_write w = {expected.id, TD_SCHEMA, wire, size, 0};
+    ts_receipt receipt;
+    ts_status st = ts_commit(s, expected.id ? &expected : NULL, expected.id ? 1 : 0, &w, 1, NULL, 0, &receipt);
+    if (!st) {
+        metadata(out, v);
+        out->record = (ts_record){w.id, expected.id ? expected.revision + (receipt.changed != 0) : 1,
+            receipt.changed ? receipt.commit : current->commit, TD_SCHEMA, size};
+    }
+    return st;
+}
 static ts_status save(ts_store *s, ts_read expected, const td_value *v, td_snapshot *out) {
     if (!out) return TS_INVALID;
     memset(out, 0, sizeof *out);
     if (!s || !valid(v)) return TS_INVALID;
-    ts_record current = {0};
-    if (expected.id) {
-        if (expected.id > INT64_MAX || !expected.revision || expected.revision > INT64_MAX) return TS_INVALID;
-        ts_status st = ts_get(s, expected.id, &current, NULL, 0);
-        if (st != TS_OK && st != TS_CAPACITY) return st;
-        if (current.revision != expected.revision) return TS_CONFLICT;
-        if (current.schema != TD_SCHEMA) return TS_INVALID;
-    }
+    ts_record current;
+    ts_status st = expect(s, expected, &current);
+    if (st) return st;
     size_t size = TD_HEADER_SIZE + 2 * v->length;
     uint8_t *wire = malloc(size);
     if (!wire) return TS_IO;
-    ts_status st = td_encode(v, wire, size, &size);
-    ts_write w = {expected.id, TD_SCHEMA, wire, size, 0};
-    ts_receipt receipt;
-    if (!st) st = ts_commit(s, expected.id ? &expected : NULL, expected.id ? 1 : 0, &w, 1, NULL, 0, &receipt);
+    st = td_encode(v, wire, size, &size);
+    if (!st) st = commit(s, expected, &current, wire, size, v, out);
     free(wire);
-    if (!st) {
-        metadata(out, v);
-        out->record = (ts_record){w.id, expected.id ? expected.revision + (receipt.changed != 0) : 1,
-            receipt.changed ? receipt.commit : current.commit, TD_SCHEMA, size};
-    }
     return st;
 }
-
 ts_status td_create(ts_store *s, const td_value *v, td_snapshot *out) { return save(s, (ts_read){0, 0}, v, out); }
 ts_status td_save(ts_store *s, ts_read expected, const td_value *v, td_snapshot *out) {
     if (!expected.id) { if (out) memset(out, 0, sizeof *out); return TS_INVALID; }
     return save(s, expected, v, out);
+}
+
+ts_status td_save_text(ts_store *s, ts_read expected, const td_text_value *v, td_snapshot *out) {
+    if (!out) return TS_INVALID;
+    memset(out, 0, sizeof *out);
+    if (!s || !v) return TS_INVALID;
+    size_t n = tx_length(v->text);
+    if (n > UINT32_MAX || v->anchor > n || v->caret > n ||
+        !((v->composing_start == -1 && v->composing_end == -1) ||
+          (v->composing_start >= 0 && v->composing_end >= v->composing_start && (size_t)v->composing_end <= n)))
+        return TS_INVALID;
+    ts_record current;
+    ts_status st = expect(s, expected, &current);
+    if (st) return st;
+    size_t manifest;
+    if ((st = tx_store(s, v->text, NULL, 0, &manifest, NULL)) != TS_CAPACITY && st) return st;
+    if (manifest > TS_DATA_LIMIT - TD_HEADER_SIZE) return TS_CAPACITY;
+    size_t size = TD_HEADER_SIZE + manifest;
+    uint8_t *wire = malloc(size);
+    if (!wire) return TS_IO;
+    memcpy(wire, "TDOC", 4); put32(wire + 4, 2); put32(wire + 8, (uint32_t)n);
+    put32(wire + 12, v->anchor); put32(wire + 16, v->caret);
+    put32(wire + 20, (uint32_t)v->composing_start); put32(wire + 24, (uint32_t)v->composing_end);
+    put32(wire + 28, 0);
+    st = tx_store(s, v->text, wire + TD_HEADER_SIZE, manifest, &manifest, NULL);
+    td_value meta = {NULL, 0, v->anchor, v->caret, v->composing_start, v->composing_end};
+    if (!st) st = commit(s, expected, &current, wire, size, &meta, out);
+    if (!st) out->length = n;
+    free(wire);
+    return st;
 }
 
 static int capture_valid(const td_capture *c) {

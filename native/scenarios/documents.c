@@ -8,6 +8,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 static int failures;
@@ -261,10 +262,110 @@ static void process_death(void) {
     puts("ok SIGKILL: acknowledged text, reverse selection and composition retained; issued Ask remains unknown on retry");
 }
 
+/* Indexed (v2) documents. Text for step k is reproducible, so a recovered revision can be
+ * checked exactly after SIGKILL. */
+static size_t indexed_text(unsigned k, uint16_t *out) {
+    size_t n = 50000;
+    for (size_t i = 0; i < n; i++) out[i] = (uint16_t)(i % 61 == 0 ? 0x0a : 'a' + i % 26);
+    for (unsigned j = 1; j <= k; j++) {
+        size_t at = (j * 7919u) % (n + 1), cut = at < n ? (j % 3) : 0;
+        memmove(out + at + 2, out + at + cut, (n - at - cut) * 2);
+        out[at] = (uint16_t)('A' + j % 26); out[at + 1] = (uint16_t)j;
+        n = n - cut + 2;
+    }
+    return n;
+}
+static tx_text *indexed_tree(unsigned k, uint16_t *scratch) {
+    tx_text *t; size_t n = indexed_text(k, scratch);
+    MUST(tx_build(scratch, n, &t) == TS_OK);
+    return t;
+}
+static int same_tree(const tx_text *t, const uint16_t *text, size_t n) {
+    if (tx_length(t) != n) return 0;
+    uint16_t *buf = malloc(n * 2 + 2); MUST(buf && tx_read(t, 0, n, buf) == TS_OK);
+    int same = !memcmp(buf, text, n * 2); free(buf); return same;
+}
+static void indexed(void) {
+    ts_store *store; MUST(ts_open(path("indexed"), &store) == TS_OK);
+    static uint16_t a[60000], b[60000];
+    size_t na = indexed_text(0, a);
+    tx_text *t = indexed_tree(0, b), *u;
+    td_text_value v = {t, 5, 2, 1, 4}; td_snapshot snap, again;
+    MUST(td_save_text(store, (ts_read){0, 0}, &v, &snap) == TS_OK);
+    uint64_t id = snap.record.id;
+    CHECK(snap.record.revision == 1 && snap.length == na && snap.anchor == 5 && snap.composing_end == 4);
+    /* td_load serves the flat API from v2; small capacity still reports metadata. */
+    CHECK(td_load(store, id, 0, &again, b, 10) == TS_CAPACITY && again.length == na && again.caret == 2);
+    CHECK(td_load(store, id, 0, &again, b, 60000) == TS_OK && again.length == na && !memcmp(a, b, na * 2) &&
+          again.record.revision == 1 && again.record.schema == TD_SCHEMA);
+    /* Edit through the tree, save over revision 1; history stays readable. */
+    MUST(tx_edit(t, 100, 103, (uint16_t[]){'X', 'Y'}, 2, &u) == TS_OK);
+    td_text_value w = {u, 0, 0, -1, -1};
+    MUST(td_save_text(store, (ts_read){id, 1}, &w, &snap) == TS_OK);
+    CHECK(snap.record.revision == 2 && snap.length == na - 1);
+    td_snapshot old; tx_text *ot, *nt;
+    MUST(td_load_text(store, id, 1, &old, &ot) == TS_OK);
+    CHECK(same_tree(ot, a, na) && old.anchor == 5 && old.record.revision == 1);
+    MUST(td_load_text(store, id, 0, &again, &nt) == TS_OK);
+    CHECK(tx_length(nt) == na - 1 && again.record.revision == 2);
+    uint16_t mid[4]; MUST(tx_read(nt, 99, 4, mid) == TS_OK);
+    CHECK(mid[0] == a[99] && mid[1] == 'X' && mid[2] == 'Y' && mid[3] == a[103]);
+    /* Stale and unchanged saves. */
+    CHECK(td_save_text(store, (ts_read){id, 1}, &w, &again) == TS_CONFLICT);
+    td_text_value same = {nt, 0, 0, -1, -1};
+    MUST(td_save_text(store, (ts_read){id, 2}, &same, &again) == TS_OK);
+    CHECK(again.record.revision == 2 && again.record.commit == snap.record.commit);
+    td_text_value bad = {nt, (uint32_t)na, 0, -1, -1};
+    CHECK(td_save_text(store, (ts_read){id, 2}, &bad, &again) == TS_INVALID);
+    bad.anchor = 0; bad.composing_start = 3; bad.composing_end = 2;
+    CHECK(td_save_text(store, (ts_read){id, 2}, &bad, &again) == TS_INVALID);
+    /* v1 documents load as trees; v2 documents can be captured by Ask like any other. */
+    uint16_t small[] = {'h', 'i'}; td_value flat = {small, 2, 2, 2, -1, -1}; td_snapshot one; tx_text *ft;
+    MUST(td_create(store, &flat, &one) == TS_OK);
+    MUST(td_load_text(store, one.record.id, 0, &again, &ft) == TS_OK);
+    CHECK(same_tree(ft, small, 2) && again.caret == 2 && again.record.revision == 1);
+    td_capture ask = {{id, 2}, NULL, 0, NULL, 0}; uint8_t intent[16] = {0x7d}; ts_receipt receipt;
+    CHECK(td_ask(store, intent, &ask, &receipt) == TS_OK);
+    tx_release(t); tx_release(u); tx_release(ot); tx_release(nt); tx_release(ft);
+    ts_close(store);
+    puts("ok indexed documents: v2 round trip, flat reads, history, stale/unchanged saves, v1 migration, Ask");
+}
+static void indexed_death(void) {
+    static uint16_t scratch[60000], expect[60000];
+    uint64_t least = UINT64_MAX, most = 0;
+    for (int cycle = 0; cycle < 8; cycle++) {
+        char name[32]; snprintf(name, sizeof name, "indexed-death-%d", cycle);
+        pid_t child = fork(); MUST(child >= 0);
+        if (!child) {
+            ts_store *s; MUST(ts_open(path(name), &s) == TS_OK);
+            tx_text *t = indexed_tree(0, scratch); td_text_value v = {t, 0, 0, -1, -1}; td_snapshot snap;
+            MUST(td_save_text(s, (ts_read){0, 0}, &v, &snap) == TS_OK);
+            for (unsigned k = 1;; k++) {
+                tx_text *n = indexed_tree(k, scratch); v.text = n;
+                MUST(td_save_text(s, (ts_read){snap.record.id, snap.record.revision}, &v, &snap) == TS_OK);
+                tx_release(t); t = n;
+            }
+        }
+        nanosleep(&(struct timespec){0, 200000000L + 60000000L * cycle}, NULL);
+        MUST(kill(child, SIGKILL) == 0); int status; MUST(waitpid(child, &status, 0) == child && WIFSIGNALED(status));
+        ts_store *s; MUST(ts_open(path(name), &s) == TS_OK);
+        td_snapshot snap; tx_text *t;
+        MUST(td_load_text(s, 1, 0, &snap, &t) == TS_OK);   /* every chunk of the committed manifest exists */
+        size_t n = indexed_text((unsigned)snap.record.revision - 1, expect);
+        CHECK(snap.record.revision >= 1 && same_tree(t, expect, n));
+        if (snap.record.revision < least) least = snap.record.revision;
+        if (snap.record.revision > most) most = snap.record.revision;
+        tx_release(t); ts_close(s);
+    }
+    CHECK(least > 1);
+    printf("ok indexed SIGKILL: 8 cycles killed at revisions %llu..%llu; each loads with all chunks and exact text\n",
+           (unsigned long long)least, (unsigned long long)most);
+}
+
 int main(int argc, char **argv) {
     if (argc != 2 || strlen(argv[1]) >= sizeof base) { fprintf(stderr, "usage: core-documents <directory>\n"); return 2; }
     strcpy(base, argv[1]); mkdir(base, 0700);
-    codec(); bounds(); edits_and_history(); capture(); quota(); process_death();
+    codec(); bounds(); edits_and_history(); capture(); quota(); process_death(); indexed(); indexed_death();
     if (failures) { fprintf(stderr, "core-documents: %d failures\n", failures); return 1; }
     puts("core-documents: all checks passed (storage/semantic correctness, not Android IME or presentation evidence)");
     return 0;
