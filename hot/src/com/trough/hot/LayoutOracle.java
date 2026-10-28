@@ -24,6 +24,8 @@ final class LayoutOracle {
         paint.setTextSize(36);
         paint.setColor(Color.BLACK);
         int cases = 0, lineMismatch = 0, baselineMismatch = 0, pixelCases = 0, linesTotal = 0;
+        int carets = 0, caretMismatch = 0, taps = 0, tapMismatch = 0;
+        List<Object> caretFailures = new ArrayList<>();
         long badPixels = 0;
         List<Object> failures = new ArrayList<>();
         int[] widths = {240, 410, 655, 1000};
@@ -43,6 +45,26 @@ final class LayoutOracle {
                 baselinesOk = Math.abs(ref.getLineBaseline(i) - ours.lines.get(i).baseline) < 0.51f;
             if (!linesOk) lineMismatch++;
             if (!baselinesOk) baselineMismatch++;
+            if (linesOk) {
+                for (int o = 0; o <= text.length(); o++) {
+                    carets++;
+                    float rx = ref.getPrimaryHorizontal(o), ox = ours.caretX(o);
+                    if (Math.abs(rx - ox) > 0.5f) {
+                        caretMismatch++;
+                        if (caretFailures.size() < 8) caretFailures.add(Json.map("text", text.substring(0, Math.min(16, text.length())),
+                            "width", width, "offset", o, "ref", rx, "ours", ox, "line", ours.lineOf(o)));
+                    }
+                }
+                for (int i = 0; i < ref.getLineCount(); i++) for (float x = 0; x <= width; x += 7) {
+                    taps++;
+                    int ro = ref.getOffsetForHorizontal(i, x), oo = ours.offsetAt(i, x);
+                    if (ro != oo) {
+                        tapMismatch++;
+                        if (caretFailures.size() < 16) caretFailures.add(Json.map("tap", true, "text", text.substring(0, Math.min(16, text.length())),
+                            "width", width, "line", i, "x", x, "ref", ro, "ours", oo));
+                    }
+                }
+            }
             long bad = -1;
             if (linesOk) {
                 pixelCases++;
@@ -76,7 +98,9 @@ final class LayoutOracle {
                     "our_baseline0", ours.lines.isEmpty() ? -1 : ours.lines.get(0).baseline));
             }
         }
-        return Json.map("ok", lineMismatch == 0 && baselineMismatch == 0 && badPixels == 0, "cases", cases, "lines", linesTotal,
+        return Json.map("ok", lineMismatch == 0 && baselineMismatch == 0 && badPixels == 0 && caretMismatch == 0 && tapMismatch == 0,
+            "carets", carets, "caret_mismatches", caretMismatch, "taps", taps, "tap_mismatches", tapMismatch,
+            "caret_failures", caretFailures, "cases", cases, "lines", linesTotal,
             "line_mismatches", lineMismatch, "baseline_mismatches", baselineMismatch, "pixel_cases", pixelCases,
             "bad_pixels", badPixels, "failures", failures);
     }

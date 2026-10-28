@@ -17,14 +17,20 @@ import java.util.List;
  * renderer composes and the interaction layer uses for hit testing. Offsets are UTF-16. */
 final class TextLayout {
     static final class Glyph { Font font; int id; float x, y; }
-    static final class Line { int start, end; float baseline, top, bottom, width; boolean rtl; }
+    /** A run of one direction within a line, in visual order: logical [start, end) and its box. */
+    static final class Run { int start, end; boolean rtl; float x, advance; }
+    static final class Line { int start, end; float baseline, top, bottom, width; boolean rtl; final List<Run> runs = new ArrayList<>(); }
     final List<Glyph> glyphs = new ArrayList<>();
     final List<Line> lines = new ArrayList<>();
     float height;
+    private String text;
+    private Paint paint;
+    private float left, width;
 
     /** Lays out text (paragraphs separated by '\n') in width px with the given paint, from (x, y). */
     static TextLayout layout(String text, Paint paint, float width, float x, float y) {
         TextLayout out = new TextLayout();
+        out.text = text; out.paint = paint; out.left = x; out.width = width;
         Paint.FontMetrics fm = paint.getFontMetrics();
         float top = y;
         int start = 0;
@@ -45,6 +51,7 @@ final class TextLayout {
         if (start == end) {                               // empty paragraph: one empty line
             Line l = new Line();
             l.start = l.end = start; l.top = top; l.baseline = top + Math.round(ascent); l.bottom = l.baseline + Math.round(descent);
+            l.rtl = false;
             out.lines.add(l);
             return l.bottom;
         }
@@ -95,6 +102,9 @@ final class TextLayout {
                         q.font = pg.getFont(g); q.id = pg.getGlyphId(g); q.x = pg.getGlyphX(g); q.y = pg.getGlyphY(g);
                         out.glyphs.add(q);
                     }
+                    Run run = new Run();
+                    run.start = start + rs; run.end = start + re; run.rtl = rtl; run.x = pen; run.advance = pg.getAdvance();
+                    l.runs.add(run);
                     pen += pg.getAdvance();
                 }
             }
@@ -103,5 +113,52 @@ final class TextLayout {
             lineStart = lineEnd;
         }
         return top;
+    }
+
+    /** The line holding offset (an offset at a line break belongs to the following line). */
+    int lineOf(int offset) {
+        for (int i = lines.size() - 1; i > 0; i--) if (offset >= lines.get(i).start) return i;
+        return 0;
+    }
+
+    /** The caret's x for offset, in the direction of the run that holds it; at a run boundary the
+     * paragraph direction's run wins (the primary caret). */
+    float caretX(int offset) {
+        Line l = lines.get(lineOf(offset));
+        if (l.runs.isEmpty()) return l.rtl ? left + width : left;
+        Run hit = null;
+        for (Run r : l.runs) if (offset >= r.start && offset < r.end) hit = r;
+        if (hit == null || (offset == hit.start && hit.rtl != l.rtl)) {
+            /* Boundary: the run ending or starting here in the paragraph's direction. */
+            for (Run r : l.runs) if (r.rtl == l.rtl && (offset == r.end || offset == r.start)) { hit = r; break; }
+        }
+        if (hit == null) {                        // past the drawn text (trailing whitespace)
+            Run edge = l.runs.get(l.rtl ? 0 : l.runs.size() - 1);
+            return l.rtl ? edge.x : edge.x + edge.advance;
+        }
+        int o = Math.max(hit.start, Math.min(offset, hit.end));
+        float into = paint.getRunAdvance(text, hit.start, hit.end, l.start, Math.max(hit.end, lineVisibleEnd(l)), hit.rtl, o);
+        return hit.rtl ? hit.x + hit.advance - into : hit.x + into;
+    }
+
+    /** The offset nearest x on line i (a tap). */
+    int offsetAt(int i, float x) {
+        Line l = lines.get(i);
+        if (l.runs.isEmpty()) return l.start;
+        Run first = l.runs.get(0), last = l.runs.get(l.runs.size() - 1);
+        if (x <= first.x) return first.rtl ? first.end : first.start;
+        if (x >= last.x + last.advance) return last.rtl ? last.start : last.end;
+        for (Run r : l.runs) {
+            if (x < r.x || x > r.x + r.advance) continue;
+            float into = r.rtl ? r.x + r.advance - x : x - r.x;
+            return paint.getOffsetForAdvance(text, r.start, r.end, l.start, Math.max(r.end, lineVisibleEnd(l)), r.rtl, into);
+        }
+        return l.end;
+    }
+
+    private int lineVisibleEnd(Line l) {
+        int e = l.end;
+        while (e > l.start && Character.isWhitespace(text.charAt(e - 1))) e--;
+        return e;
     }
 }
