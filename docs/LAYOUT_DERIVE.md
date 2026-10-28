@@ -54,11 +54,27 @@ identity cache in front. The probe (`font_probe` in the receipt) keeps measuring
   in the executor. Absolute times swing about 2x between runs of the same bundle (direct loop:
   870 to 1987 ms), so only comparisons within one run mean anything.
 
+## Where the ceiling is
+
+`stage_scaling` times each platform stage alone over the corpus on 1 and 4 threads.
+Two runs on bundle `c086af09cfa8`:
+
+| stage (1 thread -> 4 threads) | run 1 | run 2 |
+|---|---|---|
+| shaping (`TextRunShaper`) | 136 -> 135 ms | 89 -> 137 ms |
+| line breaking (`MeasuredText` + `LineBreaker`) | 83 -> 210 ms | 90 -> 122 ms |
+| bidi (`java.text.Bidi`, pure Java) | 76 -> 17 ms | 40 -> 12 ms |
+
+The pure-Java stage scales 3-4x; the native text stages do not scale at all. That is
+consistent with minikin serializing these calls process-wide. A lock is the likely cause; a
+native profile would confirm it. Consequences:
+- operators that call the platform text stack get 1-2 workers, and parallelism goes to other work;
+- a Trough-owned shaper (HarfBuzz and FreeType, built natively, with no process lock) is the
+  workaround if layout throughput becomes the bottleneck. It must still match the platform's
+  pixels, which is the text-rendering decision's oracle.
+
 ## Not yet built
 
-- **Why layout stops scaling:** a shared lock in the platform's shaping and layout cache is
-  suspected, not shown. Profile with simpleperf before choosing a worker count. Until then,
-  layout should not take more than two workers.
 - **Thermal state in receipts:** record thermal status and CPU frequency with every timing.
 - **Granularity:** layout per line range for long paragraphs, so one edit does not re-lay a
   whole paragraph.

@@ -105,7 +105,45 @@ final class LayoutDeriveOracle {
             threads.add(Json.map("threads", workers, "ms", (System.nanoTime() - start) / 1e6));
         }
         out.put("java_threads", threads);
+        out.put("stage_scaling", stageScaling(corpus));
         return out;
+    }
+
+    /** Each platform stage alone over the corpus on 1 and 4 threads (ms): where layout's
+     * multi-thread ceiling sits. */
+    static Map<String, Object> stageScaling(final List<String> corpus) {
+        Map<String, Object> r = new LinkedHashMap<>();
+        String[] stages = {"shape", "break", "bidi"};
+        for (final String stage : stages) {
+            List<Object> row = new ArrayList<>();
+            for (int w : new int[]{1, 4}) {
+                Thread[] pool = new Thread[w];
+                final java.util.concurrent.atomic.AtomicInteger next = new java.util.concurrent.atomic.AtomicInteger();
+                long start = System.nanoTime();
+                for (int k = 0; k < w; k++) {
+                    pool[k] = new Thread(new Runnable() { public void run() {
+                        android.graphics.Paint p = new android.graphics.Paint();
+                        p.setTextSize(DeriveLayout.TEXT_SIZE);
+                        for (int i; (i = next.getAndIncrement()) < corpus.size();) {
+                            String t = corpus.get(i); char[] c = t.toCharArray();
+                            if (stage.equals("shape")) android.graphics.text.TextRunShaper.shapeTextRun(c, 0, c.length, 0, c.length, 0, 0, false, p);
+                            else if (stage.equals("break")) {
+                                android.graphics.text.MeasuredText m = new android.graphics.text.MeasuredText.Builder(c).appendStyleRun(p, c.length, false).build();
+                                android.graphics.text.LineBreaker.ParagraphConstraints pc = new android.graphics.text.LineBreaker.ParagraphConstraints();
+                                pc.setWidth(655);
+                                new android.graphics.text.LineBreaker.Builder().setBreakStrategy(android.graphics.text.LineBreaker.BREAK_STRATEGY_HIGH_QUALITY)
+                                    .build().computeLineBreaks(m, pc, 0);
+                            } else new java.text.Bidi(c, 0, null, 0, c.length, java.text.Bidi.DIRECTION_DEFAULT_LEFT_TO_RIGHT);
+                        }
+                    }});
+                    pool[k].start();
+                }
+                for (Thread t : pool) { try { t.join(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); } }
+                row.add((System.nanoTime() - start) / 1e6);
+            }
+            r.put(stage, row);
+        }
+        return r;
     }
 
     /** Per-call cost (us) of ways to name the face behind a fresh PositionedGlyphs Font. */
