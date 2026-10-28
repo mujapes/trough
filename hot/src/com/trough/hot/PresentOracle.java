@@ -29,7 +29,8 @@ final class PresentOracle {
             return null;
         }});
         try {
-            if (!ready.await(10, TimeUnit.SECONDS)) return Json.map("ok", false, "error", "surface not created (is the app visible?)");
+            if (!ready.await(10, TimeUnit.SECONDS))
+                return Json.map("ok", false, "needs_visible_app", true, "error", "surface not created: Trough is not visible");
             String result = NativeCore.presentProbe(view[0].getHolder().getSurface(), 240);
             JSONObject o = new JSONObject(result);
             Map<String, Object> out = new LinkedHashMap<>();

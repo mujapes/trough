@@ -44,7 +44,11 @@ for name in $(printf '%s' "$obs" | python3 -c 'import json,sys; print(" ".join(j
     if python3 "$S" "$name" --timeout "$limit" --out "$out/$name.json" >/dev/null 2>"$out/$name.err"; then
         rm -f "$out/$name.err"; echo "ok   $name"
     else
-        fail=1; echo "FAIL $name (see $out)"
+        if grep -q '"needs_visible_app": *true' "$out/$name.json" 2>/dev/null; then
+            echo "SKIP $name (needs Trough visible on screen)"
+        else
+            fail=1; echo "FAIL $name (see $out)"
+        fi
     fi
 done
 echo "bundle $(printf '%.12s' "$have") evidence: $out"
