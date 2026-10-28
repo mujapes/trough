@@ -35,9 +35,29 @@ Skia's luminance bucket instead of the exact colour.
     channel difference 2, over 41k inked pixels.
   - GPU composition takes 0.58 ms.
 
+## Layout
+
+`TextLayout.java` turns paragraphs into lines and positioned glyphs with the platform stack:
+- `java.text.Bidi` gives the paragraph direction (first strong) and level runs.
+- `MeasuredText` (style runs per bidi run) feeds `LineBreaker` with the high-quality strategy.
+  Hyphenation is off until hyphen edits are drawn.
+- Each line's runs are put in visual order and shaped with `TextRunShaper`. An RTL paragraph
+  is aligned to its width, and trailing whitespace is not drawn.
+- Line metrics follow `StaticLayout`'s rule: the paint's integer metrics, extended (never
+  shrunk) by fallback fonts on the line. Lines therefore stack on whole pixels.
+
+`android.layout` compares against `StaticLayout` (same text, width, paint, strategy, direction
+heuristic, no padding, fallback line spacing). Six texts (Latin paragraphs, Arabic, mixed
+bidi with numbers, Devanagari, CJK with Latin, leading empty paragraphs) run at widths 240,
+410, 655 and 1000 px. On the Pixel (bundle `bfe844c88fd9...`): 24 cases and 115 lines, with
+every line start and baseline equal and 0 differing pixels when our positioned glyphs are
+drawn by the platform. Two fixes came from this oracle, both now in the code: integer line
+metrics, and the extend-never-shrink rule.
+
 ## Not yet built
 
-Subpixel glyph positioning (positions are snapped to pixels now); colour glyphs such as emoji,
+Subpixel glyph positioning on the GPU path (positions are snapped to pixels there, while
+`TextLayout` keeps exact positions); hyphen edits; colour glyphs such as emoji,
 which need an RGBA atlas; atlas eviction and luminance-bucket keys; line breaking, paragraph
 bidi and grapheme-aware cursoring in the layout layer; and scaling with display density and
 font scale.

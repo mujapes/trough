@@ -12,7 +12,9 @@ from the bionic library, Mali-G710 / Vulkan 1.4 / 165 extensions, 60 Hz pacing
 (docs/PRESENT.md). Next: the presenter proper (swapchain lifetime, scene pipelines, glyphs,
 damage), or stage-3 work planning. Rectangle and glyph renderer with pixel oracles (lavapipe,
 Mali exact); text = platform TextRunShaper + Canvas.drawGlyphs masks + Trough GPU composition,
-pixel-identical to the platform across 7 scripts (docs/TEXT_RENDERING.md). The InputConnection adapter exists
+pixel-identical to the platform across 7 scripts (docs/TEXT_RENDERING.md).
+TextLayout (Bidi + LineBreaker + TextRunShaper) equals StaticLayout on 115 lines (android.layout).
+Presenter swapchain path written; android.surface needs Trough visible and has not run yet. The InputConnection adapter exists
 (docs/INPUT.md): android.ime matches SDK 37's BaseInputConnection over 16000 random IME ops.
 
 Latest (late night): `native/store/keeper`, the storage owner thread ([contract](docs/KEEPER.md)):
