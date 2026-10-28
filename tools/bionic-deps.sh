@@ -2,6 +2,8 @@
 # Inputs for native/bionic.sh, fetched and verified (docs/BIONIC.md). Prints the two exports.
 #   BIONIC_SYSROOT: Termux's ndk-sysroot r30 (Apache-2.0/BSD NDK headers and crt objects),
 #                   pinned by SHA-256 from Termux's package index.
+#   BIONIC_INCLUDE: Khronos Vulkan headers from Debian's libvulkan-dev 1.4.309.0-1 (the .deb,
+#                   pinned by SHA-256), so they travel with the sources.
 #   SQLITE_SRC:     Debian's sqlite3 3.46.1-7+deb13u2 source with Debian's patches applied, the
 #                   same release the root's libsqlite3 comes from, amalgamated by its own Makefile.
 # Needs: curl, dpkg-dev (dpkg-source), tclsh, make, cc; clang and lld (19) for the build itself.
@@ -14,6 +16,7 @@ SQLITE_DSC=sqlite3_3.46.1-7+deb13u2.dsc
 SQLITE_DSC_SHA=46e1eec171e11108fc436e45309b635b601029726b6ffd3bf435bb474e511638
 DEBIAN=https://deb.debian.org/debian/pool/main/s/sqlite3
 SQLITE_C_SHA=9dc06fa808506de2b43498ad60043075ba9ad0cb5ff7978704f61a4fca53aede
+VULKAN_CORE_SHA=39f358bb99f7be5206524d119de4a5b5ab5c515c329c2857ff395d37e6387b4c
 SQLITE_H_SHA=f319f664239fdd3154721a70b7cf37fa1475703c6a4deaf7605511851c1edb17
 
 if [ ! -d "$C/x/data/data/com.termux/files/usr/include" ]; then
@@ -36,5 +39,16 @@ if [ ! -f "$A/sqlite3.c" ]; then
 fi
 echo "$SQLITE_C_SHA  $A/sqlite3.c" | sha256sum -c - >&2
 echo "$SQLITE_H_SHA  $A/sqlite3.h" | sha256sum -c - >&2
+VULKAN_DEB=libvulkan-dev_1.4.309.0-1_arm64.deb
+VULKAN_DEB_SHA=3244f0422d3c5cf14f5d13bc48a0cae7786d94ea0ceff22414c094388666e70d
+if [ ! -f "$C/include/vulkan/vulkan_core.h" ]; then
+    mkdir -p "$C/deb" && cd "$C/deb"
+    [ -f "$VULKAN_DEB" ] || curl -fsSLO "https://deb.debian.org/debian/pool/main/v/vulkan-loader/$VULKAN_DEB"
+    echo "$VULKAN_DEB_SHA  $VULKAN_DEB" | sha256sum -c - >&2
+    rm -rf "$C/vk" "$C/include" && dpkg-deb -x "$VULKAN_DEB" "$C/vk" && mkdir -p "$C/include"
+    cp -r "$C/vk/usr/include/vulkan" "$C/vk/usr/include/vk_video" "$C/include/"
+fi
+echo "$VULKAN_CORE_SHA  $C/include/vulkan/vulkan_core.h" | sha256sum -c - >&2
+echo "BIONIC_INCLUDE=$C/include"
 echo "BIONIC_SYSROOT=$C/x/data/data/com.termux/files"
 echo "SQLITE_SRC=$A"

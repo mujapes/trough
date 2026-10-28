@@ -2,6 +2,7 @@ build.sh
 bionic.sh
 outputs-bionic.list
 android/jni.c
+android/present.c
 sources.list
 outputs.list
 bench/bench.c

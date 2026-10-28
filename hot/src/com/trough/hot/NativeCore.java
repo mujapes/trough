@@ -20,6 +20,7 @@ final class NativeCore {
     static native long[] queueState(long queue);
     static native long[] value(long queue);
     static native int notifyFd(long keeper);
+    static native String presentProbe(android.view.Surface surface, int frames);
     static native long externalEdit(long keeper, long document, int start, int end, String text);
     static native String slice(long queue, int start, int end);
     static native long batch(long keeper, long queue, int[] ranges, String[] texts, int anchor, int caret, int cs, int ce);

@@ -27,6 +27,7 @@ if command -v "${CLANG:-clang-19}" >/dev/null && DEPS="$("$ROOT/tools/bionic-dep
     mkdir -p "$B/native/bionic-inputs"
     cp "${TROUGH_CACHE:-$HOME/.cache/trough-sysroot}/deb/ndk-sysroot_30_aarch64.deb" "$B/native/bionic-inputs/ndk-sysroot.deb"
     cp "$SQLITE_SRC/sqlite3.c" "$SQLITE_SRC/sqlite3.h" "$B/native/bionic-inputs/"
+    cp -r "$BIONIC_INCLUDE" "$B/native/bionic-inputs/include"
 else
     echo "hot.sh: no bionic toolchain/inputs; bundle has no android-* outputs" >&2
 fi

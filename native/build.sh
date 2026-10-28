@@ -57,7 +57,8 @@ cp "$S/outputs.list" "$O/outputs.list"
 if [ -d "$S/bionic-inputs" ]; then
     X=$(mktemp -d)
     dpkg-deb -x "$S/bionic-inputs/ndk-sysroot.deb" "$X"
-    BIONIC_SYSROOT="$X/data/data/com.termux/files" SQLITE_SRC="$S/bionic-inputs" sh "$S/bionic.sh" "$S" "$O"
+    BIONIC_SYSROOT="$X/data/data/com.termux/files" SQLITE_SRC="$S/bionic-inputs" \
+        BIONIC_INCLUDE="$S/bionic-inputs/include" sh "$S/bionic.sh" "$S" "$O"
     rm -rf "$X"
     cat "$S/outputs-bionic.list" >> "$O/outputs.list"
 fi
