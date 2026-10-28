@@ -61,3 +61,11 @@ reattach), not as live in-memory queues.
   - 4 coalesced saves; flush 15.7 ms;
   - live, durable and restart-recovered text exact;
   - library load 22 ms.
+
+Follow-up (bundle `a27064c57747...`, 20000 edits, contention counters added): 5.2 us p50,
+19.4 us p99, 1.43 ms max, one edit over 1 ms. The queue lock was found held 21 times (0.1%)
+and the keeper's poke lock never. The earlier 5.3 ms outlier did not recur; slow edits point
+to preemption or GC rather than lock inversion, so no priority-inheritance change was made.
+`ti_state.contended` and `tk_stats.poke_contended` stay as permanent diagnostics. CI's
+`bionic-arm64` job reproduces the build deterministically on Ubuntu from the same inputs.
+
