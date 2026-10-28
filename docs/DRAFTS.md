@@ -8,12 +8,17 @@ Android binding of its own.
 
 ## Ownership
 
-The interaction owner calls `ti_edit` (same batch contract as `td_apply`) and `ti_view`.
+The live value is a [`tx_text`](TEXT.md) (since 2026-10-28 evening). The interaction owner calls
+`ti_edit` (same batch contract as `td_apply`: the whole batch and final selection are validated
+before anything changes; each edit is then O(log n + inserted)) and `ti_view` (a flat copy), or
+`ti_snapshot` (O(1), an immutable reference for layout or agents).
 These take a mutex that the storage side holds only for copies, never across SQLite, so
 typing does not wait on storage. Every accepted edit advances the live `local` revision.
 
-The storage owner runs `ti_capture` -> `td_save` (outside the lock) -> `ti_acknowledge` or
-`ti_reject` for that exact `local`. At most one capture is in flight; edits made meanwhile stay
+The storage owner runs `ti_capture` (retains the live snapshot, no copy) -> `td_save_text`
+(outside the lock; writes only changed chunks, [TDOC v2](DOCUMENTS.md)) -> `ti_acknowledge` or
+`ti_reject` for that exact `local`, then releases the captured reference. Storage-owner calls are
+not concurrent with each other. At most one capture is in flight; edits made meanwhile stay
 pending and the next capture carries all of them, so saves coalesce under load (4000 edits
 became 13 saves on the Pixel, 67-441 in the VM, depending on scheduling). Acknowledgement
 advances `saved`/`durable` and drops the covered batches. It never replaces the live value
@@ -26,10 +31,11 @@ subscribing for external revisions are the storage owner's job.
 
 ## External revisions: rebase or conflict
 
-The queue keeps the text of the last acknowledged durable revision (base) and the ranges of
+The queue keeps the last acknowledged durable text (base, a shared snapshot) and the ranges of
 every unacknowledged batch (not their text). Invariant: base + logged batches = live.
 `ti_rebase` diffs base against the new durable text into one replacement (common prefix and
-suffix), transforms it through the logged batches and applies it to the live value, mapping
+suffix; chunks shared at the same offset are skipped without comparison; the scan runs outside
+the lock), transforms it through the logged batches and applies it to the live value, mapping
 selection and composition. Logged batches are transformed the other way, so later rebases stay
 exact. Ties: a local edit ending at the remote start (including an insertion at the same point)
 goes first; one starting at the remote end goes after.
@@ -57,10 +63,16 @@ overflow, clean rebase dirtying). Phone: bundle
 `5eadad0bf7024750ce7ace5c31df03a6eef0b94c3b43a9c77e9506de4620f992`, receipt in
 `out/evidence/core.drafts.json`.
 
+Since the move to `tx_text` the oracle also runs 200 rebases against revisions that share
+chunks with the base, six periodic-text cases where chunks are shared at shifted offsets, and
+20 leaf-boundary constructions for the diff's alignment and clamp guards. Each case is checked
+against an independent flat minimal diff. Mutants: 10/10 on the earlier set plus 5/5 on the
+chunk-aware diff (prefix/suffix alignment, clamp, off-by-one, non-terminating prefix).
+
 ## Not yet built
 
 Android `InputConnection`/IME adapter that drives this queue; the storage-owner worker and its
-scheduling; change notification for external revisions; a per-keystroke cost independent of
-document size (each edit currently copies the live text, as `td_apply` does; indexed text
-storage remains stage-2 work); persisting unacknowledged edits across process death (they
-live only in memory until acknowledged).
+scheduling; change notification for external revisions; persisting unacknowledged edits across
+process death (they live only in memory until acknowledged). A rebase against a freshly loaded
+revision still compares O(n) units, since loaded chunks are distinct objects; chunk identity by
+hash could remove that.

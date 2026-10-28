@@ -33,21 +33,38 @@ static td_snapshot create(ts_store *s, const uint16_t *t, size_t n) {
     MUST(td_create(s, &v, &snap) == TS_OK);
     return snap;
 }
+static ts_status open_flat(ti_queue **q, const td_snapshot *doc, const uint16_t *text, size_t limit) {
+    tx_text *t; MUST(tx_build(text, doc->length, &t) == TS_OK);
+    ts_status st = ti_open(q, doc, t, limit);
+    tx_release(t); return st;
+}
+static ts_status rebase_flat(ti_queue *q, const td_snapshot *r, const uint16_t *text) {
+    tx_text *t; MUST(tx_build(text, r->length, &t) == TS_OK);
+    ts_status st = ti_rebase(q, r, t);
+    tx_release(t); return st;
+}
 /* Storage owner: one full capture/save/acknowledge, rebasing on a storage conflict. */
 static ts_status persist(ts_store *s, ti_queue *q) {
-    static uint16_t buf[CAP]; ti_captured c;
-    ts_status st = ti_capture(q, buf, CAP, &c);
+    ti_captured c;
+    ts_status st = ti_capture(q, &c);
     if (st) return st;
     td_snapshot r;
-    st = td_save(s, c.expected, &c.value, &r);
+    st = td_save_text(s, c.expected, &c.value, &r);
     if (st == TS_OK) {
-        for (size_t i = 0; i < c.value.length; i++) was_durable[c.value.text[i]] = 1;
+        size_t n = tx_length(c.value.text); uint16_t *u = malloc(n * 2 + 2);
+        MUST(u && tx_read(c.value.text, 0, n, u) == TS_OK);
+        for (size_t i = 0; i < n; i++) was_durable[u[i]] = 1;
+        free(u); tx_release(c.value.text);
         MUST(ti_acknowledge(q, c.local, &r) == TS_OK); return TS_OK;
     }
+    tx_release(c.value.text);
     MUST(ti_reject(q, c.local) == TS_OK);
     if (st != TS_CONFLICT) return st;
-    MUST(td_load(s, c.expected.id, 0, &r, buf, CAP) == TS_OK);
-    return ti_rebase(q, &r, buf);
+    tx_text *t;
+    MUST(td_load_text(s, c.expected.id, 0, &r, &t) == TS_OK);
+    st = ti_rebase(q, &r, t);
+    tx_release(t);
+    return st;
 }
 static void view(ti_queue *q, model *m, td_value *v, ti_state *st) {
     MUST(ti_view(q, m->text, CAP, v, st) == TS_OK); m->length = v->length;
@@ -58,26 +75,28 @@ static void basics(void) {
     ts_store *s; MUST(ts_open(path("basics"), &s) == TS_OK);
     uint16_t hello[] = {'h','e','l','l','o'};
     td_snapshot doc = create(s, hello, 5); ti_queue *q;
-    MUST(ti_open(&q, &doc, hello, 0) == TS_OK);
+    MUST(open_flat(&q, &doc, hello, 0) == TS_OK);
     ti_state st; ti_state_get(q, &st);
     CHECK(st.phase == TI_CLEAN && st.durable == 1 && st.local == 0 && st.saved == 0);
     uint16_t buf[64]; ti_captured c;
-    CHECK(ti_capture(q, buf, 64, &c) == TS_NOT_FOUND);
+    CHECK(ti_capture(q, &c) == TS_NOT_FOUND);
     td_edit bang = {5, 5, (uint16_t[]){'!'}, 1}; uint64_t local;
     MUST(ti_edit(q, &bang, 1, 6, 6, -1, -1, &local) == TS_OK && local == 1);
-    CHECK(ti_capture(q, buf, 2, &c) == TS_CAPACITY && c.value.length == 6);
-    MUST(ti_capture(q, buf, 64, &c) == TS_OK && c.local == 1 && c.expected.id == doc.record.id && c.expected.revision == 1);
-    CHECK(ti_capture(q, buf, 64, &(ti_captured){0}) == TS_INVALID);      /* one save in flight */
+    MUST(ti_capture(q, &c) == TS_OK && c.local == 1 && c.expected.id == doc.record.id && c.expected.revision == 1 &&
+         tx_length(c.value.text) == 6 && c.value.caret == 6);
+    CHECK(ti_capture(q, &(ti_captured){0}) == TS_INVALID);      /* one save in flight */
     /* Typing continues while the save runs; the returning snapshot never replaces it. */
     td_edit more = {6, 6, (uint16_t[]){'?'}, 1};
     MUST(ti_edit(q, &more, 1, 7, 7, -1, -1, &local) == TS_OK && local == 2);
-    td_snapshot r; MUST(td_save(s, c.expected, &c.value, &r) == TS_OK);
+    td_snapshot r; MUST(td_save_text(s, c.expected, &c.value, &r) == TS_OK);
+    tx_release(c.value.text);
     CHECK(ti_acknowledge(q, 2, &r) == TS_INVALID);                      /* not the captured revision */
     MUST(ti_acknowledge(q, 1, &r) == TS_OK);
     model m; td_value v; view(q, &m, &v, &st);
     CHECK(st.phase == TI_DIRTY && st.saved == 1 && st.local == 2 && st.durable == 2 && m.length == 7 && m.text[6] == '?' && v.caret == 7);
     /* A failed save keeps the edits pending; the next capture carries everything. */
-    MUST(ti_capture(q, buf, 64, &c) == TS_OK && c.local == 2 && c.expected.revision == 2);
+    MUST(ti_capture(q, &c) == TS_OK && c.local == 2 && c.expected.revision == 2);
+    tx_release(c.value.text);
     MUST(ti_reject(q, 2) == TS_OK);
     ti_state_get(q, &st); CHECK(st.phase == TI_DIRTY);
     CHECK(persist(s, q) == TS_OK);
@@ -111,7 +130,7 @@ static void rebases(void) {
     ts_store *s; MUST(ts_open(path("rebases"), &s) == TS_OK);
     uint16_t abc[] = {'a','b','c','d','e','f'}, buf[CAP];
     td_snapshot doc = create(s, abc, 6); ti_queue *q;
-    MUST(ti_open(&q, &doc, abc, 0) == TS_OK);
+    MUST(open_flat(&q, &doc, abc, 0) == TS_OK);
     /* Local insert at the start with selection and composition; remote append at the end. */
     td_edit x = {0, 0, (uint16_t[]){'X'}, 1};
     MUST(ti_edit(q, &x, 1, 1, 1, 0, 1, NULL) == TS_OK);
@@ -138,11 +157,11 @@ static void rebases(void) {
     uint16_t r3[] = {'Q','X'};
     external(s, doc.record.id, r3, 2);
     r = current(s, doc.record.id, buf);
-    CHECK(ti_rebase(q, &r, buf) == TS_OK);
+    CHECK(rebase_flat(q, &r, buf) == TS_OK);
     view(q, &m, &v, &st);
     CHECK(same(m.text, m.length, r3, 2) && st.phase == TI_CLEAN && v.anchor == 2 && v.caret == 2);
-    CHECK(ti_capture(q, buf, CAP, &(ti_captured){0}) == TS_NOT_FOUND);
-    CHECK(ti_rebase(q, &r, buf) == TS_OK);                /* same revision: no change */
+    CHECK(ti_capture(q, &(ti_captured){0}) == TS_NOT_FOUND);
+    CHECK(rebase_flat(q, &r, buf) == TS_OK);                /* same revision: no change */
     ti_state_get(q, &st); CHECK(st.external == 3);
     /* Overlapping edits conflict: live untouched, edits and saves refused until resolved. */
     td_edit y = {1, 2, (uint16_t[]){'Y'}, 1};
@@ -153,7 +172,7 @@ static void rebases(void) {
     view(q, &m, &v, &st);
     CHECK(st.phase == TI_CONFLICT && m.length == 2 && m.text[1] == 'Y');
     CHECK(ti_edit(q, &sel, 1, 0, 0, -1, -1, NULL) == TS_CONFLICT);
-    CHECK(ti_capture(q, buf, CAP, &(ti_captured){0}) == TS_CONFLICT);
+    CHECK(ti_capture(q, &(ti_captured){0}) == TS_CONFLICT);
     r = current(s, doc.record.id, buf);
     CHECK(ti_resolve_keep(q, r.record.revision + 1) == TS_INVALID);
     MUST(ti_resolve_keep(q, r.record.revision) == TS_OK);
@@ -173,7 +192,7 @@ static void rebases(void) {
     /* Boundaries: insertions at one point merge local-first; an edit starting exactly at the
      * end of a remote replacement (or ending at its start) touches it without overlapping. */
     doc = create(s, abc, 6);
-    MUST(ti_open(&q, &doc, abc, 0) == TS_OK);
+    MUST(open_flat(&q, &doc, abc, 0) == TS_OK);
     td_edit l = {3, 3, (uint16_t[]){'L'}, 1}, d = {4, 5, (uint16_t[]){'D'}, 1};
     MUST(ti_edit(q, &l, 1, 4, 4, -1, -1, NULL) == TS_OK);
     MUST(ti_edit(q, &d, 1, 5, 5, -1, -1, NULL) == TS_OK);   /* "abcLDef" */
@@ -199,7 +218,7 @@ static void overflow(void) {
     ts_store *s; MUST(ts_open(path("overflow"), &s) == TS_OK);
     uint16_t t[] = {'a','b'}, buf[CAP];
     td_snapshot doc = create(s, t, 2); ti_queue *q;
-    MUST(ti_open(&q, &doc, t, 64) == TS_OK);
+    MUST(open_flat(&q, &doc, t, 64) == TS_OK);
     td_edit e = {0, 0, (uint16_t[]){'x'}, 1};
     for (int i = 0; i < 8; i++) MUST(ti_edit(q, &e, 1, 0, 0, -1, -1, NULL) == TS_OK);
     ti_state st; ti_state_get(q, &st);
@@ -243,7 +262,7 @@ static void differential(void) {
         model live = {{0}, 0}, durable;
         for (int i = 0; i < 20; i++) live.text[live.length++] = fresh++;
         td_snapshot doc = create(s, live.text, live.length); ti_queue *q;
-        MUST(ti_open(&q, &doc, live.text, round % 5 ? 0 : 200) == TS_OK);
+        MUST(open_flat(&q, &doc, live.text, round % 5 ? 0 : 200) == TS_OK);
         for (size_t i = 0; i < live.length; i++) was_local[live.text[i]] = was_durable[live.text[i]] = 1;
         for (int step = 0; step < 120; step++) {
             uint32_t r = next() % 100;
@@ -287,7 +306,7 @@ static void differential(void) {
                         /* Owner chooses the durable text: reopen the queue from storage. */
                         ti_close(q);
                         doc = current(s, doc.record.id, live.text); live.length = doc.length;
-                        MUST(ti_open(&q, &doc, live.text, round % 5 ? 0 : 200) == TS_OK);
+                        MUST(open_flat(&q, &doc, live.text, round % 5 ? 0 : 200) == TS_OK);
                         for (size_t i = 0; i < live.length; i++) was_local[live.text[i]] = 1;
                     }
                 } else {
@@ -304,8 +323,8 @@ static void differential(void) {
                 external(s, doc.record.id, d.text, d.length);
             } else {
                 /* Lost save: captured, then the store fails before acknowledging. */
-                uint16_t buf[CAP]; ti_captured c;
-                if (ti_capture(q, buf, CAP, &c) == TS_OK) MUST(ti_reject(q, c.local) == TS_OK);
+                ti_captured c;
+                if (ti_capture(q, &c) == TS_OK) { tx_release(c.value.text); MUST(ti_reject(q, c.local) == TS_OK); }
             }
         }
         /* Drain: every acknowledged save leaves durable == live once clean. */
@@ -315,7 +334,7 @@ static void differential(void) {
                 /* A clean queue learns of external revisions only from its storage owner. */
                 model now; td_snapshot c = current(s, doc.record.id, now.text);
                 if (c.record.revision == st.durable) break;
-                CHECK(ti_rebase(q, &c, now.text) == TS_OK);
+                CHECK(rebase_flat(q, &c, now.text) == TS_OK);
                 continue;
             }
             if (st.phase == TI_CONFLICT) {
@@ -333,6 +352,168 @@ static void differential(void) {
     CHECK(merges > 50 && conflicts > 10 && saves > 500);
     printf("ok draft differential: %u edits, %u saves, %u merges, %u conflicts over 60 documents\n", edits, saves, merges, conflicts);
     ts_close(s);
+}
+
+/* External revisions that share chunks with the queue's base (an in-process editor deriving
+ * from the same snapshot) exercise the diff's shared-chunk skips. Disjoint edits on either
+ * side of each other have one exact merged result. */
+static void shared_chunks(void) {
+    ts_store *s; MUST(ts_open(path("shared"), &s) == TS_OK);
+    enum { N = 20000 };
+    static uint16_t init[N], expect[N + 1024], got[N + 1024];
+    for (size_t i = 0; i < N; i++) init[i] = (uint16_t)('a' + i % 23);
+    tx_text *t; MUST(tx_build(init, N, &t) == TS_OK);
+    td_text_value v0 = {t, 0, 0, -1, -1}; td_snapshot doc;
+    MUST(td_save_text(s, (ts_read){0, 0}, &v0, &doc) == TS_OK);
+    ti_queue *q; MUST(ti_open(&q, &doc, t, 0) == TS_OK);
+    tx_release(t);
+    unsigned merges = 0;
+    for (int i = 0; i < 200; i++) {
+        td_text_value base; ti_state st;
+        MUST(ti_snapshot(q, &base, &st) == TS_OK && st.phase == TI_CLEAN);
+        size_t n = tx_length(base.text), half = n / 2;
+        int remote_first = i % 2;
+        size_t r_at = remote_first ? next() % (half - 8) : half + 8 + next() % (half - 16);
+        size_t l_at = remote_first ? half + 8 + next() % (half - 16) : next() % (half - 8);
+        size_t r_cut = next() % 4;
+        uint16_t r_ins[3] = {'R', (uint16_t)i, 'r'}, l_ins = 'L';
+        MUST(ti_edit(q, &(td_edit){l_at, l_at, &l_ins, 1}, 1, 0, 0, -1, -1, NULL) == TS_OK);
+        tx_text *remote; MUST(tx_edit(base.text, r_at, r_at + r_cut, r_ins, 3, &remote) == TS_OK);
+        td_text_value rv = {remote, 0, 0, -1, -1}; td_snapshot r;
+        MUST(td_save_text(s, (ts_read){doc.record.id, st.durable}, &rv, &r) == TS_OK);
+        /* Expected: apply the later-positioned edit first so earlier offsets stay valid. */
+        MUST(tx_read(base.text, 0, n, expect) == TS_OK);
+        size_t m = n;
+        #define APPLY(at, cut, ins, k) do { memmove(expect + (at) + (k), expect + (at) + (cut), (m - (at) - (cut)) * 2); \
+            memcpy(expect + (at), (ins), (k) * 2); m = m - (cut) + (k); } while (0)
+        if (remote_first) { APPLY(l_at, 0, &l_ins, 1); APPLY(r_at, r_cut, r_ins, 3); }
+        else { APPLY(r_at, r_cut, r_ins, 3); APPLY(l_at, 0, &l_ins, 1); }
+        CHECK(ti_rebase(q, &r, remote) == TS_OK);
+        td_value v; MUST(ti_view(q, got, N + 1024, &v, &st) == TS_OK);
+        CHECK(same(got, v.length, expect, m) && st.external == (uint64_t)i + 1);
+        if (same(got, v.length, expect, m)) merges++;
+        CHECK(persist(s, q) == TS_OK);
+        tx_release(remote); tx_release(base.text);
+    }
+    /* Identical durable text in a new revision (shares every chunk): no change to live. */
+    td_text_value cur; ti_state before, after;
+    MUST(ti_snapshot(q, &cur, &before) == TS_OK);
+    td_snapshot r; cur.anchor = 1;
+    MUST(td_save_text(s, (ts_read){doc.record.id, before.durable}, &cur, &r) == TS_OK && r.record.revision == before.durable + 1);
+    CHECK(ti_rebase(q, &r, cur.text) == TS_OK);
+    ti_state_get(q, &after);
+    CHECK(after.external == before.external && after.durable == r.record.revision && after.phase == TI_CLEAN);
+    tx_release(cur.text);
+    ti_close(q); ts_close(s);
+    printf("ok draft shared chunks: %u/200 rebases against revisions sharing chunks with the base merged exactly\n", merges);
+}
+
+/* Periodic text makes a chunk appear in both texts at shifted offsets with equal content,
+ * which is exactly where a diff may only skip a shared chunk if it is aligned. The expected
+ * merge uses an independent flat minimal prefix/suffix diff, the queue's documented rule. */
+static void periodic(void) {
+    ts_store *s; MUST(ts_open(path("periodic"), &s) == TS_OK);
+    enum { N = 12000 };
+    static uint16_t base[N + 8], remote[N + 8], live[N + 8], expect[N + 16], got[N + 16];
+    unsigned cases = 0;
+    for (int variant = 0; variant < 6; variant++) {
+        size_t period = variant < 3 ? 1 : 7;
+        for (size_t i = 0; i < N; i++) base[i] = (uint16_t)('a' + i % period);
+        tx_text *t; MUST(tx_build(base, N, &t) == TS_OK);
+        td_text_value v0 = {t, 0, 0, -1, -1}; td_snapshot doc;
+        MUST(td_save_text(s, (ts_read){0, 0}, &v0, &doc) == TS_OK);
+        ti_queue *q; MUST(ti_open(&q, &doc, t, 0) == TS_OK);
+        /* Remote edits near the start shift every later shared chunk. */
+        tx_text *r; size_t rn;
+        uint16_t one = base[0];
+        if (variant % 3 == 0) MUST(tx_edit(t, 0, period, NULL, 0, &r) == TS_OK);          /* delete a period */
+        else if (variant % 3 == 1) MUST(tx_edit(t, 0, 0, base, period, &r) == TS_OK);     /* insert a period */
+        else MUST(tx_edit(t, 3, 3, &one, 1, &r) == TS_OK);                                 /* one unit */
+        rn = tx_length(r); MUST(tx_read(r, 0, rn, remote) == TS_OK);
+        size_t l_at = N / 2;
+        uint16_t l_ins = 'L';
+        MUST(ti_edit(q, &(td_edit){l_at, l_at, &l_ins, 1}, 1, 0, 0, -1, -1, NULL) == TS_OK);
+        memcpy(live, base, l_at * 2); live[l_at] = 'L'; memcpy(live + l_at + 1, base + l_at, (N - l_at) * 2);
+        /* Independent minimal diff of base -> remote. */
+        size_t p = 0, sfx = 0;
+        while (p < N && p < rn && base[p] == remote[p]) p++;
+        while (sfx < N - p && sfx < rn - p && base[N - 1 - sfx] == remote[rn - 1 - sfx]) sfx++;
+        size_t es = p, ee = N - sfx, el = rn - p - sfx;
+        td_text_value rv = {r, 0, 0, -1, -1}; td_snapshot rs;
+        MUST(td_save_text(s, (ts_read){doc.record.id, 1}, &rv, &rs) == TS_OK);
+        ts_status st = ti_rebase(q, &rs, r);
+        if (ee <= l_at || es >= l_at) {
+            /* Disjoint from the local insertion (ties put the local edit first). */
+            size_t at = es >= l_at ? es + 1 : es, end = es >= l_at ? ee + 1 : ee, m = N + 1;
+            memcpy(expect, live, at * 2); memcpy(expect + at, remote + p, el * 2);
+            memcpy(expect + at + el, live + end, (m - end) * 2);
+            m = m - (end - at) + el;
+            td_value v; MUST(ti_view(q, got, N + 16, &v, NULL) == TS_OK);
+            CHECK(st == TS_OK && same(got, v.length, expect, m));
+        } else CHECK(st == TS_CONFLICT);
+        cases++;
+        tx_release(r); tx_release(t); ti_close(q);
+    }
+    ts_close(s);
+    printf("ok draft periodic: %u shifted shared-chunk rebases match the independent minimal diff\n", cases);
+}
+
+/* Leaf-boundary constructions the diff's guards exist for, built through the public text API:
+ * (a) a unit equal to the next leaf's first unit inserted at that boundary makes the shared
+ *     leaf's end-aligned skip reach into the prefix (the clamp);
+ * (b) an insert two leaves before a leaf plus deleting a unit after it equal to its last unit leaves that
+ *     leaf shared but shifted relative to the end (the alignment check). */
+static int boundary_case(ts_store *s, int which) {
+    enum { N = 16000 };
+    static uint16_t base[N], remote[N + 8], expect[N + 16], got[N + 16], live[N + 8];
+    for (size_t i = 0; i < N; i++) base[i] = (uint16_t)(0x100 + next() % 5000);
+    tx_text *t; MUST(tx_build(base, N, &t) == TS_OK);
+    const uint16_t *u; size_t len, at;
+    MUST(tx_chunk(t, 0, &u, &len, &at) == TS_OK);
+    size_t first = len, S = len;                      /* (a): start of the second leaf */
+    if (which) {                                      /* (b): the third leaf; a split merges its */
+        MUST(tx_chunk(t, S, &u, &len, &at) == TS_OK); /* right part into the next leaf only */
+        S += len;
+    }
+    MUST(tx_chunk(t, S, &u, &len, &at) == TS_OK);
+    size_t E = S + len;
+    if (which) { base[E] = base[E - 1]; tx_release(t); MUST(tx_build(base, N, &t) == TS_OK); }
+    td_text_value v0 = {t, 0, 0, -1, -1}; td_snapshot doc;
+    MUST(td_save_text(s, (ts_read){0, 0}, &v0, &doc) == TS_OK);
+    ti_queue *q; MUST(ti_open(&q, &doc, t, 0) == TS_OK);
+    tx_text *r, *r2;
+    if (!which) MUST(tx_edit(t, S, S, &base[S], 1, &r) == TS_OK);
+    else {
+        uint16_t x = 0x7;
+        MUST(tx_edit(t, first / 2, first / 2, &x, 1, &r2) == TS_OK);
+        MUST(tx_edit(r2, E + 1, E + 2, NULL, 0, &r) == TS_OK);
+        tx_release(r2);
+    }
+    size_t rn = tx_length(r); MUST(tx_read(r, 0, rn, remote) == TS_OK);
+    size_t l_at = first / 4; uint16_t l_ins = 'L';
+    MUST(ti_edit(q, &(td_edit){l_at, l_at, &l_ins, 1}, 1, 0, 0, -1, -1, NULL) == TS_OK);
+    memcpy(live, base, l_at * 2); live[l_at] = 'L'; memcpy(live + l_at + 1, base + l_at, (N - l_at) * 2);
+    size_t p = 0, sfx = 0;
+    while (p < N && p < rn && base[p] == remote[p]) p++;
+    while (sfx < N - p && sfx < rn - p && base[N - 1 - sfx] == remote[rn - 1 - sfx]) sfx++;
+    size_t es = p + 1, ee = N - sfx + 1, el = rn - p - sfx, m = N + 1;   /* after the local insertion */
+    memcpy(expect, live, es * 2); memcpy(expect + es, remote + p, el * 2);
+    memcpy(expect + es + el, live + ee, (m - ee) * 2);
+    m = m - (ee - es) + el;
+    td_text_value rv = {r, 0, 0, -1, -1}; td_snapshot rs;
+    MUST(td_save_text(s, (ts_read){doc.record.id, 1}, &rv, &rs) == TS_OK);
+    int ok = ti_rebase(q, &rs, r) == TS_OK;
+    td_value v; MUST(ti_view(q, got, N + 16, &v, NULL) == TS_OK);
+    ok = ok && same(got, v.length, expect, m);
+    tx_release(r); tx_release(t); ti_close(q);
+    return ok;
+}
+static void boundaries(void) {
+    ts_store *s; MUST(ts_open(path("boundaries"), &s) == TS_OK);
+    unsigned ok = 0;
+    for (int i = 0; i < 10; i++) { int a = boundary_case(s, 0), b = boundary_case(s, 1); CHECK(a && b); ok += a + b; }
+    ts_close(s);
+    printf("ok draft diff guards: %u/20 leaf-boundary rebases (prefix-overlapping and end-misaligned shared leaves) exact\n", ok);
 }
 
 /* Interaction and storage owners on separate threads. The interaction thread never blocks
@@ -373,7 +554,7 @@ static void threads(void) {
 int main(int argc, char **argv) {
     if (argc != 2 || strlen(argv[1]) >= sizeof base) { fprintf(stderr, "usage: core-drafts <directory>\n"); return 2; }
     strcpy(base, argv[1]); mkdir(base, 0700);
-    basics(); rebases(); overflow(); differential(); threads();
+    basics(); rebases(); overflow(); differential(); shared_chunks(); periodic(); boundaries(); threads();
     if (failures) { fprintf(stderr, "core-drafts: %d failures\n", failures); return 1; }
     puts("core-drafts: all checks passed (input persistence queue semantics, not Android InputConnection evidence)"); return 0;
 }

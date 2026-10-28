@@ -54,8 +54,9 @@ Receipt in `out/evidence/core.text.json`.
 
 ## Not yet built
 
-Documents (`td_*`) still store full TDOC snapshots, and the draft queue still copies the live
-text per edit. Adopting `tx_text` there (a TDOC v2 with a text manifest, O(1) draft captures) is
-the next integration. Also missing: lazy chunk loading for texts larger than memory, and
+Adopted 2026-10-28: TDOC v2 documents (`td_save_text`/`td_load_text`) and the draft queue's live
+value. Note that a split joins its right part into the following leaf when they fit, so an edit
+can rewrite one neighbouring chunk (the durable typing test bounds this at 2 chunks per save).
+Also missing: lazy chunk loading for texts larger than memory, and
 retention/collection of unreferenced chunk objects, which must trace every manifest that
 history and captured requests still reference.

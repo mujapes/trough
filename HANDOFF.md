@@ -2,6 +2,12 @@
 
 ## Active continuation (2026-10-28)
 
+Latest (evening): tx_text adopted. TDOC v2 documents store a chunk manifest (td_save_text /
+td_load_text; v1 still read everywhere; 8 SIGKILL cycles recover exact text). The draft queue's
+live value is a tx_text: O(log n) edits, O(1) captures and snapshots, a chunk-aware rebase diff
+(mutants 5/5 after adding periodic and leaf-boundary cases). Next: chunk retention/GC tracing
+manifests from history and captures, then stage-3 work planning.
+
 Latest (16:30 UTC): `native/store/text`, indexed text ([contract](docs/TEXT.md)): immutable
 chunk tree, O(log n) edits, O(1) snapshots, line index, chunk-level durable manifest. `core.text`
 passes locally (ASan/UBSan, TSan, 10/12 mutants, survivors equivalent) and on Pixel bundle
