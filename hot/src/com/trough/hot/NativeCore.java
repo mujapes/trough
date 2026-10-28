@@ -17,6 +17,7 @@ final class NativeCore {
     static native String live(long queue);
     static native String durable(long keeper, long document, long revision);
     static native long[] stats(long keeper);
+    static native long[] queueState(long queue);
 
     private static boolean loaded;
     static synchronized long load(File bundle) {
@@ -42,7 +43,7 @@ final class NativeCore {
             long k = check(start(dir.getPath()), "start");
             long doc = check(create(k), "create"), q = check(attach(k, doc), "attach");
             StringBuilder model = new StringBuilder();
-            int edits = 3000;
+            int edits = 20000;
             long[] ns = new long[edits];
             long local = 0;
             for (int j = 0; j < edits; j++) {
@@ -55,6 +56,9 @@ final class NativeCore {
                 ns[j] = System.nanoTime() - t;
                 model.replace(at, end, text);
             }
+            long[] qs = queueState(q);
+            int slow = 0;
+            for (long v : ns) if (v > 1_000_000) slow++;
             boolean liveOk = model.toString().equals(live(q));
             long t = System.nanoTime();
             long revision = check(flush(k, q, local, 20000), "flush");
@@ -73,7 +77,8 @@ final class NativeCore {
             return Json.map("ok", ok, "load_ms", loadNs / 1e6, "edits", edits, "length", model.length(),
                 "edit_p50_us", sorted[edits / 2] / 1e3, "edit_p99_us", sorted[edits * 99 / 100] / 1e3,
                 "edit_max_us", sorted[edits - 1] / 1e3, "flush_ms", flushNs / 1e6, "saves", st[0],
-                "failures", st[1], "live_ok", liveOk, "durable_ok", durableOk, "recovered", recovered,
+                "failures", st[1], "slow_edits_over_1ms", slow, "queue_lock_contended", qs[3],
+                "poke_lock_contended", st[4], "live_ok", liveOk, "durable_ok", durableOk, "recovered", recovered,
                 "revision", revision);
         } finally {
             Main.deleteTree(dir);

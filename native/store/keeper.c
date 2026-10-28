@@ -310,7 +310,9 @@ ts_status tk_run(tk_owner *k, tk_task task, void *arg) {
 }
 
 void tk_poke(tk_owner *k) {
-    pthread_mutex_lock(&k->lock);
+    int busy = pthread_mutex_trylock(&k->lock);
+    if (busy) pthread_mutex_lock(&k->lock);
+    k->stats.poke_contended += busy != 0;
     k->pokes++;
     pthread_cond_signal(&k->wake);
     pthread_mutex_unlock(&k->lock);

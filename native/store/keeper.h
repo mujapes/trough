@@ -31,6 +31,7 @@ ts_status tk_flush(tk_owner *, ti_queue *, uint64_t local, unsigned timeout_ms, 
 typedef ts_status (*tk_task)(ts_store *, void *);
 ts_status tk_run(tk_owner *, tk_task, void *);
 
-typedef struct { uint64_t saves, failures, rebases, conflicts; } tk_stats;
+/* poke_contended: pokes that found the keeper's lock held (interaction-latency diagnostics). */
+typedef struct { uint64_t saves, failures, rebases, conflicts, poke_contended; } tk_stats;
 void tk_stats_get(tk_owner *, tk_stats *);
 #endif

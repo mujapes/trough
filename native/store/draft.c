@@ -20,6 +20,7 @@ struct ti_queue {
     tx_text *base, *flight;      /* last acknowledged durable text; text being saved */
     uint64_t flight_local;
     unsigned saving, overflowed;
+    uint64_t contended;
     batch *head, *tail;
     size_t logged, limit;
 };
@@ -56,7 +57,7 @@ static ti_phase phase(const ti_queue *q) {
 static void state(const ti_queue *q, ti_state *s) {
     s->phase = phase(q); s->local = q->local; s->saved = q->saved; s->durable = q->durable;
     s->external = q->external; s->length = tx_length(q->value.text); s->logged = q->logged;
-    s->overflowed = q->overflowed;
+    s->overflowed = q->overflowed; s->contended = q->contended;
 }
 static int selection_valid(size_t n, uint32_t anchor, uint32_t caret, int32_t cs, int32_t ce) {
     if (anchor > n || caret > n) return 0;
@@ -92,7 +93,9 @@ ts_status ti_edit(ti_queue *q, const td_edit *edits, size_t count, uint32_t anch
                   int32_t cs, int32_t ce, uint64_t *local) {
     if (!q || (count && !edits)) return TS_INVALID;
     if (count > TD_EDIT_LIMIT) return TS_CAPACITY;
-    pthread_mutex_lock(&q->lock);
+    int busy = pthread_mutex_trylock(&q->lock);
+    if (busy) pthread_mutex_lock(&q->lock);
+    q->contended += busy != 0;
     ts_status st = TS_CONFLICT;
     tx_text *next = NULL;
     batch *b = NULL;

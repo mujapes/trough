@@ -111,12 +111,22 @@ JNIEXPORT jstring JNICALL CLASS(durable)(JNIEnv *env, jclass c, jlong k, jlong d
     free(l.units);
     return out;
 }
+/* Queue diagnostics: {local, saved, durable, contended}. */
+JNIEXPORT jlongArray JNICALL CLASS(queueState)(JNIEnv *env, jclass c, jlong q) {
+    (void)c;
+    ti_state s;
+    ti_state_get((ti_queue *)(intptr_t)q, &s);
+    jlong v[4] = {(jlong)s.local, (jlong)s.saved, (jlong)s.durable, (jlong)s.contended};
+    jlongArray out = (*env)->NewLongArray(env, 4);
+    if (out) (*env)->SetLongArrayRegion(env, out, 0, 4, v);
+    return out;
+}
 JNIEXPORT jlongArray JNICALL CLASS(stats)(JNIEnv *env, jclass c, jlong k) {
     (void)c;
     tk_stats s;
     tk_stats_get((tk_owner *)(intptr_t)k, &s);
-    jlong v[4] = {(jlong)s.saves, (jlong)s.failures, (jlong)s.rebases, (jlong)s.conflicts};
-    jlongArray out = (*env)->NewLongArray(env, 4);
-    if (out) (*env)->SetLongArrayRegion(env, out, 0, 4, v);
+    jlong v[5] = {(jlong)s.saves, (jlong)s.failures, (jlong)s.rebases, (jlong)s.conflicts, (jlong)s.poke_contended};
+    jlongArray out = (*env)->NewLongArray(env, 5);
+    if (out) (*env)->SetLongArrayRegion(env, out, 0, 5, v);
     return out;
 }

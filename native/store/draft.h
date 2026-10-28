@@ -26,6 +26,7 @@ typedef struct {
     size_t length;         /* live length in UTF-16 units */
     size_t logged;         /* bytes of unacknowledged batches retained for rebasing */
     unsigned overflowed;   /* log limit exceeded: any external revision becomes a conflict */
+    uint64_t contended;    /* edits that found the queue lock held (latency diagnostics) */
 } ti_state;
 typedef struct {
     uint64_t local;        /* pass back to ti_acknowledge / ti_reject */
