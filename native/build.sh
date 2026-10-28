@@ -32,15 +32,15 @@ for scenario in publication resources replacement; do
 done
 # Durable store: SQLite from the root's own Debian packages (native/packages.list).
 set --
-for part in store document stream task workspace; do
+for part in store document stream task workspace draft; do
     $CC $CORE -c "$S/store/$part.c" -o "$O/lib/$part.o"
     set -- "$@" "$O/lib/$part.o"
 done
 rm -f "$O/lib/libtroughstore.a"
 ${AR:-ar} rcsD "$O/lib/libtroughstore.a" "$@"
 rm -f "$@"
-for scenario in store documents streams tasks workspace; do
-    $CC $CORE $DYN -I"$S/store" "$S/scenarios/$scenario.c" "$O/lib/libtroughstore.a" -lsqlite3 -o "$O/bin/core-$scenario"
+for scenario in store documents streams tasks workspace drafts; do
+    $CC $CORE $DYN -I"$S/store" "$S/scenarios/$scenario.c" "$O/lib/libtroughstore.a" -lsqlite3 -pthread -o "$O/bin/core-$scenario"
 done
 $CC $CORE -c "$S/runtime/process.c" -o "$O/lib/process.o"
 ${AR:-ar} rcsD "$O/lib/libtroughprocess.a" "$O/lib/process.o"

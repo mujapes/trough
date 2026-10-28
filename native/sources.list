@@ -24,11 +24,14 @@ store/task.c
 store/task.h
 store/workspace.c
 store/workspace.h
+store/draft.c
+store/draft.h
 scenarios/store.c
 scenarios/documents.c
 scenarios/streams.c
 scenarios/tasks.c
 scenarios/workspace.c
+scenarios/drafts.c
 runtime/process.h
 runtime/process.c
 runtime/run.c

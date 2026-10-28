@@ -15,6 +15,7 @@ bin/core-documents
 bin/core-streams
 bin/core-tasks
 bin/core-workspace
+bin/core-drafts
 lib/libtroughprocess.a
 bin/trough-run
 bin/core-processes
