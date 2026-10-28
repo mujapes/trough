@@ -2,6 +2,12 @@
 
 ## Active continuation (2026-10-28)
 
+Stage 3 started (late 2026-10-28): `native/core/derive`, the derivation graph ([contract](docs/DERIVE.md)):
+demand, red-green verification on the world clock, early cutoff, Skyframe-style restarts for
+dynamic deps, snapshot jobs, cancellation, cycles, eviction. `core.derive` matches a memo-free
+reference (653795 checks / 30000 rounds), 10/10 mutants. Next: batch needs (35% restarts), then
+real operators (layout/scene as nodes) and admission/leases.
+
 DECIDED (2026-10-28): the Java/native boundary is a bionic build of the same sources, loaded
 in-process (docs/BIONIC.md). All store oracles pass as bionic programs on the Pixel; android.jni
 types 3000 edits from Java at 10.9 us p50 per call. Self-hosted: the phone's clang rebuilds all

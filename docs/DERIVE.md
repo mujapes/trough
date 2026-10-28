@@ -1,0 +1,92 @@
+# Derivation graph
+
+`native/core/derive.{h,c}` is the first stage-3 piece ([CONSTRUCTION.md](CONSTRUCTION.md)
+section 3): demand propagation, dependency- and equality-based invalidation, and cache identity
+over the publication kernel (`world.h`). Every derived product (layout, scene, search index,
+task plan) is meant to be a node here. This document is its contract.
+
+## Model
+
+- A **node** is a cached value identified by `(operator module cell, key)`; `dv_intern` is
+  the cache identity. The module cell's value is the operator's code identity, so replacing a
+  module invalidates its nodes the same way a changed input does.
+- A **dependency** is a world cell or another node, recorded in the order the operator read
+  it. Dependencies are dynamic: which ones are read can depend on values read earlier.
+- The owner **demands** roots. `dv_poll` verifies them at the world's current publication and
+  hands out **jobs** for nodes that must be computed.
+- A job is a snapshot: the node's key, its operator identity and the values it is given, all
+  at one revision. Workers run the operator on the job alone and never see the graph or the
+  world. A worker returns either a value plus the refs it actually read, or the refs it needs
+  and was not given.
+
+## Verification (Salsa's red-green algorithm)
+
+A node verified at revision V is still valid at R when its module cell and each recorded
+dependency are unchanged since V. Dependencies are checked in read order, and node
+dependencies are verified recursively first. The world's `publication` is the global clock,
+because a cell's `revision` is the publication at which it last changed. A recomputed node whose value is
+equal keeps its old `changed_at`, so its dependants verify without running (early cutoff).
+Removed cells are a stable `DV_ABSENT` value, since world ids never revive.
+
+## Dynamic dependencies (Skyframe's restart model)
+
+A node is recomputed when verification fails. Its old dependencies that are free to supply
+(cells, and nodes already verified at R) are kept as provided values. Everything else the
+operator must ask for. A `DV_RESULT_NEED` adds the missing refs and interns their nodes. Once
+those are verified, the node is reissued with all values re-captured at one revision. A dependency
+the operator stops reading is never recomputed on its behalf.
+
+## Concurrency, staleness and cancellation
+
+Several jobs may run at once, and the world may move while they run. A completion is still
+accepted: its value is correct as of the job's revision, and it is recorded as verified at
+that revision. The next poll re-verifies it against anything newer. There is one job per
+node; `dv_cancel` withdraws it, and the late completion is `TR_STALE`, even if the node was
+reissued. `dv_wanted` tells a worker whether the last poll still reached its node, so
+unwanted work can stop early.
+
+## Cycles
+
+When a node's dependency is already on the path being verified, the job gets that ref with
+`DV_CYCLE`, and the operator decides what a cycle means (normally an error value). A
+cycle's values depend on which node the demand entered first, so a node that saw `DV_CYCLE` is
+volatile: it is never reused at a later revision.
+
+## Bounds
+
+Nodes, dependency blocks (8 dependencies each, chained), the intern table and the walk stack
+all live in caller storage. Exceeding any of them is `TR_CAPACITY`, never an allocation.
+`dv_evict` drops an undemanded, idle node, and dependants that recorded it recompute. Choosing
+what to evict, and admission by bytes, are owner policy outside this kernel. Values are
+canonical handles, so the resources they name stay with their owner (`resources.h` leases).
+
+## Oracle (`core.derive`, `tests/core_derive.sh`)
+
+Six operators with value-dependent fan-out and choice run as workers that see only job values.
+A memo-free reference evaluates the current world from scratch.
+
+- Deterministic cases: an unchanged world and unrelated cell edits run 0 jobs. Early cutoff:
+  9 edits changed `op2` but not `op4`'s inputs, and `op4` never ran. Other cases cover module
+  replacement, removed inputs, cancellation (including completion of the old ticket while
+  its reissue runs), eviction followed by an input change, invalid results (unprovided reads,
+  needs that were already provided), a dependency that is no longer read and is not
+  recomputed, a two-node cycle (settles, recovers, path-dependent re-demand), and node capacity.
+- Random: cell edits, module bumps, cell removal, demand changes and evictions. Up to 6 jobs
+  run at once and complete in random order, with cancellations and edits made while jobs
+  run. At every idle point, each demanded node and each node reported clean equals the
+  reference. 3000 rounds under ASan/UBSan: 61033 checks. 30000 rounds: 653795 checks in 2.1 s.
+- Pixel bundle `0ab61dc6c126...`: `core.derive` passes in 63 ms, and `build.native` rebuilds every
+  output, including `core-derive`, byte-identically on the phone.
+- Mutants: 10 of 10 caught. They drop early cutoff, ignore cell changes, ignore module identity,
+  skip the ticket check, provide unverified hints, verify at completion time instead of job
+  time, ignore node dependency changes, trust evicted dependencies, accept unprovided reads,
+  and ignore volatility.
+
+## Not yet built
+
+- Restart cost: 35% of random-run jobs are restarts. Batching needs (an operator asks for
+  every dependency it can name before it stops) and per-operator dependency hints are the
+  known fixes; measure them on real operators first.
+- A root list instead of scanning every node per poll, plus incremental sweeps.
+- Byte/resource admission and cancellation leases joined to `resources.h`, IO workers and tracing.
+- Real operators: document layout and scene compilation as nodes, which is the next consumer.

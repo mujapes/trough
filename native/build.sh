@@ -22,12 +22,12 @@ $CC -O2 -Wall -Wextra -shared -fPIC -o "$O/lib/libexecmap.so" "$S/execmap/execma
 
 # The same native substrate and scenario executors are built on the VM and on the phone.
 CORE="-std=c11 -O2 -Wall -Wextra -Werror -fPIC -ffile-prefix-map=$S=native"
-for part in world resources modules; do
+for part in world resources modules derive; do
     $CC $CORE -c "$S/core/$part.c" -o "$O/lib/core-$part.o"
 done
-${AR:-ar} rcsD "$O/lib/libtroughcore.a" "$O/lib/core-world.o" "$O/lib/core-resources.o" "$O/lib/core-modules.o"
-rm -f "$O/lib/core-world.o" "$O/lib/core-resources.o" "$O/lib/core-modules.o"
-for scenario in publication resources replacement; do
+${AR:-ar} rcsD "$O/lib/libtroughcore.a" "$O/lib/core-world.o" "$O/lib/core-resources.o" "$O/lib/core-modules.o" "$O/lib/core-derive.o"
+rm -f "$O/lib/core-world.o" "$O/lib/core-resources.o" "$O/lib/core-modules.o" "$O/lib/core-derive.o"
+for scenario in publication resources replacement derive; do
     $CC $CORE $DYN -I"$S/core" "$S/scenarios/$scenario.c" "$O/lib/libtroughcore.a" -ldl -o "$O/bin/core-$scenario"
 done
 # Durable store: SQLite from the root's own Debian packages (native/packages.list).

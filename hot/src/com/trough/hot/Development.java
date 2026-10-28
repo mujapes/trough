@@ -27,7 +27,7 @@ final class Development implements AutoCloseable, ScenarioProtocol.Handler {
     /** Store oracles that take a data directory; each is also built against bionic (android.*). */
     private static final List<String> STORE=Arrays.asList("store","documents","streams","tasks","workspace","drafts","text","keeper");
     private List<String> scenarios() {
-        List<String> all=new ArrayList<>(Arrays.asList("app.observe","core.publication","core.resources","core.replacement"));
+        List<String> all=new ArrayList<>(Arrays.asList("app.observe","core.publication","core.resources","core.replacement","core.derive"));
         for(String s:STORE) all.add("core."+s);
         all.add("core.processes"); all.add("build.native");
         if(new File(bundle,"lib/libtrough-android.so").isFile()) {

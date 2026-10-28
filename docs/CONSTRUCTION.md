@@ -247,6 +247,11 @@ backoff, flush-to-durable for Ask) and delivers agent/external revisions to them
 `native/store/workspace` supplies stable roots that publish a draft and stream atomically,
 and recover their current state without view/module-owned IDs ([contract](WORKSPACES.md)).
 
+`native/core/derive` is the first stage-3 piece: demand-driven derivation over the world, with
+Salsa-style red-green verification, early cutoff, dynamic dependencies by restart, concurrent
+snapshot jobs, cancellation and bounded storage ([contract](DERIVE.md)). No real operator uses
+it yet, and admission by bytes, leases and tracing remain stage-3 work.
+
 ## Agent implementation discipline
 
 Before adding code, name the end-state contract it implements and its upstream/downstream
