@@ -39,11 +39,26 @@ negative lengths. They also showed that the fallback mode (`fullEditor=false`) i
 reference, because it clears its Editable. Pixel bundle `4103cb0d5100...` (SDK 37): 40 seeds,
 16000 operations and 6960 queries, all identical.
 
+## Host view and change notification
+
+`EditorView.java` hosts one draft:
+- `onCheckIsTextEditor` is true.
+- `onCreateInputConnection` fills `EditorInfo`: multi-line text with sentence caps, no
+  fullscreen, the initial selection, and up to 1024 units of surrounding text on each side. It
+  returns a `TextInput`.
+- Changes made outside the IME are pushed, not polled. The keeper writes an eventfd
+  (`tk_notify_fd`) when it merges or conflicts an external revision, or when a save fails.
+- `EditorView` registers the fd with the main Looper (`addOnFileDescriptorEventListener`). On
+  an event it reads the queue's external count and calls `InputMethodManager.restartInput`
+  only if the text moved, so a failure notification does not disturb the IME.
+- `android.editor` (Pixel bundle `ba63cde56abd...`): `EditorInfo` class, initial selection and
+  surrounding text are correct. An agent edit merged on the keeper thread produced exactly one
+  event and one restart, with the merged text right and the caret kept.
+
 ## Not yet built
 
-- A host View: `onCreateInputConnection` with `EditorInfo` (input type, initial selection,
-  surrounding text) on the eventual native surface view.
-- `InputMethodManager.updateSelection` and cursor-anchor notifications after edits that did
-  not come from the IME (agent merges and rebases change `external` in the queue).
+- The view becomes the native presenter's surface view. Its touch handling, focus and
+  `showSoftInput` belong to the interaction layer.
+- Cursor-anchor info (`CursorAnchorInfo`) needs text layout geometry.
 - `sendKeyEvent` for hardware keys, plus clipboard, extracted text and accessibility. Bidi
   and grapheme-aware cursor movement belong to the text layout layer.
