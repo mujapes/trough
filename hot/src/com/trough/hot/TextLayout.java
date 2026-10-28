@@ -18,8 +18,11 @@ import java.util.List;
 final class TextLayout {
     static final class Glyph { Font font; int id; float x, y; }
     /** A run of one direction within a line, in visual order: logical [start, end) and its box. */
-    static final class Run { int start, end; boolean rtl; float x, advance; }
-    static final class Line { int start, end; float baseline, top, bottom, width; boolean rtl; final List<Run> runs = new ArrayList<>(); }
+    static final class Run { int start, end, level; boolean rtl; float x, advance; }
+    static final class Line {
+        int start, end; float baseline, top, bottom, width; boolean rtl; final List<Run> runs = new ArrayList<>();
+        int[] stops; float[] stopX;                       // tap candidates, filled on first hit test
+    }
     final List<Glyph> glyphs = new ArrayList<>();
     final List<Line> lines = new ArrayList<>();
     float height;
@@ -103,7 +106,7 @@ final class TextLayout {
                         out.glyphs.add(q);
                     }
                     Run run = new Run();
-                    run.start = start + rs; run.end = start + re; run.rtl = rtl; run.x = pen; run.advance = pg.getAdvance();
+                    run.start = start + rs; run.end = start + re; run.rtl = rtl; run.level = line.getRunLevel(r); run.x = pen; run.advance = pg.getAdvance();
                     l.runs.add(run);
                     pen += pg.getAdvance();
                 }
@@ -121,39 +124,62 @@ final class TextLayout {
         return 0;
     }
 
-    /** The caret's x for offset, in the direction of the run that holds it; at a run boundary the
-     * paragraph direction's run wins (the primary caret). */
+    /** The primary caret's x for offset, as Layout.getPrimaryHorizontal: the caret trails the
+     * previous character when that character's bidi level is lower than the one at offset (at a
+     * line start the paragraph level stands in for the previous character), else it leads the
+     * character at offset. */
     float caretX(int offset) {
         Line l = lines.get(lineOf(offset));
         if (l.runs.isEmpty()) return l.rtl ? left + width : left;
-        Run hit = null;
-        for (Run r : l.runs) if (offset >= r.start && offset < r.end) hit = r;
-        if (hit == null || (offset == hit.start && hit.rtl != l.rtl)) {
-            /* Boundary: the run ending or starting here in the paragraph's direction. */
-            for (Run r : l.runs) if (r.rtl == l.rtl && (offset == r.end || offset == r.start)) { hit = r; break; }
-        }
-        if (hit == null) {                        // past the drawn text (trailing whitespace)
-            Run edge = l.runs.get(l.rtl ? 0 : l.runs.size() - 1);
-            return l.rtl ? edge.x : edge.x + edge.advance;
-        }
-        int o = Math.max(hit.start, Math.min(offset, hit.end));
-        float into = paint.getRunAdvance(text, hit.start, hit.end, l.start, Math.max(hit.end, lineVisibleEnd(l)), hit.rtl, o);
-        return hit.rtl ? hit.x + hit.advance - into : hit.x + into;
+        int paragraphLevel = l.rtl ? 1 : 0;
+        Run at = runAt(l, offset), before = offset == l.start ? null : runAt(l, offset - 1);
+        int levelAt = at != null ? at.level : paragraphLevel;
+        int levelBefore = before != null ? before.level : paragraphLevel;
+        if (levelBefore < levelAt) {
+            if (offset == l.start) return l.rtl ? left + width : left;
+            if (before != null) return edge(l, before, offset);
+        } else if (at != null) return edge(l, at, offset);
+        Run last = l.runs.get(l.rtl ? 0 : l.runs.size() - 1);   // past the drawn text (trailing whitespace)
+        return l.rtl ? last.x : last.x + last.advance;
     }
 
-    /** The offset nearest x on line i (a tap). */
+    /** The offset whose primary caret is nearest x on line i (a tap), as
+     * Layout.getOffsetForHorizontal: cursor positions from the line start to the line end, except
+     * that a line other than the last stops before its final character (the break). Ties go to
+     * the earlier offset, except the final position, which wins them. */
     int offsetAt(int i, float x) {
         Line l = lines.get(i);
-        if (l.runs.isEmpty()) return l.start;
-        Run first = l.runs.get(0), last = l.runs.get(l.runs.size() - 1);
-        if (x <= first.x) return first.rtl ? first.end : first.start;
-        if (x >= last.x + last.advance) return last.rtl ? last.start : last.end;
-        for (Run r : l.runs) {
-            if (x < r.x || x > r.x + r.advance) continue;
-            float into = r.rtl ? r.x + r.advance - x : x - r.x;
-            return paint.getOffsetForAdvance(text, r.start, r.end, l.start, Math.max(r.end, lineVisibleEnd(l)), r.rtl, into);
+        if (l.stops == null) {
+            int max = l.end;
+            if (i < lines.size() - 1 && l.end > l.start && text.charAt(l.end) != '\n')   // the platform's line holds its '\n'; ours stops before it
+                max = paint.getTextRunCursor(text, l.start, l.end, l.rtl, l.end, Paint.CURSOR_BEFORE);
+            int n = 0;
+            int[] stops = new int[max - l.start + 1];
+            for (int o = l.start; o <= max; o++)
+                if (o == l.start || o == max || paint.getTextRunCursor(text, l.start, l.end, l.rtl, o, Paint.CURSOR_AT) == o) stops[n++] = o;
+            float[] xs = new float[n];
+            for (int k = 0; k < n; k++) xs[k] = caretX(stops[k]);
+            l.stops = java.util.Arrays.copyOf(stops, n); l.stopX = xs;
         }
-        return l.end;
+        int best = 0;
+        float bestDist = Math.abs(l.stopX[0] - x);
+        for (int k = 1; k < l.stops.length; k++) {
+            float d = Math.abs(l.stopX[k] - x);
+            if (d < bestDist || (k == l.stops.length - 1 && d <= bestDist)) { best = k; bestDist = d; }
+        }
+        return l.stops[best];
+    }
+
+    private static Run runAt(Line l, int offset) {
+        for (Run r : l.runs) if (offset >= r.start && offset < r.end) return r;
+        return null;
+    }
+
+    /** The x of the run's edge at offset (the run's own direction). */
+    private float edge(Line l, Run r, int offset) {
+        int o = Math.max(r.start, Math.min(offset, r.end));
+        float into = paint.getRunAdvance(text, r.start, r.end, l.start, Math.max(r.end, lineVisibleEnd(l)), r.rtl, o);
+        return r.rtl ? r.x + r.advance - into : r.x + into;
     }
 
     private int lineVisibleEnd(Line l) {

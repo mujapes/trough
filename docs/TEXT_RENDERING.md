@@ -54,10 +54,24 @@ every line start and baseline equal and 0 differing pixels when our positioned g
 drawn by the platform. Two fixes came from this oracle, both now in the code: integer line
 metrics, and the extend-never-shrink rule.
 
+Carets and taps follow `Layout`'s own rules rather than a heuristic:
+- `caretX` is the primary caret (`getPrimaryHorizontal`). It trails the previous character
+  when that character's bidi level is lower than the level at the offset, and otherwise leads
+  the character at the offset. At a line start the paragraph level stands in for the previous
+  character, so a line that starts with an RTL run inside an LTR paragraph has its caret at the line edge.
+- `offsetAt` is `getOffsetForHorizontal`: the cursor position (via `getTextRunCursor`) whose
+  primary caret is nearest the tap. A wrapped line stops before its final character, while a
+  paragraph's last line and the layout's last line reach their end. Earlier offsets win ties,
+  except the final position. Candidates and their x are cached per line on the first tap.
+
+The oracle checks every offset's caret and taps every 7 px on every line. The first Pixel run,
+with a per-run `getOffsetForAdvance` and a "paragraph-direction run wins" caret, failed 2 of
+2132 carets and 113 of 7653 taps: at the שלום boundaries, at a line starting with עברית, and at
+the layout's last line end. Bundle `fc978451ba7c...`: 0 of 2132 and 0 of 7653.
+
 ## Not yet built
 
 Subpixel glyph positioning on the GPU path (positions are snapped to pixels there, while
 `TextLayout` keeps exact positions); hyphen edits; colour glyphs such as emoji,
-which need an RGBA atlas; atlas eviction and luminance-bucket keys; line breaking, paragraph
-bidi and grapheme-aware cursoring in the layout layer; and scaling with display density and
+which need an RGBA atlas; atlas eviction and luminance-bucket keys; caret movement by keyboard (visual left/right across bidi runs) and selection highlights; and scaling with display density and
 font scale.
