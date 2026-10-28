@@ -16,7 +16,13 @@ core/modules.c
 core/modules.h
 store/store.c
 store/store.h
+store/document.c
+store/document.h
+store/stream.c
+store/stream.h
 scenarios/store.c
+scenarios/documents.c
+scenarios/streams.c
 packages.list
 scenarios/publication.c
 scenarios/resources.c

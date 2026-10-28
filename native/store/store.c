@@ -11,7 +11,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-enum { BATCH_LIMIT = 4096, SCHEMA_VERSION = 1 };
+enum { BATCH_LIMIT = 4096, SCHEMA_VERSION = 2 };
 
 struct ts_store {
     sqlite3 *db;
@@ -20,7 +20,8 @@ struct ts_store {
     uint64_t tmp_counter;
     size_t recovered_unknown;
     sqlite3_stmt *current, *revision, *at_revision, *insert_commit, *insert_revision,
-                 *create, *update, *effect, *effect_insert, *effect_update, *effect_log;
+                 *create, *update, *effect, *effect_insert, *effect_update, *effect_log,
+                 *effect_read, *effect_scan, *key_insert, *key_lookup;
 };
 
 static const char *MIGRATIONS[SCHEMA_VERSION] = {
@@ -34,6 +35,8 @@ static const char *MIGRATIONS[SCHEMA_VERSION] = {
     "  request BLOB NOT NULL, outcome BLOB, seq INTEGER NOT NULL) WITHOUT ROWID;"
     "CREATE TABLE effect_log(intent BLOB NOT NULL, seq INTEGER NOT NULL, from_state INTEGER NOT NULL,"
     "  to_state INTEGER NOT NULL, PRIMARY KEY(intent, seq)) WITHOUT ROWID;",
+    "CREATE TABLE record_keys(key BLOB PRIMARY KEY CHECK(length(key)=16),"
+    " record INTEGER NOT NULL UNIQUE REFERENCES records(id)) WITHOUT ROWID;",
 };
 
 static ts_status code(int rc) {
@@ -86,7 +89,7 @@ void ts_sha256(const void *data, size_t size, uint8_t out[32]) {
     size_t left = size;
     for (; left >= 64; left -= 64, p += 64) block(h, p);
     uint8_t tail[128] = {0};
-    memcpy(tail, p, left);
+    if (left) memcpy(tail, p, left);
     tail[left] = 0x80;
     size_t n = left < 56 ? 64 : 128;
     uint64_t bits = (uint64_t)size * 8;
@@ -192,6 +195,14 @@ ts_status ts_open(const char *dir, ts_store **out) {
         "UPDATE effects SET state=?, outcome=coalesce(?, outcome), seq=? WHERE intent=?");
     if (!rc) rc = prepare(s, &s->effect_log,
         "INSERT INTO effect_log(intent, seq, from_state, to_state) VALUES(?,?,?,?)");
+    if (!rc) rc = prepare(s, &s->effect_read,
+        "SELECT intent, state, kind, seq, length(request), length(outcome), outcome IS NOT NULL,"
+        " request, outcome FROM effects WHERE intent=?");
+    if (!rc) rc = prepare(s, &s->effect_scan,
+        "SELECT intent, state, kind, seq, length(request), length(outcome), outcome IS NOT NULL"
+        " FROM effects WHERE intent>?2 AND (?1=0 OR state=?1) ORDER BY intent LIMIT ?3");
+    if (!rc) rc = prepare(s, &s->key_insert, "INSERT INTO record_keys(key, record) VALUES(?,?)");
+    if (!rc) rc = prepare(s, &s->key_lookup, "SELECT record FROM record_keys WHERE key=?");
     if (rc) { status = rc == SQLITE_CORRUPT || rc == SQLITE_NOTADB ? TS_INVALID : code(rc); goto fail; }
     *out = s;
     return TS_OK;
@@ -203,7 +214,8 @@ fail:
 void ts_close(ts_store *s) {
     if (!s) return;
     sqlite3_stmt *all[] = {s->current, s->revision, s->at_revision, s->insert_commit, s->insert_revision,
-                           s->create, s->update, s->effect, s->effect_insert, s->effect_update, s->effect_log};
+                           s->create, s->update, s->effect, s->effect_insert, s->effect_update, s->effect_log,
+                           s->effect_read, s->effect_scan, s->key_insert, s->key_lookup};
     for (size_t i = 0; i < sizeof all / sizeof *all; i++) sqlite3_finalize(all[i]);
     if (s->db) sqlite3_close(s->db);
     if (s->objects >= 0) close(s->objects);
@@ -219,6 +231,17 @@ ts_status ts_limit_pages(ts_store *s, uint64_t pages) {
 }
 
 size_t ts_recovered_unknown(const ts_store *s) { return s->recovered_unknown; }
+
+ts_status ts_lookup(ts_store *s, const uint8_t key[16], uint64_t *id) {
+    if (!id) return TS_INVALID;
+    *id = 0;
+    if (!s || !key) return TS_INVALID;
+    int rc = sqlite3_bind_blob(s->key_lookup, 1, key, 16, SQLITE_TRANSIENT);
+    if (rc == SQLITE_OK) rc = sqlite3_step(s->key_lookup);
+    if (rc == SQLITE_ROW) *id = (uint64_t)sqlite3_column_int64(s->key_lookup, 0);
+    sqlite3_reset(s->key_lookup); sqlite3_clear_bindings(s->key_lookup);
+    return rc == SQLITE_DONE ? TS_NOT_FOUND : code(rc);
+}
 
 /* ---- reads ---- */
 static ts_status fill(sqlite3_stmt *st, int data_column, ts_record *r, void *buffer, size_t capacity) {
@@ -275,6 +298,64 @@ ts_status ts_effect_get(ts_store *s, const uint8_t intent[16], ts_effect_state *
     return status;
 }
 
+static void effect_metadata(sqlite3_stmt *st, ts_effect_record *r) {
+    memset(r, 0, sizeof *r);
+    memcpy(r->intent, sqlite3_column_blob(st, 0), 16);
+    r->state = (ts_effect_state)sqlite3_column_int(st, 1);
+    r->kind = (uint32_t)sqlite3_column_int64(st, 2);
+    r->commit = (uint64_t)sqlite3_column_int64(st, 3);
+    r->request_size = (size_t)sqlite3_column_int64(st, 4);
+    r->outcome_size = (size_t)sqlite3_column_int64(st, 5);
+    r->has_outcome = (unsigned)sqlite3_column_int(st, 6);
+}
+
+ts_status ts_effect_read(ts_store *s, const uint8_t intent[16], ts_effect_record *r,
+                         void *request, size_t request_capacity, void *outcome, size_t outcome_capacity) {
+    if (!r) return TS_INVALID;
+    /* Reading into a scan entry (intent == r->intent) is a normal caller pattern. */
+    uint8_t id[16];
+    if (intent) memcpy(id, intent, sizeof id);
+    memset(r, 0, sizeof *r);
+    if (!s || !intent || (request_capacity && !request) || (outcome_capacity && !outcome)) return TS_INVALID;
+    sqlite3_stmt *st = s->effect_read;
+    int rc = sqlite3_bind_blob(st, 1, id, 16, SQLITE_TRANSIENT);
+    if (rc == SQLITE_OK) rc = sqlite3_step(st);
+    ts_status status = rc == SQLITE_DONE ? TS_NOT_FOUND : code(rc);
+    if (rc == SQLITE_ROW) {
+        effect_metadata(st, r);
+        if (r->request_size > request_capacity || r->outcome_size > outcome_capacity) status = TS_CAPACITY;
+        else {
+            if (r->request_size) memcpy(request, sqlite3_column_blob(st, 7), r->request_size);
+            if (r->outcome_size) memcpy(outcome, sqlite3_column_blob(st, 8), r->outcome_size);
+        }
+    }
+    sqlite3_reset(st);
+    sqlite3_clear_bindings(st);
+    return status;
+}
+
+ts_status ts_effect_scan(ts_store *s, ts_effect_state state, const uint8_t after[16],
+                         ts_effect_record *entries, size_t capacity, size_t *count) {
+    if (!count) return TS_INVALID;
+    *count = 0;
+    if (!s || !entries || !capacity || capacity > TS_EFFECT_PAGE_LIMIT || state < 0 || state > TS_UNKNOWN)
+        return TS_INVALID;
+    sqlite3_stmt *st = s->effect_scan;
+    int rc = sqlite3_bind_int(st, 1, state);
+    /* TRANSIENT also permits passing the last output entry as the next cursor. */
+    if (rc == SQLITE_OK) rc = after ? sqlite3_bind_blob(st, 2, after, 16, SQLITE_TRANSIENT) :
+        sqlite3_bind_zeroblob(st, 2, 0); /* empty blob sorts before every 16-byte id */
+    if (rc == SQLITE_OK) rc = sqlite3_bind_int64(st, 3, (sqlite3_int64)capacity);
+    size_t n = 0;
+    if (rc == SQLITE_OK)
+        while ((rc = sqlite3_step(st)) == SQLITE_ROW) effect_metadata(st, &entries[n++]);
+    sqlite3_reset(st);
+    sqlite3_clear_bindings(st);
+    if (rc != SQLITE_DONE) return code(rc);
+    *count = n;
+    return TS_OK;
+}
+
 /* ---- commit ---- */
 static int allowed(ts_effect_state from, ts_effect_state to) {
     switch (from) {
@@ -291,11 +372,12 @@ static ts_status validate(const ts_read *reads, size_t nr, const ts_write *write
     if (nr > BATCH_LIMIT || nw > BATCH_LIMIT || ne > BATCH_LIMIT) return TS_CAPACITY;
     if ((nr && !reads) || (nw && !writes) || (ne && !effects)) return TS_INVALID;
     for (size_t i = 0; i < nr; i++) {
-        if (!reads[i].id) return TS_INVALID;
+        if (!reads[i].id || reads[i].id > INT64_MAX || reads[i].revision > INT64_MAX) return TS_INVALID;
         for (size_t j = 0; j < i; j++) if (reads[j].id == reads[i].id) return TS_INVALID;
     }
     for (size_t i = 0; i < nw; i++) {
         const ts_write *w = &writes[i];
+        if (w->id > INT64_MAX) return TS_INVALID;
         if (w->remove ? !w->id : (w->size > TS_DATA_LIMIT || (w->size && !w->data))) return TS_INVALID;
         if (!w->id) continue;
         size_t j = 0;
@@ -318,9 +400,24 @@ static int bind_detail(sqlite3_stmt *st, int column, const void *data, size_t si
 
 ts_status ts_commit(ts_store *s, const ts_read *reads, size_t nr, ts_write *writes, size_t nw,
                     const ts_effect *effects, size_t ne, ts_receipt *receipt) {
+    return ts_commit_named(s, reads, nr, writes, nw, effects, ne, NULL, 0, receipt);
+}
+
+ts_status ts_commit_named(ts_store *s, const ts_read *reads, size_t nr, ts_write *writes, size_t nw,
+                          const ts_effect *effects, size_t ne, const ts_name *names, size_t nn, ts_receipt *receipt) {
+    if (!receipt) return TS_INVALID;
     memset(receipt, 0, sizeof *receipt);
+    if (!s || (nn && !names)) return TS_INVALID;
     ts_status status = validate(reads, nr, writes, nw, effects, ne);
     if (status) return status;
+    if (nn > nw) return TS_INVALID;
+    for (size_t i = 0; i < nn; i++) {
+        if (names[i].index >= nw || writes[names[i].index].id) return TS_INVALID;
+        for (size_t j = 0; j < i; j++)
+            if (names[j].index == names[i].index || !memcmp(names[j].key, names[i].key, 16)) return TS_INVALID;
+    }
+    unsigned char created[BATCH_LIMIT];
+    for (size_t i = 0; i < nw; i++) created[i] = writes[i].id == 0;
     int rc = exec(s, "BEGIN IMMEDIATE");
     if (rc) return code(rc);
     size_t changed = 0;
@@ -352,7 +449,7 @@ ts_status ts_commit(ts_store *s, const ts_read *reads, size_t nr, ts_write *writ
             /* An identical prepare is a retry, not a second intent. */
             int retry = !e->from && kind == e->kind && size == e->size && (!size || !memcmp(request, e->detail, size));
             sqlite3_reset(s->effect);
-            if (e->from ? (int)e->from != state : !retry) { status = TS_CONFLICT; goto fail; }
+            if (e->from ? ((int)e->from != state || kind != e->kind) : !retry) { status = TS_CONFLICT; goto fail; }
         } else {
             sqlite3_reset(s->effect);
             if (rc != SQLITE_DONE) { status = code(rc); goto fail; }
@@ -377,6 +474,7 @@ ts_status ts_commit(ts_store *s, const ts_read *reads, size_t nr, ts_write *writ
             sqlite3_reset(s->current);
             if (rc != SQLITE_ROW) { status = rc == SQLITE_DONE ? TS_INVALID : code(rc); goto fail; }
             if (same) continue;
+            if (r->revision == INT64_MAX) { status = TS_FULL; goto fail; }
             revision = r->revision + 1;
             sqlite3_bind_int64(s->update, 1, (sqlite3_int64)revision);
             sqlite3_bind_int64(s->update, 2, w->schema);
@@ -396,6 +494,12 @@ ts_status ts_commit(ts_store *s, const ts_read *reads, size_t nr, ts_write *writ
         sqlite3_bind_int64(s->insert_revision, 6, seq);
         if ((rc = step_done(s->insert_revision))) { status = code(rc); goto fail; }
         changed++;
+    }
+    for (size_t i = 0; i < nn; i++) {
+        sqlite3_bind_blob(s->key_insert, 1, names[i].key, 16, SQLITE_TRANSIENT);
+        sqlite3_bind_int64(s->key_insert, 2, (sqlite3_int64)writes[names[i].index].id);
+        rc = step_done(s->key_insert);
+        if (rc) { status = rc == SQLITE_CONSTRAINT ? TS_CONFLICT : code(rc); goto fail; }
     }
     for (size_t i = 0; i < ne; i++) {
         const ts_effect *e = &effects[i];
@@ -434,11 +538,7 @@ ts_status ts_commit(ts_store *s, const ts_read *reads, size_t nr, ts_write *writ
 fail:
     exec(s, "ROLLBACK");
     /* Ids assigned inside the rolled-back transaction never existed. */
-    if (seq) for (size_t i = 0; i < nw; i++) {
-        size_t j = 0;
-        while (j < nr && reads[j].id != writes[i].id) j++;
-        if (j == nr) writes[i].id = 0;
-    }
+    for (size_t i = 0; i < nw; i++) if (created[i]) writes[i].id = 0;
     return status;
 }
 
@@ -477,15 +577,53 @@ ts_status ts_object_get(ts_store *s, const uint8_t hash[32], void *buffer, size_
     return read_object(s->objects, name, hash, buffer, capacity, size);
 }
 
+static ts_status sync_object_directories(ts_store *s, const char *sub) {
+    int fd = openat(s->objects, sub, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (fd < 0) return TS_IO;
+    int ok = !fsync(fd) && !fsync(s->objects);
+    int saved_errno = errno;
+    close(fd);
+    return ok ? TS_OK : saved_errno == ENOSPC || saved_errno == EDQUOT ? TS_FULL : TS_IO;
+}
+
+/* Hash-named does not mean a pre-existing file is intact. Compare actual bytes before
+ * deduplication; a known good put repairs a damaged object by the normal atomic write. */
+static int object_matches(int fd, const void *data, size_t size) {
+    struct stat st;
+    if (fstat(fd, &st)) return -1;
+    if (st.st_size < 0 || (uint64_t)st.st_size != size) return 0;
+    uint8_t buffer[16384]; size_t offset = 0;
+    while (offset < size) {
+        size_t want = size - offset; if (want > sizeof buffer) want = sizeof buffer;
+        ssize_t n = read(fd, buffer, want);
+        if (n < 0 && errno == EINTR) continue;
+        if (n < 0) return -1;
+        if (!n || memcmp(buffer, (const uint8_t *)data + offset, (size_t)n)) return 0;
+        offset += (size_t)n;
+    }
+    return 1;
+}
+
 ts_status ts_object_put(ts_store *s, const void *data, size_t size, uint8_t hash[32]) {
     if (size && !data) return TS_INVALID;
     ts_sha256(data, size, hash);
     char h[65], name[80], tmp[64];
     hex(hash, h);
     snprintf(name, sizeof name, "%.2s/%s", h, h + 2);
-    struct stat st;
-    if (!fstatat(s->objects, name, &st, 0) && (size_t)st.st_size == size) return TS_OK;  /* immutable: already there */
     char sub[3] = {h[0], h[1], 0};
+    int existing = openat(s->objects, name, O_RDONLY | O_CLOEXEC);
+    if (existing >= 0) {
+        int matches = object_matches(existing, data, size);
+        int synced = matches == 1 ? !fsync(existing) : 0;
+        int saved_errno = errno;
+        close(existing);
+        if (matches < 0) return TS_IO;
+        if (matches == 1) {
+            if (!synced) return saved_errno == ENOSPC || saved_errno == EDQUOT ? TS_FULL : TS_IO;
+            /* A previous rename may have succeeded before its directory sync failed. */
+            return sync_object_directories(s, sub);
+        }
+    } else if (errno != ENOENT) return TS_IO;
     if (mkdirat(s->objects, sub, 0700) && errno != EEXIST) return TS_IO;
     snprintf(tmp, sizeof tmp, "tmp-%ld-%llu", (long)getpid(), (unsigned long long)s->tmp_counter++);
     int fd = openat(s->objects, tmp, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
@@ -501,8 +639,5 @@ ts_status ts_object_put(ts_store *s, const void *data, size_t size, uint8_t hash
     ok = !close(fd) && ok;
     /* Visible only complete and synced; then the directory entries themselves are synced. */
     if (!ok || renameat(s->objects, tmp, s->objects, name)) { unlinkat(s->objects, tmp, 0); return TS_IO; }
-    int subfd = openat(s->objects, sub, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-    ok = subfd >= 0 && !fsync(subfd) && !fsync(s->objects);
-    if (subfd >= 0) close(subfd);
-    return ok ? TS_OK : TS_IO;
+    return sync_object_directories(s, sub);
 }

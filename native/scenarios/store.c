@@ -3,6 +3,7 @@
 #define _GNU_SOURCE
 #include "store.h"
 #include <signal.h>
+#include <sqlite3.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -81,6 +82,77 @@ static void records(void) {
     CHECK(ts_commit(s, 0, 0, &fresh, 1, 0, 0, &rc) == TS_OK && fresh.id > id);    /* never reused */
     ts_close(s);
     printf("ok captured reads, conflicts, no blind writes, unchanged no-ops, atomic sets, history, removal, one owner\n");
+}
+
+static void named_records(void) {
+    ts_store *s; MUST(ts_open(dir_named("named"), &s) == TS_OK);
+    uint8_t key[16] = {7}; ts_name name = {0, {7}}; ts_receipt receipt;
+    ts_write first = {0, 11, "first", 5, 0};
+    CHECK(ts_commit_named(s, 0, 0, &first, 1, 0, 0, &name, 1, &receipt) == TS_OK && first.id == 1);
+    uint64_t found;
+    CHECK(ts_lookup(s, key, &found) == TS_OK && found == first.id);
+    /* A creation whose allocated id also appears in an absence read must still be reset on
+     * rollback. Inferring which writes were new from the read set loses that distinction. */
+    ts_read reads[2] = {{first.id, 1}, {2, 0}};
+    ts_write writes[2] = {{first.id, 11, "changed", 7, 0}, {0, 12, "second", 6, 0}};
+    name.index = 1;
+    ts_effect effect = {{44}, 0, TS_PREPARED, 3, "request", 7};
+    CHECK(ts_commit_named(s, reads, 2, writes, 2, &effect, 1, &name, 1, &receipt) == TS_CONFLICT &&
+          writes[1].id == 0 && receipt.commit == 0 && writes[0].id == first.id);
+    ts_record r; char buffer[16];
+    CHECK(ts_get(s, first.id, &r, buffer, sizeof buffer) == TS_OK && r.revision == 1 && r.size == 5 && !memcmp(buffer, "first", 5));
+    CHECK(ts_effect_get(s, effect.intent, 0, 0) == TS_NOT_FOUND);
+    name.key[0] = 8;
+    CHECK(ts_commit_named(s, reads, 2, writes, 2, &effect, 1, &name, 1, &receipt) == TS_OK && writes[1].id == 2 && receipt.changed == 3);
+    CHECK(ts_lookup(s, name.key, &found) == TS_OK && found == 2);
+    ts_name invalid = {0, {9}};
+    CHECK(ts_commit_named(s, reads, 1, writes, 1, 0, 0, &invalid, 1, &receipt) == TS_INVALID);
+    ts_write fresh[2] = {{0, 1, 0, 0, 0}, {0, 1, 0, 0, 0}};
+    ts_name duplicate[2] = {{0, {9}}, {1, {9}}};
+    CHECK(ts_commit_named(s, 0, 0, fresh, 2, 0, 0, duplicate, 2, &receipt) == TS_INVALID && fresh[0].id == 0);
+    duplicate[1].key[0] = 10; duplicate[1].index = 0;
+    CHECK(ts_commit_named(s, 0, 0, fresh, 2, 0, 0, duplicate, 2, &receipt) == TS_INVALID);
+    ts_read current = {first.id, 2}; ts_write remove = {first.id, 0, 0, 0, 1};
+    CHECK(ts_commit(s, &current, 1, &remove, 1, 0, 0, &receipt) == TS_OK);
+    ts_close(s); MUST(ts_open(dir_named("named"), &s) == TS_OK);
+    CHECK(ts_lookup(s, key, &found) == TS_OK && found == first.id);
+    CHECK(ts_get(s, found, &r, buffer, sizeof buffer) == TS_NOT_FOUND && r.revision == 3);
+    invalid.key[0] = 7;
+    CHECK(ts_commit_named(s, 0, 0, fresh, 1, 0, 0, &invalid, 1, &receipt) == TS_CONFLICT && fresh[0].id == 0);
+    ts_close(s);
+    puts("ok named records: atomic links/effects, key conflicts, rollback identity, tombstone reservation and restart");
+}
+
+static void migration_and_exhaustion(void) {
+    ts_store *s; MUST(ts_open(dir_named("migration"), &s) == TS_OK);
+    ts_write w = {0, 3, "v1", 2, 0}; ts_receipt receipt;
+    MUST(ts_commit(s, 0, 0, &w, 1, 0, 0, &receipt) == TS_OK); ts_close(s);
+    /* Construct the exact pre-key v1 schema from the empty-key v2 store. */
+    char path[3200]; snprintf(path, sizeof path, "%s/records.db", dir_named("migration"));
+    sqlite3 *db; MUST(sqlite3_open(path, &db) == SQLITE_OK);
+    MUST(sqlite3_exec(db, "DROP TABLE record_keys; PRAGMA user_version=1", 0, 0, 0) == SQLITE_OK); sqlite3_close(db);
+    MUST(ts_open(dir_named("migration"), &s) == TS_OK);
+    ts_record r; char buffer[8]; uint64_t found; uint8_t key[16] = {1};
+    CHECK(ts_get(s, w.id, &r, buffer, sizeof buffer) == TS_OK && r.revision == 1 && !memcmp(buffer, "v1", 2));
+    CHECK(ts_lookup(s, key, &found) == TS_NOT_FOUND && found == 0);
+    ts_name name = {0, {1}}; ts_write new_record = {0, 4, "v2", 2, 0};
+    CHECK(ts_commit_named(s, 0, 0, &new_record, 1, 0, 0, &name, 1, &receipt) == TS_OK);
+    ts_close(s);
+    MUST(sqlite3_open(path, &db) == SQLITE_OK);
+    MUST(sqlite3_exec(db, "UPDATE records SET revision=9223372036854775807 WHERE id=1;"
+                         "UPDATE revisions SET revision=9223372036854775807 WHERE id=1;", 0, 0, 0) == SQLITE_OK);
+    sqlite3_close(db); MUST(ts_open(dir_named("migration"), &s) == TS_OK);
+    ts_read expected = {1, INT64_MAX};
+    CHECK(ts_commit(s, &expected, 1, &w, 1, 0, 0, &receipt) == TS_OK && receipt.changed == 0);
+    w.data = "xx";
+    CHECK(ts_commit(s, &expected, 1, &w, 1, 0, 0, &receipt) == TS_FULL && receipt.commit == 0);
+    CHECK(ts_get(s, 1, &r, buffer, sizeof buffer) == TS_OK && r.revision == INT64_MAX && !memcmp(buffer, "v1", 2));
+    expected.revision = UINT64_MAX;
+    CHECK(ts_commit(s, &expected, 1, &w, 1, 0, 0, &receipt) == TS_INVALID);
+    ts_close(s); MUST(sqlite3_open(path, &db) == SQLITE_OK);
+    MUST(sqlite3_exec(db, "PRAGMA user_version=3", 0, 0, 0) == SQLITE_OK); sqlite3_close(db);
+    CHECK(ts_open(dir_named("migration"), &s) == TS_INVALID);
+    puts("ok schema v1 migration preserves revisions; unknown versions rejected; revision exhaustion never wraps");
 }
 
 enum { MODEL = 24, MODEL_OPS = 20000 };
@@ -193,6 +265,137 @@ static void effects(void) {
     printf("ok effect lifecycle: idempotent prepare, no skipped authorisation, outbox atomicity, issued->unknown on reopen, reconciliation, terminal states\n");
 }
 
+/* Independent outbox model. IDs sort by numeric index, but are inserted in reverse order;
+ * binary requests and variable/empty outcomes must survive state changes and reopen. */
+enum { OUTBOX = TS_EFFECT_PAGE_LIMIT + 7 };
+static void outbox_id(uint8_t id[16], unsigned n) {
+    memset(id, 0, 16);
+    id[14] = (uint8_t)(n >> 8); id[15] = (uint8_t)n;
+    if (n == OUTBOX - 1) memset(id, 255, 16);
+}
+static void outbox_request(uint8_t request[5], unsigned n) {
+    request[0] = 0; request[1] = (uint8_t)n; request[2] = 255;
+    request[3] = (uint8_t)(n >> 8); request[4] = 0;
+}
+static void outbox(void) {
+    ts_store *s;
+    MUST(ts_open(dir_named("outbox"), &s) == TS_OK);
+    ts_effect_state states[OUTBOX];
+    uint64_t commits[OUTBOX];
+    ts_receipt receipt;
+    uint8_t request[5], result[] = {0, 255, 42};
+    for (unsigned k = OUTBOX; k-- > 0;) {
+        outbox_request(request, k);
+        ts_effect e = {{0}, 0, TS_PREPARED, 17, request, sizeof request};
+        outbox_id(e.intent, k);
+        MUST(ts_commit(s, 0, 0, 0, 0, &e, 1, &receipt) == TS_OK);
+        states[k] = TS_PREPARED; commits[k] = receipt.commit;
+    }
+    /* One of each legal state, including both kinds of terminal outcome. */
+    for (unsigned k = 0; k < OUTBOX; k++) {
+        ts_effect_state target = (ts_effect_state)(1 + k % 7);
+        while (states[k] != target) {
+            ts_effect_state next = states[k] == TS_PREPARED ?
+                (target == TS_CANCELLED ? TS_CANCELLED : TS_AUTHORISED) :
+                states[k] == TS_AUTHORISED ? TS_ISSUED : target;
+            ts_effect e = {{0}, states[k], next, 17, result, k % 2 ? sizeof result : 0};
+            outbox_id(e.intent, k);
+            MUST(ts_commit(s, 0, 0, 0, 0, &e, 1, &receipt) == TS_OK);
+            states[k] = next; commits[k] = receipt.commit;
+        }
+    }
+    ts_effect_record page[TS_EFFECT_PAGE_LIMIT], r;
+    size_t count = 99;
+    CHECK(ts_effect_scan(s, TS_PREPARED, 0, page, 0, &count) == TS_INVALID && count == 0);
+    CHECK(ts_effect_scan(s, TS_PREPARED, 0, page, TS_EFFECT_PAGE_LIMIT + 1, &count) == TS_INVALID);
+    CHECK(ts_effect_scan(s, (ts_effect_state)8, 0, page, 1, &count) == TS_INVALID);
+    CHECK(ts_effect_scan(s, 0, 0, 0, 1, &count) == TS_INVALID);
+    /* An adapter for another effect kind cannot advance the intent, even in a batch. */
+    ts_effect wrong = {{0}, TS_PREPARED, TS_AUTHORISED, 18, 0, 0};
+    outbox_id(wrong.intent, 0);
+    ts_write note = {0, 1, "should not exist", 16, 0};
+    CHECK(ts_commit(s, 0, 0, &note, 1, &wrong, 1, &receipt) == TS_CONFLICT && note.id == 0 && receipt.commit == 0);
+    /* The model checks every filtered page and every payload before and after recovery. */
+    uint64_t recovery_commit = 0;
+    for (unsigned reopened = 0; reopened < 2; reopened++) {
+        if (reopened) {
+            ts_close(s); MUST(ts_open(dir_named("outbox"), &s) == TS_OK);
+            size_t recovered = 0;
+            for (unsigned k = 0; k < OUTBOX; k++) if (states[k] == TS_ISSUED) recovered++;
+            CHECK(ts_recovered_unknown(s) == recovered);
+        }
+        for (unsigned filter = 0; filter <= TS_UNKNOWN; filter++) {
+            const size_t capacities[] = {1, 7, TS_EFFECT_PAGE_LIMIT};
+            for (unsigned c = 0; c < sizeof capacities / sizeof *capacities; c++) {
+                unsigned expected = 0, seen = 0;
+                const uint8_t *after = 0;
+                do {
+                    MUST(ts_effect_scan(s, (ts_effect_state)filter, after, page, capacities[c], &count) == TS_OK);
+                    for (size_t j = 0; j < count; j++) {
+                        while (expected < OUTBOX) {
+                            ts_effect_state st = states[expected];
+                            if (reopened && st == TS_ISSUED) st = TS_UNKNOWN;
+                            if (!filter || (unsigned)st == filter) break;
+                            expected++;
+                        }
+                        MUST(expected < OUTBOX);
+                        uint8_t id[16]; outbox_id(id, expected);
+                        CHECK(!memcmp(id, page[j].intent, 16));
+                        ts_effect_state st = states[expected];
+                        if (reopened && st == TS_ISSUED) {
+                            st = TS_UNKNOWN;
+                            CHECK(page[j].commit > commits[expected]);
+                            if (!recovery_commit) recovery_commit = page[j].commit;
+                            CHECK(page[j].commit == recovery_commit);
+                        } else CHECK(page[j].commit == commits[expected]);
+                        CHECK(page[j].state == st && page[j].kind == 17 && page[j].request_size == 5);
+                        unsigned has = st == TS_OBSERVED || st == TS_FAILED;
+                        size_t outcome_size = has && expected % 2 ? sizeof result : 0;
+                        CHECK(page[j].has_outcome == has && page[j].outcome_size == outcome_size);
+                        expected++; seen++;
+                    }
+                    if (count) after = page[count - 1].intent; /* deliberately aliases the output page */
+                } while (count == capacities[c]);
+                unsigned want = 0;
+                for (unsigned k = 0; k < OUTBOX; k++) {
+                    ts_effect_state st = reopened && states[k] == TS_ISSUED ? TS_UNKNOWN : states[k];
+                    want += !filter || (unsigned)st == filter;
+                }
+                CHECK(seen == want);
+            }
+        }
+        for (unsigned k = 0; k < OUTBOX; k++) {
+            uint8_t id[16], got[5], outcome[3]; outbox_id(id, k); outbox_request(request, k);
+            memset(got, 123, sizeof got); memset(outcome, 123, sizeof outcome);
+            CHECK(ts_effect_read(s, id, &r, got, sizeof got - 1, outcome, sizeof outcome) == TS_CAPACITY);
+            CHECK(r.request_size == 5 && got[0] == 123 && outcome[0] == 123);
+            CHECK(ts_effect_read(s, id, &r, 0, 0, 0, 0) == TS_CAPACITY && r.request_size == 5);
+            unsigned has = states[k] == TS_OBSERVED || states[k] == TS_FAILED;
+            if (has && k % 2) {
+                CHECK(ts_effect_read(s, id, &r, got, sizeof got, outcome, 2) == TS_CAPACITY);
+                CHECK(got[0] == 123 && outcome[0] == 123 && r.outcome_size == sizeof result);
+            }
+            CHECK(ts_effect_read(s, id, &r, got, sizeof got, outcome, sizeof outcome) == TS_OK);
+            CHECK(!memcmp(got, request, sizeof got) && r.has_outcome == has);
+            if (r.outcome_size) CHECK(!memcmp(outcome, result, sizeof result));
+            CHECK(ts_effect_read(s, r.intent, &r, got, sizeof got, outcome, sizeof outcome) == TS_OK);
+            CHECK(!memcmp(r.intent, id, 16) && !memcmp(got, request, sizeof got));
+            /* Re-delivery of a prepare must preserve an advanced state and its outcome. */
+            ts_effect duplicate = {{0}, 0, TS_PREPARED, 17, request, sizeof request};
+            memcpy(duplicate.intent, id, 16);
+            CHECK(ts_commit(s, 0, 0, 0, 0, &duplicate, 1, &receipt) == TS_OK && receipt.changed == 0);
+            ts_effect_record after;
+            CHECK(ts_effect_read(s, id, &after, got, sizeof got, outcome, sizeof outcome) == TS_OK);
+            CHECK(after.state == r.state && after.commit == r.commit && after.has_outcome == r.has_outcome);
+        }
+    }
+    uint8_t absent[16]; memset(absent, 254, sizeof absent);
+    CHECK(ts_effect_read(s, absent, &r, request, sizeof request, result, sizeof result) == TS_NOT_FOUND && r.commit == 0);
+    CHECK(ts_effect_read(s, absent, &r, 0, 1, 0, 0) == TS_INVALID);
+    ts_close(s);
+    printf("ok durable outbox: %d intents, all states, bounded filtered pages, binary payloads, empty outcomes, kind conflicts and restart recovery\n", OUTBOX);
+}
+
 static void quota_and_objects(void) {
     ts_store *s;
     MUST(ts_open(dir_named("quota"), &s) == TS_OK);
@@ -222,6 +425,10 @@ static void quota_and_objects(void) {
     fputc('X', f);
     fclose(f);
     CHECK(ts_object_get(s, h, buf, sizeof buf, &size) == TS_IO);                    /* corruption is never data */
+    CHECK(ts_object_put(s, "artifact", 8, h2) == TS_OK && !memcmp(h, h2, 32));       /* repair, never deduplicate corrupt bytes */
+    CHECK(ts_object_get(s, h, buf, sizeof buf, &size) == TS_OK && size == 8 && !memcmp(buf, "artifact", 8));
+    CHECK(ts_object_put(s, NULL, 0, h) == TS_OK && ts_object_put(s, NULL, 0, h2) == TS_OK && !memcmp(h, h2, 32));
+    CHECK(ts_object_get(s, h, NULL, 0, &size) == TS_OK && size == 0);
     ts_close(s);
     printf("ok quota exhaustion installs nothing and recovers; objects are content-addressed, deduplicated and verified\n");
 }
@@ -323,6 +530,17 @@ static void crash(void) {
         ts_effect issued = fx(count - 2, 0, 0, 0), observed = fx(count - 3, 0, 0, 0);
         if (count > 2) CHECK(ts_effect_get(s, issued.intent, &st, 0) == TS_OK && st == TS_UNKNOWN);
         if (count > 3) CHECK(ts_effect_get(s, observed.intent, &st, 0) == TS_OK && st == TS_OBSERVED);
+        /* Recovery can actually reconstruct work, not merely report a state code. */
+        ts_effect_record entry;
+        char request[16], outcome[16];
+        if (count > 2) {
+            CHECK(ts_effect_read(s, issued.intent, &entry, request, sizeof request, outcome, sizeof outcome) == TS_OK);
+            CHECK(entry.state == TS_UNKNOWN && entry.request_size == 4 && !memcmp(request, "call", 4) && !entry.has_outcome);
+        }
+        if (count > 3) {
+            CHECK(ts_effect_read(s, observed.intent, &entry, request, sizeof request, outcome, sizeof outcome) == TS_OK);
+            CHECK(entry.state == TS_OBSERVED && entry.outcome_size == 2 && !memcmp(outcome, "ok", 2));
+        }
         unknown += ts_recovered_unknown(s);
         ts_close(s);
         if (failures) break;
@@ -338,8 +556,11 @@ int main(int argc, char **argv) {
     mkdir(base, 0700);
     sha_vectors();
     records();
+    named_records();
+    migration_and_exhaustion();
     differential();
     effects();
+    outbox();
     quota_and_objects();
     crash();
     if (failures) { fprintf(stderr, "core-store: %d failures\n", failures); return 1; }

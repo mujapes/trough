@@ -31,7 +31,14 @@ for scenario in publication resources replacement; do
     $CC $CORE $DYN -I"$S/core" "$S/scenarios/$scenario.c" "$O/lib/libtroughcore.a" -ldl -o "$O/bin/core-$scenario"
 done
 # Durable store: SQLite from the root's own Debian packages (native/packages.list).
-$CC $CORE $DYN -I"$S/store" "$S/store/store.c" "$S/scenarios/store.c" -lsqlite3 -o "$O/bin/core-store"
+$CC $CORE -c "$S/store/store.c" -o "$O/lib/store.o"
+$CC $CORE -c "$S/store/document.c" -o "$O/lib/document.o"
+$CC $CORE -c "$S/store/stream.c" -o "$O/lib/stream.o"
+${AR:-ar} rcsD "$O/lib/libtroughstore.a" "$O/lib/store.o" "$O/lib/document.o" "$O/lib/stream.o"
+rm -f "$O/lib/store.o" "$O/lib/document.o" "$O/lib/stream.o"
+$CC $CORE $DYN -I"$S/store" "$S/scenarios/store.c" "$O/lib/libtroughstore.a" -lsqlite3 -o "$O/bin/core-store"
+$CC $CORE $DYN -I"$S/store" "$S/scenarios/documents.c" "$O/lib/libtroughstore.a" -lsqlite3 -o "$O/bin/core-documents"
+$CC $CORE $DYN -I"$S/store" "$S/scenarios/streams.c" "$O/lib/libtroughstore.a" -lsqlite3 -o "$O/bin/core-streams"
 mkdir -p "$O/fixtures"
 for version in 1 2; do
     $CC $CORE -shared -DVERSION=$version "$S/scenarios/fixtures/implementation.c" -o "$O/fixtures/module-$version.so"

@@ -81,6 +81,9 @@ The input adapter's IME transaction semantics and the store's acknowledgement se
 be designed together. Text editing does not wait for a model or a UI renderer. Durable capture
 is not reduced to an async save callback that can overwrite a later edit.
 
+The implemented document/capture storage contract is [DOCUMENTS.md](DOCUMENTS.md), including
+its asynchronous input-owner obligations, bounded admission and remaining text-index work.
+
 ### 3. Work planning and real resource ownership
 
 Implement demand propagation, dependency/equality-based invalidation, cache identity and
@@ -170,8 +173,9 @@ preference questions or reasons to build an interim application.
   Resolve it before laying out downstream host bindings; record licenses and oracle coverage.
 - GPU/CPU inference and a device-supported accelerator path need real model/operator/format
   evidence. No TPU dependency is allowed to quietly become necessary for basic navigation.
-- Generated schema tooling, immutable arenas, incremental planner, device presenter, durable
-  store and module migration are not implemented by the small kernel below.
+- Generated schema tooling, immutable arenas, incremental planner and device presenter remain
+  outstanding. Durable storage and native module lifecycle components now exist separately
+  from the publication kernel; their existence does not complete their product integration.
 
 A few days or weeks is a construction horizon, not an evidenced estimate for a complete new
 standards-compatible browser. No defensible completion date follows from this design alone.
@@ -204,6 +208,21 @@ phone performance results. Build/reproduction evidence is recorded in the handof
 The initial experiment batching callbacks into the old debug UI was removed from the working
 implementation after the user's clarification. There is no local UI patch presented as the
 foundation of the unified architecture.
+
+Stage 1 also now includes `native/core/resources` (leases, fences and retirement) and
+`native/core/modules` (prepare/activation/retirement), independently checked by the resource
+and dynamic-library replacement scenarios. The signed development controller runs named
+scenarios on the phone and binds receipts to the exact bundle/runtime. Full presentation,
+input, audio and application-owned orchestration remain downstream obligations.
+
+Stage 2 includes `native/store/store` (SQLite revisions, atomic read-validated commits,
+durable effect lifecycle, bounded outbox recovery, verified immutable objects) and
+`native/store/document` (canonical UTF-16 documents, pure edit batches, durable save receipts,
+historical captures and idempotent prepared Ask). The native archive, source bundle and
+scenario registry carry these same implementations to self-hosting. `native/store/stream`
+adds atomic named entries, ordered tails, historical provenance and stable snapshot paging
+([contract](STREAMS.md)). Retention, indexed text/range storage and actual input/task owners remain construction
+work. Passing these semantic oracles does not establish a complete document engine or UI.
 
 ## Agent implementation discipline
 

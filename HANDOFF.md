@@ -1,4 +1,51 @@
-# Current handoff: unified design and hot replacement, 2026-10-27
+# Current handoff: autonomous construction, 2026-10-28
+
+## Active continuation (2026-10-28)
+
+The user resumed after a VM interruption and authorised continuing the full Trough build.
+At 06:58:35 UTC they said they were going to sleep and to continue until the five-hour limit
+(11:58:35 UTC). Keep constructing/testing autonomously within the design; no routine user
+testing or permission questions. Save source/evidence as work proceeds. Do not interpret this
+checkpoint as completion of the full application.
+
+Recovered uncommitted work extended the effect outbox with bounded metadata pagination and
+owned request/outcome retrieval; immutable effect-kind matching and the store archive were
+also pending. Those changes pass the existing 20,000-operation differential store oracle,
+263-intent pagination/restart checks and 20 SIGKILL cycles, including ASan/UBSan.
+
+New stage-2 components:
+
+- `native/store/document`: canonical lossless UTF-16 documents, atomic pure edit batches,
+  revision-checked durable saves, immutable historical reads and idempotent prepared Ask
+  capsules with exact document/source/route-policy dependencies. [Contract](docs/DOCUMENTS.md).
+- `native/store/stream`: stable named heads/entries, atomic append/tail publication, exact
+  historical content/provenance and bounded snapshot pagination. [Contract](docs/STREAMS.md).
+- Store schema v2 adds immutable key-to-record associations in the same record/effect commit.
+  Regression cases cover migration from v1, rollback of allocated IDs even when the same ID
+  appeared in an absence read, tombstone reservations and signed revision exhaustion.
+- Object puts verify existing bytes, atomically repair corrupt same-size objects and sync
+  directory entries on retries instead of acknowledging an unverified existing pathname.
+
+Native build/archive/source inventory, CI, signed scenario registry, controller and interpreter
+patching include `core.documents` and `core.streams`. Local document oracle: 4000 differential
+edit batches, 571 stale saves, 40 reopens, quota/maximum-size and SIGKILL composition/capture.
+Local stream oracle: 1200 appends across two streams, history/pagination/provenance, 12 reopens,
+quota/corruption and 10 SIGKILL cycles. Both pass with ASan/UBSan. These are storage semantics,
+not actual Android IME/rendering or live application replacement evidence.
+
+Phone evidence so far: `core.documents` passed against bundle
+`d9a7a12309003870e70a7442dadd8921a5221a22b1c22f24ad8936d177fcafdb`; signed receipt in
+`out/evidence/core.documents.json` and `.sig`. This was before the stream/schema-v2 changes;
+those still require publication/device verification at this checkpoint.
+
+Next: finish verifying/publishing this stage-2 work, then continue the remaining ownership
+contracts (workspace/artifact/task records, input persistence queue, indexed text/range
+storage and work planning), preserving the existing loader and autonomous phone loop.
+The final scene/browser/media/IME stack remains substantial work, not a completed product.
+
+---
+
+# Previous handoff: unified design and hot replacement, 2026-10-27
 
 ## Device evidence, 2026-10-27 night (Opus, building on Astra's tree)
 

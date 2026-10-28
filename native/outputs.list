@@ -6,9 +6,12 @@ bin/dnstest
 bin/nsprobe
 lib/libexecmap.so
 lib/libtroughcore.a
+lib/libtroughstore.a
 bin/core-publication
 bin/core-resources
 bin/core-replacement
 bin/core-store
+bin/core-documents
+bin/core-streams
 fixtures/module-1.so
 fixtures/module-2.so

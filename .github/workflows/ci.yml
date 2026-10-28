@@ -35,6 +35,8 @@ jobs:
           CORE_CFLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer' tests/core_lifecycle.sh
           sudo apt-get update -qq && sudo apt-get install -y -qq libsqlite3-dev
           CORE_CFLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer' tests/core_store.sh
+          CORE_CFLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer' tests/core_documents.sh
+          CORE_CFLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer' tests/core_streams.sh
 
   bench-arm64:
     # Free arm64 runner (public repo): the same static bench, run natively on Neoverse.
@@ -48,6 +50,8 @@ jobs:
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq libsqlite3-dev
           tests/core_world.sh && tests/core_lifecycle.sh && tests/core_store.sh
+          tests/core_documents.sh
+          tests/core_streams.sh
       - name: Namespace capability probe oracle
         run: python3 tests/namespaces.py
       - uses: actions/upload-artifact@v4
