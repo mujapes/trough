@@ -74,6 +74,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - name: ELF page-tail differential oracle
+        run: python3 tests/loader_pages.py
       - name: texec oracle (Android's app seccomp filter + /data/data/t.t, simulated)
         run: tests/run.sh
       - name: Diagnose a loader failure

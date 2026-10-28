@@ -126,7 +126,10 @@ static void load(const char *path, Loaded *out) {
         }
         if (p->memsz > p->filesz) {  /* .bss: zero the rest of the last file page, map the remainder */
             u64 file_page_end = (file_end + page - 1) & ~(page - 1);
-            if (p->filesz) for (u64 a = file_end; a < file_page_end && a < mem_end; a++) *(volatile char *)a = 0;
+            /* Linux padzero clears the entire page tail, including beyond p_memsz.
+             * ld.so's initial calloc uses that slack after _end and assumes it is zero;
+             * leaving ELF notes there corrupts its link_map (Ubuntu glibc 2.39). */
+            if (p->filesz) for (u64 a = file_end; a < file_page_end; a++) *(volatile char *)a = 0;
             u64 anon = p->filesz ? file_page_end : start;
             if (mem_end > anon) {
                 i64 m = SYS(NR_mmap, anon, ((mem_end + page - 1) & ~(page - 1)) - anon, prot | PROT_W,

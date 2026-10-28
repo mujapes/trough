@@ -2,6 +2,16 @@
 
 ## Active continuation (2026-10-28)
 
+ARM CI crash root cause: texec zeroed the final file-backed page only to `p_memsz`. Linux's
+`padzero` clears the whole tail. Ubuntu glibc 2.39's minimal calloc allocates after `_end`
+assuming zeros, so ELF note bytes became link_map pointers (`0x696e6900646c7472`). Runner
+`40709414561` contains register/mapping evidence. Clear the full page tail. New independent
+`tests/loader_pages.py` poisons non-load bytes: native Linux passed, old texec failed with 23,
+fixed texec matches Linux for both small and multi-page BSS. CI now gates this before loader
+integration. Await fresh CI before claiming the Ubuntu integration crash resolved.
+References: [Linux ELF loading](https://codebrowser.dev/linux/linux/fs/binfmt_elf.c.html),
+[glibc initial allocation](https://codebrowser.dev/glibc/glibc/elf/dl-minimal-malloc.c.html).
+
 The next automation dependency is now implemented: `build.native` uses `NativeReproduction`
 and the native supervisor to rebuild immutable bundle sources, run tfix and compare all 22
 outputs byte-for-byte, with bounded memory/output and scratch/descendant cleanup. No candidate
