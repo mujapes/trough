@@ -57,6 +57,25 @@ Receipt in `out/evidence/core.text.json`.
 Adopted 2026-10-28: TDOC v2 documents (`td_save_text`/`td_load_text`) and the draft queue's live
 value. Note that a split joins its right part into the following leaf when they fit, so an edit
 can rewrite one neighbouring chunk (the durable typing test bounds this at 2 chunks per save).
-Also missing: lazy chunk loading for texts larger than memory, and
-retention/collection of unreferenced chunk objects, which must trace every manifest that
-history and captured requests still reference.
+Also missing: lazy chunk loading for texts larger than memory.
+
+## Chunk references and collection (store schema v3)
+
+A `ts_write` may declare the objects its revision references. The commit fails with
+`TS_NOT_FOUND`, writing nothing, unless every declared object exists. It records the references
+in the same transaction, so the store tracks reachability without knowing document formats.
+`td_save_text` declares every chunk of its manifest. `ts_object_collect` removes object files
+that no revision references. History (including tombstoned records) is retained, so today this
+reclaims only orphans: chunks of a save whose commit never happened, such as a crash between
+put and commit or a failed save. The single store owner must not run it between a put and the
+commit that references it; `td_save_text` keeps the two inside one call.
+
+The v3 migration records whether the store had any revisions before references were tracked.
+If so, collection refuses with `TS_INVALID`, because older revisions may reference objects
+without declaring them. Evidence: the store oracle covers dangling references (atomic abort),
+duplicates, history and tombstone retention, removal-with-references rejection, reopen, and 600
+objects sharing prefix directories (exactly the unreferenced 300 removed). The documents
+oracle collects after every SIGKILL cycle and then loads the recovered revision and revision 1
+exactly. Mutants: 5 of 6 caught; the survivor ignores a failed reference insert, which needs
+SQLite fault injection to test. A history retention or compaction policy is a separate design
+decision; captured Ask requests already pin exact document revisions.

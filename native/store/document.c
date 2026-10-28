@@ -181,8 +181,8 @@ static ts_status expect(ts_store *s, ts_read expected, ts_record *current) {
     return current->schema == TD_SCHEMA ? TS_OK : TS_INVALID;
 }
 static ts_status commit(ts_store *s, ts_read expected, const ts_record *current, uint8_t *wire, size_t size,
-                        const td_value *v, td_snapshot *out) {
-    ts_write w = {expected.id, TD_SCHEMA, wire, size, 0};
+                        const td_value *v, td_snapshot *out, const uint8_t (*objects)[32], size_t count) {
+    ts_write w = {expected.id, TD_SCHEMA, wire, size, 0, objects, count};
     ts_receipt receipt;
     ts_status st = ts_commit(s, expected.id ? &expected : NULL, expected.id ? 1 : 0, &w, 1, NULL, 0, &receipt);
     if (!st) {
@@ -203,7 +203,7 @@ static ts_status save(ts_store *s, ts_read expected, const td_value *v, td_snaps
     uint8_t *wire = malloc(size);
     if (!wire) return TS_IO;
     st = td_encode(v, wire, size, &size);
-    if (!st) st = commit(s, expected, &current, wire, size, v, out);
+    if (!st) st = commit(s, expected, &current, wire, size, v, out, NULL, 0);
     free(wire);
     return st;
 }
@@ -237,7 +237,14 @@ ts_status td_save_text(ts_store *s, ts_read expected, const td_text_value *v, td
     put32(wire + 28, 0);
     st = tx_store(s, v->text, wire + TD_HEADER_SIZE, manifest, &manifest, NULL);
     td_value meta = {NULL, 0, v->anchor, v->caret, v->composing_start, v->composing_end};
-    if (!st) st = commit(s, expected, &current, wire, size, &meta, out);
+    /* The revision references every chunk, so collection keeps them for as long as it exists. */
+    size_t chunks = (manifest - TX_MANIFEST_HEADER) / TX_MANIFEST_ENTRY;
+    uint8_t (*objects)[32] = st ? NULL : malloc((chunks ? chunks : 1) * 32);
+    if (!st && !objects) st = TS_IO;
+    for (size_t i = 0; !st && i < chunks; i++)
+        memcpy(objects[i], wire + TD_HEADER_SIZE + TX_MANIFEST_HEADER + TX_MANIFEST_ENTRY * i, 32);
+    if (!st) st = commit(s, expected, &current, wire, size, &meta, out, (const uint8_t (*)[32])objects, chunks);
+    free(objects);
     if (!st) out->length = n;
     free(wire);
     return st;

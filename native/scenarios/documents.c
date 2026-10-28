@@ -144,7 +144,7 @@ static void capture(void) {
     td_value value = {first, 5, 5, 5, -1, -1}; td_snapshot document;
     MUST(td_create(store, &value, &document) == TS_OK);
     uint64_t doc_id = document.record.id;
-    ts_write source = {0, 77, "source revision one", 19, 0}; ts_receipt receipt;
+    ts_write source = {0, 77, "source revision one", 19, 0, NULL, 0}; ts_receipt receipt;
     MUST(ts_commit(store, NULL, 0, &source, 1, NULL, 0, &receipt) == TS_OK);
     td_reference ref = {source.id, 1, 77};
     const uint8_t options[] = {0, 1, 255, 0, 2};
@@ -195,7 +195,7 @@ static void capture(void) {
     CHECK(ts_get_revision(store, decoded.dependencies[0].id, decoded.dependencies[0].revision, &old, source_bytes, sizeof source_bytes) == TS_OK &&
           old.size == 19 && !memcmp(source_bytes, "source revision one", 19));
     /* Deleting inputs cannot destroy retained history, and cannot permit a new capture. */
-    ts_read current = {doc_id, 2}; ts_write remove = {doc_id, 0, NULL, 0, 1};
+    ts_read current = {doc_id, 2}; ts_write remove = {doc_id, 0, NULL, 0, 1, NULL, 0};
     CHECK(ts_commit(store, &current, 1, &remove, 1, NULL, 0, &receipt) == TS_OK);
     ask.document.revision = 1; ref.revision = 1;
     CHECK(td_ask(store, intent, &ask, &receipt) == TS_OK && receipt.changed == 0);
@@ -332,7 +332,7 @@ static void indexed(void) {
 }
 static void indexed_death(void) {
     static uint16_t scratch[60000], expect[60000];
-    uint64_t least = UINT64_MAX, most = 0;
+    uint64_t least = UINT64_MAX, most = 0; size_t orphans = 0;
     for (int cycle = 0; cycle < 8; cycle++) {
         char name[32]; snprintf(name, sizeof name, "indexed-death-%d", cycle);
         int ready[2]; MUST(pipe(ready) == 0);
@@ -358,7 +358,16 @@ static void indexed_death(void) {
         MUST(kill(child, SIGKILL) == 0); int status; MUST(waitpid(child, &status, 0) == child && WIFSIGNALED(status));
         ts_store *s; MUST(ts_open(path(name), &s) == TS_OK);
         td_snapshot snap; tx_text *t;
+        /* Chunks of the killed in-flight save are orphans; collecting them must keep every chunk
+         * that any committed revision references. */
+        ts_collected collected; MUST(ts_object_collect(s, &collected) == TS_OK);
+        orphans += collected.removed;
         MUST(td_load_text(s, 1, 0, &snap, &t) == TS_OK);   /* every chunk of the committed manifest exists */
+        tx_text *first; td_snapshot one;
+        MUST(td_load_text(s, 1, 1, &one, &first) == TS_OK);  /* and history */
+        size_t n0 = indexed_text(0, expect);
+        CHECK(same_tree(first, expect, n0));
+        tx_release(first);
         size_t n = indexed_text((unsigned)snap.record.revision - 1, expect);
         CHECK(snap.record.revision >= 1 && same_tree(t, expect, n));
         if (snap.record.revision < least) least = snap.record.revision;
@@ -366,8 +375,8 @@ static void indexed_death(void) {
         tx_release(t); ts_close(s);
     }
     CHECK(least >= 1 && most > 1);
-    printf("ok indexed SIGKILL: 8 cycles killed at revisions %llu..%llu; each loads with all chunks and exact text\n",
-           (unsigned long long)least, (unsigned long long)most);
+    printf("ok indexed SIGKILL: 8 cycles killed at revisions %llu..%llu; after collecting %zu orphan chunks each revision and its history load exactly\n",
+           (unsigned long long)least, (unsigned long long)most, orphans);
 }
 
 int main(int argc, char **argv) {

@@ -66,8 +66,8 @@ ts_status tw_create(ts_store *s, const tw_keys *keys, const td_value *initial, t
     tl_head stream = {0}; size_t stream_size;
     st = tl_head_encode(&stream, stream_wire, sizeof stream_wire, &stream_size);
     if (st) { free(document); return st; }
-    ts_write writes[] = {{0, TW_SCHEMA, wire, sizeof wire, 0}, {0, TD_SCHEMA, document, size, 0},
-                         {0, TL_HEAD_SCHEMA, stream_wire, stream_size, 0}};
+    ts_write writes[] = {{0, TW_SCHEMA, wire, sizeof wire, 0, NULL, 0}, {0, TD_SCHEMA, document, size, 0, NULL, 0},
+                         {0, TL_HEAD_SCHEMA, stream_wire, stream_size, 0, NULL, 0}};
     ts_name names[3] = {{0, {0}}, {1, {0}}, {2, {0}}};
     memcpy(names[0].key, keys->root, 16); memcpy(names[1].key, keys->draft, 16); memcpy(names[2].key, keys->stream, 16);
     ts_receipt receipt;

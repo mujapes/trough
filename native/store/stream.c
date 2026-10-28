@@ -78,7 +78,7 @@ ts_status tl_open(ts_store *s, const uint8_t key[16], tl_head *out) {
     if (st == TS_OK) return tl_load(s, id, 0, out);
     if (st != TS_NOT_FOUND) return st;
     tl_head h = {0}; uint8_t wire[HEAD_SIZE]; encode_head(&h, wire);
-    ts_write w = {0, TL_HEAD_SCHEMA, wire, sizeof wire, 0};
+    ts_write w = {0, TL_HEAD_SCHEMA, wire, sizeof wire, 0, NULL, 0};
     ts_name name = {0, {0}}; memcpy(name.key, key, 16); ts_receipt receipt;
     st = ts_commit_named(s, NULL, 0, &w, 1, NULL, 0, &name, 1, &receipt);
     if (!st) { h.record = (ts_record){w.id, 1, receipt.commit, TL_HEAD_SCHEMA, sizeof wire}; *out = h; }
@@ -159,8 +159,8 @@ static ts_status append_entry(ts_store *s, ts_read expected, const uint8_t key[1
     head.length++; memcpy(head.last, key, 16);
     uint8_t head_wire[HEAD_SIZE], entry_wire[ENTRY_LIMIT]; encode_head(&head, head_wire);
     size_t size = encode_entry(&e, entry_wire);
-    ts_write writes[] = {{head.record.id, TL_HEAD_SCHEMA, head_wire, sizeof head_wire, 0},
-                         {0, TL_ENTRY_SCHEMA, entry_wire, size, 0}};
+    ts_write writes[] = {{head.record.id, TL_HEAD_SCHEMA, head_wire, sizeof head_wire, 0, NULL, 0},
+                         {0, TL_ENTRY_SCHEMA, entry_wire, size, 0, NULL, 0}};
     ts_name name = {1, {0}}; memcpy(name.key, key, 16); ts_receipt receipt;
     ts_read reads[TD_DEPENDENCY_LIMIT + 2]; reads[0] = expected;
     if (count) memcpy(reads + 1, guards, count * sizeof *guards);

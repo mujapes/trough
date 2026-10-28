@@ -30,13 +30,18 @@ typedef struct ts_store ts_store;
 
 /* Captured input: id at revision. revision 0 asserts it never existed; tombstones keep revisions. */
 typedef struct { uint64_t id, revision; } ts_read;
-/* id 0 creates a record; its new id is written back into id. remove ignores data/schema. */
+/* id 0 creates a record; its new id is written back into id. remove ignores data/schema.
+ * objects: the stored objects this revision references (at most TS_OBJECT_REF_LIMIT). The
+ * commit fails with TS_NOT_FOUND unless each exists, and records the references in the same
+ * transaction; ts_object_collect never removes an object a retained revision references. */
 typedef struct {
     uint64_t id;
     uint32_t schema;
     const void *data;
     size_t size;
     unsigned remove;
+    const uint8_t (*objects)[32];
+    size_t object_count;
 } ts_write;
 /* Effect intent ids are caller-chosen (16 bytes) so a retried prepare is idempotent, never doubled.
  * from == 0 prepares a new intent (to must be TS_PREPARED); otherwise from and kind must
@@ -68,7 +73,7 @@ typedef struct {
     unsigned has_outcome;
 } ts_effect_record;
 
-enum { TS_DATA_LIMIT = 1 << 20, TS_EFFECT_PAGE_LIMIT = 256 };
+enum { TS_DATA_LIMIT = 1 << 20, TS_EFFECT_PAGE_LIMIT = 256, TS_OBJECT_REF_LIMIT = 1 << 16 };
 
 /* Creates <dir>/records.db and <dir>/objects as needed, migrates the schema, recovers. */
 ts_status ts_open(const char *dir, ts_store **out);
@@ -109,6 +114,15 @@ ts_status ts_effect_scan(ts_store *, ts_effect_state state, const uint8_t after[
 ts_status ts_object_put(ts_store *, const void *, size_t, uint8_t hash[32]);
 /* Verifies content against its hash on every read; corruption is TS_IO, never wrong bytes. */
 ts_status ts_object_get(ts_store *, const uint8_t hash[32], void *buffer, size_t capacity, size_t *size);
+
+/* Removes object files that no record revision references (all history is retained, so this
+ * reclaims only objects whose referencing commit never happened: crashes between put and
+ * commit, failed or conflicting saves). Must not run between a put and the commit that will
+ * reference it; the single store owner sequences that. TS_INVALID when the store holds
+ * revisions from before references were tracked (schema < 3), since those may reference
+ * objects without saying so. */
+typedef struct { size_t scanned, removed; uint64_t bytes; } ts_collected;
+ts_status ts_object_collect(ts_store *, ts_collected *);
 
 void ts_sha256(const void *, size_t, uint8_t out[32]);
 #endif

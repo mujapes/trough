@@ -55,7 +55,7 @@ static void roots(void) {
     conflict = keys(4); memset(conflict.root, 0, 16);
     CHECK(tw_create(s, &conflict, &initial, &workspace) == TS_INVALID);
     /* A broken root is a recovery error, never a silent empty replacement draft. */
-    ts_read read = {doc_id, 2}; ts_write remove = {doc_id, 0, NULL, 0, 1}; ts_receipt receipt;
+    ts_read read = {doc_id, 2}; ts_write remove = {doc_id, 0, NULL, 0, 1, NULL, 0}; ts_receipt receipt;
     MUST(ts_commit(s, &read, 1, &remove, 1, NULL, 0, &receipt) == TS_OK);
     CHECK(tw_load(s, identity.root, &workspace) == TS_INVALID);
     CHECK(tw_create(s, &identity, &initial, &workspace) == TS_INVALID);

@@ -11,7 +11,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-enum { BATCH_LIMIT = 4096, SCHEMA_VERSION = 2 };
+enum { BATCH_LIMIT = 4096, SCHEMA_VERSION = 3 };
 
 struct ts_store {
     sqlite3 *db;
@@ -21,7 +21,7 @@ struct ts_store {
     size_t recovered_unknown;
     sqlite3_stmt *current, *revision, *at_revision, *insert_commit, *insert_revision,
                  *create, *update, *effect, *effect_insert, *effect_update, *effect_log,
-                 *effect_read, *effect_scan, *key_insert, *key_lookup;
+                 *effect_read, *effect_scan, *key_insert, *key_lookup, *ref_insert, *ref_lookup;
 };
 
 static const char *MIGRATIONS[SCHEMA_VERSION] = {
@@ -37,6 +37,12 @@ static const char *MIGRATIONS[SCHEMA_VERSION] = {
     "  to_state INTEGER NOT NULL, PRIMARY KEY(intent, seq)) WITHOUT ROWID;",
     "CREATE TABLE record_keys(key BLOB PRIMARY KEY CHECK(length(key)=16),"
     " record INTEGER NOT NULL UNIQUE REFERENCES records(id)) WITHOUT ROWID;",
+    /* Object references per revision. Revisions written before this migration declared none,
+     * so collection stays disabled for a store that already had any. */
+    "CREATE TABLE object_refs(hash BLOB NOT NULL CHECK(length(hash)=32), id INTEGER NOT NULL,"
+    " revision INTEGER NOT NULL, PRIMARY KEY(hash, id, revision)) WITHOUT ROWID;"
+    "CREATE TABLE settings(name TEXT PRIMARY KEY, value INTEGER NOT NULL) WITHOUT ROWID;"
+    "INSERT INTO settings VALUES('refs_complete', (SELECT count(*) = 0 FROM revisions));",
 };
 
 static ts_status code(int rc) {
@@ -203,6 +209,8 @@ ts_status ts_open(const char *dir, ts_store **out) {
         " FROM effects WHERE intent>?2 AND (?1=0 OR state=?1) ORDER BY intent LIMIT ?3");
     if (!rc) rc = prepare(s, &s->key_insert, "INSERT INTO record_keys(key, record) VALUES(?,?)");
     if (!rc) rc = prepare(s, &s->key_lookup, "SELECT record FROM record_keys WHERE key=?");
+    if (!rc) rc = prepare(s, &s->ref_insert, "INSERT OR IGNORE INTO object_refs(hash, id, revision) VALUES(?,?,?)");
+    if (!rc) rc = prepare(s, &s->ref_lookup, "SELECT 1 FROM object_refs WHERE hash=? LIMIT 1");
     if (rc) { status = rc == SQLITE_CORRUPT || rc == SQLITE_NOTADB ? TS_INVALID : code(rc); goto fail; }
     *out = s;
     return TS_OK;
@@ -215,7 +223,7 @@ void ts_close(ts_store *s) {
     if (!s) return;
     sqlite3_stmt *all[] = {s->current, s->revision, s->at_revision, s->insert_commit, s->insert_revision,
                            s->create, s->update, s->effect, s->effect_insert, s->effect_update, s->effect_log,
-                           s->effect_read, s->effect_scan, s->key_insert, s->key_lookup};
+                           s->effect_read, s->effect_scan, s->key_insert, s->key_lookup, s->ref_insert, s->ref_lookup};
     for (size_t i = 0; i < sizeof all / sizeof *all; i++) sqlite3_finalize(all[i]);
     if (s->db) sqlite3_close(s->db);
     if (s->objects >= 0) close(s->objects);
@@ -367,6 +375,7 @@ static int allowed(ts_effect_state from, ts_effect_state to) {
     }
 }
 
+static ts_status object_exists(ts_store *s, const uint8_t hash[32]);
 static ts_status validate(const ts_read *reads, size_t nr, const ts_write *writes, size_t nw,
                           const ts_effect *effects, size_t ne) {
     if (nr > BATCH_LIMIT || nw > BATCH_LIMIT || ne > BATCH_LIMIT) return TS_CAPACITY;
@@ -379,6 +388,8 @@ static ts_status validate(const ts_read *reads, size_t nr, const ts_write *write
         const ts_write *w = &writes[i];
         if (w->id > INT64_MAX) return TS_INVALID;
         if (w->remove ? !w->id : (w->size > TS_DATA_LIMIT || (w->size && !w->data))) return TS_INVALID;
+        if (w->object_count > TS_OBJECT_REF_LIMIT) return TS_CAPACITY;
+        if ((w->object_count && !w->objects) || (w->remove && w->object_count)) return TS_INVALID;
         if (!w->id) continue;
         size_t j = 0;
         while (j < nr && reads[j].id != w->id) j++;
@@ -493,6 +504,14 @@ ts_status ts_commit_named(ts_store *s, const ts_read *reads, size_t nr, ts_write
         sqlite3_bind_int(s->insert_revision, 5, w->remove != 0);
         sqlite3_bind_int64(s->insert_revision, 6, seq);
         if ((rc = step_done(s->insert_revision))) { status = code(rc); goto fail; }
+        for (size_t k = 0; k < w->object_count; k++) {
+            if ((status = object_exists(s, w->objects[k]))) goto fail;
+            sqlite3_bind_blob(s->ref_insert, 1, w->objects[k], 32, SQLITE_STATIC);
+            sqlite3_bind_int64(s->ref_insert, 2, (sqlite3_int64)w->id);
+            sqlite3_bind_int64(s->ref_insert, 3, (sqlite3_int64)revision);
+            if ((rc = step_done(s->ref_insert))) { status = code(rc); goto fail; }
+        }
+        status = TS_IO;
         changed++;
     }
     for (size_t i = 0; i < nn; i++) {
@@ -575,6 +594,71 @@ ts_status ts_object_get(ts_store *s, const uint8_t hash[32], void *buffer, size_
     snprintf(name, sizeof name, "%.2s/%s", h, h + 2);
     *size = 0;
     return read_object(s->objects, name, hash, buffer, capacity, size);
+}
+
+/* Referencing an object requires it to be present now; its content was verified when put. */
+static ts_status object_exists(ts_store *s, const uint8_t hash[32]) {
+    char h[65], name[80];
+    hex(hash, h);
+    snprintf(name, sizeof name, "%.2s/%s", h, h + 2);
+    struct stat st;
+    if (!fstatat(s->objects, name, &st, 0)) return S_ISREG(st.st_mode) ? TS_OK : TS_INVALID;
+    return errno == ENOENT ? TS_NOT_FOUND : TS_IO;
+}
+static int unhex(const char *p, uint8_t *out, size_t n) {
+    for (size_t i = 0; i < n; i++) {
+        int v = 0;
+        for (int j = 0; j < 2; j++) {
+            char c = p[2 * i + j];
+            int d = c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1;
+            if (d < 0) return 0;
+            v = v * 16 + d;
+        }
+        out[i] = (uint8_t)v;
+    }
+    return 1;
+}
+
+ts_status ts_object_collect(ts_store *s, ts_collected *out) {
+    if (!out) return TS_INVALID;
+    memset(out, 0, sizeof *out);
+    if (!s) return TS_INVALID;
+    sqlite3_stmt *st;
+    int rc = sqlite3_prepare_v2(s->db, "SELECT value FROM settings WHERE name='refs_complete'", -1, &st, 0);
+    if (rc) return code(rc);
+    int complete = sqlite3_step(st) == SQLITE_ROW && sqlite3_column_int(st, 0) == 1;
+    sqlite3_finalize(st);
+    if (!complete) return TS_INVALID;
+    DIR *top = fdopendir(dup(s->objects));
+    if (!top) return TS_IO;
+    rewinddir(top);     /* a dup shares the offset that earlier sweeps left at the end */
+    ts_status status = TS_OK;
+    for (struct dirent *e; status == TS_OK && (e = readdir(top));) {
+        uint8_t prefix;
+        if (strlen(e->d_name) != 2 || !unhex(e->d_name, &prefix, 1)) continue;   /* tmp-*, . and .. */
+        int fd = openat(s->objects, e->d_name, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+        DIR *sub = fd >= 0 ? fdopendir(fd) : NULL;
+        if (!sub) { if (fd >= 0) close(fd); status = TS_IO; break; }
+        size_t removed = 0;
+        for (struct dirent *f; (f = readdir(sub));) {
+            uint8_t hash[32];
+            if (strlen(f->d_name) != 62 || !unhex(f->d_name, hash + 1, 31)) continue;
+            hash[0] = prefix;
+            out->scanned++;
+            sqlite3_bind_blob(s->ref_lookup, 1, hash, 32, SQLITE_STATIC);
+            rc = sqlite3_step(s->ref_lookup);
+            sqlite3_reset(s->ref_lookup);
+            if (rc == SQLITE_ROW) continue;
+            if (rc != SQLITE_DONE) { status = code(rc); break; }
+            struct stat info;
+            if (fstatat(fd, f->d_name, &info, 0) || unlinkat(fd, f->d_name, 0)) { status = TS_IO; break; }
+            out->removed++; out->bytes += (uint64_t)info.st_size; removed++;
+        }
+        if (removed && fsync(fd)) status = TS_IO;
+        closedir(sub);
+    }
+    closedir(top);
+    return status;
 }
 
 static ts_status sync_object_directories(ts_store *s, const char *sub) {

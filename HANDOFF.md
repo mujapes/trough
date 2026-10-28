@@ -2,6 +2,12 @@
 
 ## Active continuation (2026-10-28)
 
+Latest (night): store schema v3. Writes declare referenced objects (checked to exist,
+recorded atomically); `ts_object_collect` removes unreferenced objects (crash/failed-save
+orphans) and refuses on stores migrated with untracked revisions. td_save_text declares its
+chunks. See docs/TEXT.md "Chunk references and collection". Next: stage-3 work planning
+(docs/CONSTRUCTION.md section 3), or the storage-owner worker that drives the draft queue.
+
 Latest (evening): tx_text adopted. TDOC v2 documents store a chunk manifest (td_save_text /
 td_load_text; v1 still read everywhere; 8 SIGKILL cycles recover exact text). The draft queue's
 live value is a tx_text: O(log n) edits, O(1) captures and snapshots, a chunk-aware rebase diff

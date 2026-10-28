@@ -31,7 +31,7 @@ static void acceptance(void) {
     ts_store *s; MUST(ts_open(path("acceptance"), &s) == TS_OK);
     tl_head stream; td_snapshot document; initialise(s, &stream, &document);
     uint64_t doc_id = document.record.id;
-    ts_write route = {0, 88, "subscription route", 18, 0}; ts_receipt receipt;
+    ts_write route = {0, 88, "subscription route", 18, 0, NULL, 0}; ts_receipt receipt;
     MUST(ts_commit(s, NULL, 0, &route, 1, NULL, 0, &receipt) == TS_OK);
     td_reference ref = {route.id, 1, 88}; const uint8_t options[] = {0, 3, 255, 0};
     td_capture capture = {{doc_id, 1}, &ref, 1, options, sizeof options};

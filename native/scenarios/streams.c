@@ -18,7 +18,7 @@ static void key_for(uint8_t key[16], unsigned group, uint64_t number) {
     for (unsigned i = 0; i < 8; i++) key[8 + i] = (uint8_t)(number >> (8 * i));
 }
 static tl_value target(ts_store *s) {
-    ts_write w = {0, 42, "original", 8, 0}; ts_receipt receipt;
+    ts_write w = {0, 42, "original", 8, 0, NULL, 0}; ts_receipt receipt;
     MUST(ts_commit(s, NULL, 0, &w, 1, NULL, 0, &receipt) == TS_OK);
     tl_value v = {0}; v.kind = 1; v.created_ms = 1000; v.target = (td_reference){w.id, 1, 42};
     v.count = 1; v.provenance[0] = v.target;
@@ -89,7 +89,7 @@ static void ordering(void) {
         CHECK(tl_open(s, root, &reopened) == TS_OK && reopened.length == count[i] && reopened.record.id == heads[i].record.id);
     }
     /* The reference remains the original content after current content is edited/deleted. */
-    ts_read read = {value.target.id, 1}; ts_write edit = {value.target.id, 42, "new text", 8, 0}; ts_receipt receipt;
+    ts_read read = {value.target.id, 1}; ts_write edit = {value.target.id, 42, "new text", 8, 0, NULL, 0}; ts_receipt receipt;
     MUST(ts_commit(s, &read, 1, &edit, 1, NULL, 0, &receipt) == TS_OK);
     append(s, &heads[0], 3, 1, &value, &entry); /* an explicitly historical input is valid */
     read.revision = 2; edit.remove = 1; MUST(ts_commit(s, &read, 1, &edit, 1, NULL, 0, &receipt) == TS_OK);
@@ -148,7 +148,7 @@ static void validation_and_quota(void) {
     CHECK(tl_get(s, entry.key, &entry) == TS_OK); /* intentional output-key alias */
     /* Mutation through the raw store must be detected as an immutable-entry violation. */
     ts_read old = {entry.record.id, 1}; wire[56] = 2;
-    ts_write corrupt = {entry.record.id, TL_ENTRY_SCHEMA, wire, record.size, 0}; ts_receipt receipt;
+    ts_write corrupt = {entry.record.id, TL_ENTRY_SCHEMA, wire, record.size, 0, NULL, 0}; ts_receipt receipt;
     MUST(ts_commit(s, &old, 1, &corrupt, 1, NULL, 0, &receipt) == TS_OK);
     MUST(tl_load(s, head.record.id, 0, &head) == TS_OK); MUST(tl_begin(&head, &cursor) == TS_OK);
     tl_cursor saved_cursor = cursor;

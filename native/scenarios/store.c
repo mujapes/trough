@@ -52,16 +52,16 @@ static void records(void) {
     ts_receipt rc;
     ts_record r;
     char buf[64];
-    ts_write w = {0, 7, "one", 3, 0};
+    ts_write w = {0, 7, "one", 3, 0, NULL, 0};
     CHECK(ts_commit(s, 0, 0, &w, 1, 0, 0, &rc) == TS_OK && w.id && rc.commit && rc.changed == 1);
     uint64_t id = w.id, first = rc.commit;
     CHECK(ts_get(s, id, &r, buf, sizeof buf) == TS_OK && r.revision == 1 && r.schema == 7 && r.size == 3 && !memcmp(buf, "one", 3));
-    ts_write blind = {id, 7, "two", 3, 0};
+    ts_write blind = {id, 7, "two", 3, 0, NULL, 0};
     CHECK(ts_commit(s, 0, 0, &blind, 1, 0, 0, &rc) == TS_INVALID);           /* no captured read */
     ts_read stale = {id, 0};
     CHECK(ts_commit(s, &stale, 1, &blind, 1, 0, 0, &rc) == TS_CONFLICT);
     ts_read cur = {id, 1};
-    ts_write same = {id, 7, "one", 3, 0};
+    ts_write same = {id, 7, "one", 3, 0, NULL, 0};
     CHECK(ts_commit(s, &cur, 1, &same, 1, 0, 0, &rc) == TS_OK && rc.changed == 0 && rc.commit == 0);
     CHECK(ts_commit(s, &cur, 1, &blind, 1, 0, 0, &rc) == TS_OK && rc.commit == first + 1);  /* no seq consumed above */
     CHECK(ts_get(s, id, &r, buf, 1) == TS_CAPACITY && r.size == 3 && r.revision == 2);
@@ -69,16 +69,16 @@ static void records(void) {
     CHECK(ts_commit(s, &cur, 1, &same, 1, 0, 0, &rc) == TS_CONFLICT);            /* revision 1 is stale now */
     /* Atomic output set: a conflict anywhere installs nothing, including creations. */
     ts_read mixed[2] = {{id, 2}, {id + 1000, 5}};
-    ts_write two[2] = {{id, 7, "three", 5, 0}, {0, 8, "new", 3, 0}};
+    ts_write two[2] = {{id, 7, "three", 5, 0, NULL, 0}, {0, 8, "new", 3, 0, NULL, 0}};
     CHECK(ts_commit(s, mixed, 2, two, 2, 0, 0, &rc) == TS_CONFLICT && two[1].id == 0);
     CHECK(ts_get(s, id, &r, buf, sizeof buf) == TS_OK && r.revision == 2);
     ts_read gone = {id, 2};
-    ts_write del = {id, 0, 0, 0, 1};
+    ts_write del = {id, 0, 0, 0, 1, NULL, 0};
     CHECK(ts_commit(s, &gone, 1, &del, 1, 0, 0, &rc) == TS_OK);
     CHECK(ts_get(s, id, &r, buf, sizeof buf) == TS_NOT_FOUND && r.revision == 3);
     ts_read removed = {id, 3};
     CHECK(ts_commit(s, &removed, 1, &blind, 1, 0, 0, &rc) == TS_INVALID);          /* never revived */
-    ts_write fresh = {0, 7, "x", 1, 0};
+    ts_write fresh = {0, 7, "x", 1, 0, NULL, 0};
     CHECK(ts_commit(s, 0, 0, &fresh, 1, 0, 0, &rc) == TS_OK && fresh.id > id);    /* never reused */
     ts_close(s);
     printf("ok captured reads, conflicts, no blind writes, unchanged no-ops, atomic sets, history, removal, one owner\n");
@@ -87,14 +87,14 @@ static void records(void) {
 static void named_records(void) {
     ts_store *s; MUST(ts_open(dir_named("named"), &s) == TS_OK);
     uint8_t key[16] = {7}; ts_name name = {0, {7}}; ts_receipt receipt;
-    ts_write first = {0, 11, "first", 5, 0};
+    ts_write first = {0, 11, "first", 5, 0, NULL, 0};
     CHECK(ts_commit_named(s, 0, 0, &first, 1, 0, 0, &name, 1, &receipt) == TS_OK && first.id == 1);
     uint64_t found;
     CHECK(ts_lookup(s, key, &found) == TS_OK && found == first.id);
     /* A creation whose allocated id also appears in an absence read must still be reset on
      * rollback. Inferring which writes were new from the read set loses that distinction. */
     ts_read reads[2] = {{first.id, 1}, {2, 0}};
-    ts_write writes[2] = {{first.id, 11, "changed", 7, 0}, {0, 12, "second", 6, 0}};
+    ts_write writes[2] = {{first.id, 11, "changed", 7, 0, NULL, 0}, {0, 12, "second", 6, 0, NULL, 0}};
     name.index = 1;
     ts_effect effect = {{44}, 0, TS_PREPARED, 3, "request", 7};
     CHECK(ts_commit_named(s, reads, 2, writes, 2, &effect, 1, &name, 1, &receipt) == TS_CONFLICT &&
@@ -107,12 +107,12 @@ static void named_records(void) {
     CHECK(ts_lookup(s, name.key, &found) == TS_OK && found == 2);
     ts_name invalid = {0, {9}};
     CHECK(ts_commit_named(s, reads, 1, writes, 1, 0, 0, &invalid, 1, &receipt) == TS_INVALID);
-    ts_write fresh[2] = {{0, 1, 0, 0, 0}, {0, 1, 0, 0, 0}};
+    ts_write fresh[2] = {{0, 1, 0, 0, 0, NULL, 0}, {0, 1, 0, 0, 0, NULL, 0}};
     ts_name duplicate[2] = {{0, {9}}, {1, {9}}};
     CHECK(ts_commit_named(s, 0, 0, fresh, 2, 0, 0, duplicate, 2, &receipt) == TS_INVALID && fresh[0].id == 0);
     duplicate[1].key[0] = 10; duplicate[1].index = 0;
     CHECK(ts_commit_named(s, 0, 0, fresh, 2, 0, 0, duplicate, 2, &receipt) == TS_INVALID);
-    ts_read current = {first.id, 2}; ts_write remove = {first.id, 0, 0, 0, 1};
+    ts_read current = {first.id, 2}; ts_write remove = {first.id, 0, 0, 0, 1, NULL, 0};
     CHECK(ts_commit(s, &current, 1, &remove, 1, 0, 0, &receipt) == TS_OK);
     ts_close(s); MUST(ts_open(dir_named("named"), &s) == TS_OK);
     CHECK(ts_lookup(s, key, &found) == TS_OK && found == first.id);
@@ -125,17 +125,19 @@ static void named_records(void) {
 
 static void migration_and_exhaustion(void) {
     ts_store *s; MUST(ts_open(dir_named("migration"), &s) == TS_OK);
-    ts_write w = {0, 3, "v1", 2, 0}; ts_receipt receipt;
+    ts_write w = {0, 3, "v1", 2, 0, NULL, 0}; ts_receipt receipt;
     MUST(ts_commit(s, 0, 0, &w, 1, 0, 0, &receipt) == TS_OK); ts_close(s);
     /* Construct the exact pre-key v1 schema from the empty-key v2 store. */
     char path[3200]; snprintf(path, sizeof path, "%s/records.db", dir_named("migration"));
     sqlite3 *db; MUST(sqlite3_open(path, &db) == SQLITE_OK);
-    MUST(sqlite3_exec(db, "DROP TABLE record_keys; PRAGMA user_version=1", 0, 0, 0) == SQLITE_OK); sqlite3_close(db);
+    MUST(sqlite3_exec(db, "DROP TABLE object_refs; DROP TABLE settings; DROP TABLE record_keys; PRAGMA user_version=1", 0, 0, 0) == SQLITE_OK); sqlite3_close(db);
     MUST(ts_open(dir_named("migration"), &s) == TS_OK);
     ts_record r; char buffer[8]; uint64_t found; uint8_t key[16] = {1};
     CHECK(ts_get(s, w.id, &r, buffer, sizeof buffer) == TS_OK && r.revision == 1 && !memcmp(buffer, "v1", 2));
     CHECK(ts_lookup(s, key, &found) == TS_NOT_FOUND && found == 0);
-    ts_name name = {0, {1}}; ts_write new_record = {0, 4, "v2", 2, 0};
+    ts_collected collected;   /* v1 revisions never declared references: collection must refuse */
+    CHECK(ts_object_collect(s, &collected) == TS_INVALID && collected.removed == 0);
+    ts_name name = {0, {1}}; ts_write new_record = {0, 4, "v2", 2, 0, NULL, 0};
     CHECK(ts_commit_named(s, 0, 0, &new_record, 1, 0, 0, &name, 1, &receipt) == TS_OK);
     ts_close(s);
     MUST(sqlite3_open(path, &db) == SQLITE_OK);
@@ -150,9 +152,66 @@ static void migration_and_exhaustion(void) {
     expected.revision = UINT64_MAX;
     CHECK(ts_commit(s, &expected, 1, &w, 1, 0, 0, &receipt) == TS_INVALID);
     ts_close(s); MUST(sqlite3_open(path, &db) == SQLITE_OK);
-    MUST(sqlite3_exec(db, "PRAGMA user_version=3", 0, 0, 0) == SQLITE_OK); sqlite3_close(db);
+    MUST(sqlite3_exec(db, "PRAGMA user_version=4", 0, 0, 0) == SQLITE_OK); sqlite3_close(db);
     CHECK(ts_open(dir_named("migration"), &s) == TS_INVALID);
     puts("ok schema v1 migration preserves revisions; unknown versions rejected; revision exhaustion never wraps");
+}
+
+/* Declared object references: dangling ones abort the whole commit; collection removes only
+ * objects no retained revision (including history and tombstoned records) references. */
+static void object_references(void) {
+    ts_store *s; MUST(ts_open(dir_named("refs"), &s) == TS_OK);
+    uint8_t a[32], b[32], c[32], missing[32]; ts_receipt receipt; ts_collected got; ts_record r;
+    MUST(ts_object_put(s, "alpha", 5, a) == TS_OK && ts_object_put(s, "beta", 4, b) == TS_OK &&
+         ts_object_put(s, "gamma", 5, c) == TS_OK);
+    memcpy(missing, a, 32); missing[31] ^= 1;
+    uint8_t refs[3][32]; memcpy(refs[0], a, 32); memcpy(refs[1], b, 32); memcpy(refs[2], missing, 32);
+    ts_write w = {0, 9, "doc", 3, 0, (const uint8_t (*)[32])refs, 3};
+    CHECK(ts_commit(s, 0, 0, &w, 1, 0, 0, &receipt) == TS_NOT_FOUND && w.id == 0 && receipt.commit == 0);
+    CHECK(ts_get(s, 1, &r, 0, 0) == TS_NOT_FOUND);
+    w.object_count = 3; memcpy(refs[2], a, 32);            /* duplicate reference is fine */
+    MUST(ts_commit(s, 0, 0, &w, 1, 0, 0, &receipt) == TS_OK);
+    uint64_t id = w.id;
+    CHECK(ts_object_collect(s, &got) == TS_OK && got.scanned == 3 && got.removed == 1 && got.bytes == 5);
+    uint8_t buf[8]; size_t n;
+    CHECK(ts_object_get(s, c, buf, sizeof buf, &n) == TS_NOT_FOUND);
+    CHECK(ts_object_get(s, a, buf, sizeof buf, &n) == TS_OK && n == 5);
+    /* A newer revision referencing only b keeps a alive through history. */
+    ts_read expected = {id, 1}; ts_write next = {id, 9, "doc2", 4, 0, (const uint8_t (*)[32])&refs[1], 1};
+    MUST(ts_commit(s, &expected, 1, &next, 1, 0, 0, &receipt) == TS_OK);
+    CHECK(ts_object_collect(s, &got) == TS_OK && got.removed == 0 && got.scanned == 2);
+    /* Tombstones keep history, and so references. Removal cannot declare references. */
+    expected.revision = 2;
+    ts_write gone = {id, 0, 0, 0, 1, (const uint8_t (*)[32])refs, 1};
+    CHECK(ts_commit(s, &expected, 1, &gone, 1, 0, 0, &receipt) == TS_INVALID);
+    gone.object_count = 0;
+    MUST(ts_commit(s, &expected, 1, &gone, 1, 0, 0, &receipt) == TS_OK);
+    CHECK(ts_object_collect(s, &got) == TS_OK && got.removed == 0);
+    ts_write bad = {0, 9, "x", 1, 0, NULL, 1};
+    CHECK(ts_commit(s, 0, 0, &bad, 1, 0, 0, &receipt) == TS_INVALID);
+    /* Survives reopen; an object put again after collection is stored afresh. */
+    ts_close(s); MUST(ts_open(dir_named("refs"), &s) == TS_OK);
+    CHECK(ts_object_get(s, a, buf, sizeof buf, &n) == TS_OK && ts_object_get(s, b, buf, sizeof buf, &n) == TS_OK);
+    MUST(ts_object_put(s, "gamma", 5, c) == TS_OK);
+    CHECK(ts_object_get(s, c, buf, sizeof buf, &n) == TS_OK && n == 5);
+    /* Many objects per prefix directory: exactly the unreferenced half goes, the rest stay intact. */
+    enum { MANY = 600 };
+    static uint8_t hashes[MANY][32]; char body[32];
+    for (int i = 0; i < MANY; i++) { int len = snprintf(body, sizeof body, "object %d", i); MUST(ts_object_put(s, body, (size_t)len, hashes[i]) == TS_OK); }
+    static uint8_t kept[MANY / 2][32];
+    for (int i = 0; i < MANY / 2; i++) memcpy(kept[i], hashes[2 * i], 32);
+    ts_write many = {0, 9, "many", 4, 0, (const uint8_t (*)[32])kept, MANY / 2};
+    MUST(ts_commit(s, 0, 0, &many, 1, 0, 0, &receipt) == TS_OK);
+    CHECK(ts_object_collect(s, &got) == TS_OK && got.removed == MANY / 2 + 1);   /* + the re-put gamma */
+    CHECK(ts_object_get(s, c, buf, sizeof buf, &n) == TS_NOT_FOUND);
+    int intact = 1;
+    for (int i = 0; i < MANY; i++) {
+        uint8_t data[32]; ts_status st = ts_object_get(s, hashes[i], data, sizeof data, &n);
+        intact &= i % 2 ? st == TS_NOT_FOUND : st == TS_OK;
+    }
+    CHECK(intact);
+    ts_close(s);
+    puts("ok object references: dangling refs abort atomically; collection keeps history/tombstone refs, removes exactly the orphans");
 }
 
 enum { MODEL = 24, MODEL_OPS = 20000 };
@@ -175,14 +234,14 @@ static void differential(void) {
             size_t size = rnd() % 3 == 0 ? m[k].size : rnd() % 16;   /* sometimes rewrite the same bytes */
             memcpy(payload[i], m[k].data, sizeof payload[i]);
             if (size != m[k].size || rnd() % 2) for (size_t b = 0; b < size; b++) payload[i][b] = (uint8_t)rnd();
-            if (!m[k].id) { writes[nw++] = (ts_write){0, 3, payload[i], size, 0}; change = 1; continue; }
+            if (!m[k].id) { writes[nw++] = (ts_write){0, 3, payload[i], size, 0, NULL, 0}; change = 1; continue; }
             if (!m[k].live) continue;
             uint64_t captured = m[k].revision - (rnd() % 8 == 0 && m[k].revision > 1);
             stale |= captured != m[k].revision;
             reads[nr++] = (ts_read){m[k].id, captured};
             if (rnd() % 4) {
                 unsigned remove = rnd() % 40 == 0;
-                writes[nw++] = (ts_write){m[k].id, 3, payload[i], size, remove};
+                writes[nw++] = (ts_write){m[k].id, 3, payload[i], size, remove, NULL, 0};
                 change |= remove || size != m[k].size || memcmp(payload[i], m[k].data, size);
             }
         }
@@ -243,7 +302,7 @@ static void effects(void) {
     CHECK(ts_commit(s, 0, 0, 0, 0, &a, 1, &rc) == TS_CONFLICT);                     /* state moved on */
     /* Outbox: a record write and an effect transition are one durable fact. */
     ts_effect p2 = fx(2, 0, TS_PREPARED, "send");
-    ts_write note = {0, 1, "draft", 5, 0};
+    ts_write note = {0, 1, "draft", 5, 0, NULL, 0};
     ts_effect bad = fx(3, TS_PREPARED, TS_AUTHORISED, 0);                            /* does not exist */
     ts_effect both[2] = {p2, bad};
     CHECK(ts_commit(s, 0, 0, &note, 1, both, 2, &rc) == TS_NOT_FOUND && note.id == 0);
@@ -313,7 +372,7 @@ static void outbox(void) {
     /* An adapter for another effect kind cannot advance the intent, even in a batch. */
     ts_effect wrong = {{0}, TS_PREPARED, TS_AUTHORISED, 18, 0, 0};
     outbox_id(wrong.intent, 0);
-    ts_write note = {0, 1, "should not exist", 16, 0};
+    ts_write note = {0, 1, "should not exist", 16, 0, NULL, 0};
     CHECK(ts_commit(s, 0, 0, &note, 1, &wrong, 1, &receipt) == TS_CONFLICT && note.id == 0 && receipt.commit == 0);
     /* The model checks every filtered page and every payload before and after recovery. */
     uint64_t recovery_commit = 0;
@@ -403,11 +462,11 @@ static void quota_and_objects(void) {
     ts_record r;
     static char big[TS_DATA_LIMIT], buf[TS_DATA_LIMIT];
     memset(big, 'q', sizeof big);
-    ts_write w = {0, 1, "small", 5, 0};
+    ts_write w = {0, 1, "small", 5, 0, NULL, 0};
     CHECK(ts_commit(s, 0, 0, &w, 1, 0, 0, &rc) == TS_OK);
     CHECK(ts_limit_pages(s, 16) == TS_OK);
     ts_read cur = {w.id, 1};
-    ts_write huge[2] = {{w.id, 1, big, sizeof big, 0}, {0, 1, big, sizeof big, 0}};
+    ts_write huge[2] = {{w.id, 1, big, sizeof big, 0, NULL, 0}, {0, 1, big, sizeof big, 0, NULL, 0}};
     CHECK(ts_commit(s, &cur, 1, huge, 2, 0, 0, &rc) == TS_FULL && huge[1].id == 0);
     CHECK(ts_get(s, w.id, &r, buf, sizeof buf) == TS_OK && r.revision == 1 && r.size == 5);
     CHECK(ts_limit_pages(s, 0) == TS_OK);
@@ -463,8 +522,8 @@ static void child(int out) {
         memcpy(counter, &value[0], 8);
         MUST(ts_object_put(s, artifact, (size_t)len, counter + 8) == TS_OK);   /* object durable before referenced */
         ts_write writes[ACCOUNTS + 1];
-        writes[0] = (ts_write){ids[0], 1, counter, 40, 0};
-        for (int k = 1; k <= ACCOUNTS; k++) writes[k] = (ts_write){ids[k], 2, &value[k], 8, 0};
+        writes[0] = (ts_write){ids[0], 1, counter, 40, 0, NULL, 0};
+        for (int k = 1; k <= ACCOUNTS; k++) writes[k] = (ts_write){ids[k], 2, &value[k], 8, 0, NULL, 0};
         ts_effect e[4];
         size_t ne = 0;
         e[ne++] = fx(n, 0, TS_PREPARED, "call");
@@ -488,8 +547,8 @@ static void crash(void) {
     ts_write init[ACCOUNTS + 1];
     int64_t start = 1000;
     uint8_t counter[40] = {0};
-    init[0] = (ts_write){0, 1, counter, 40, 0};
-    for (int k = 1; k <= ACCOUNTS; k++) init[k] = (ts_write){0, 2, &start, 8, 0};
+    init[0] = (ts_write){0, 1, counter, 40, 0, NULL, 0};
+    for (int k = 1; k <= ACCOUNTS; k++) init[k] = (ts_write){0, 2, &start, 8, 0, NULL, 0};
     ts_receipt rc;
     MUST(ts_commit(s, 0, 0, init, ACCOUNTS + 1, 0, 0, &rc) == TS_OK && init[0].id == 1);
     ts_close(s);
@@ -562,6 +621,7 @@ int main(int argc, char **argv) {
     effects();
     outbox();
     quota_and_objects();
+    object_references();
     crash();
     if (failures) { fprintf(stderr, "core-store: %d failures\n", failures); return 1; }
     printf("core-store: all checks passed (correctness only; no device performance claim)\n");
