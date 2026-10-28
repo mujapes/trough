@@ -28,6 +28,16 @@ final class NativeCore {
     static native byte[] surfacePresent(long presenter, float[] rects, float[] glyphs, byte[] atlas, int aw, int ah,
                                         int w, int h, boolean shot, double[] result);
     static native void surfaceClose(long presenter);
+    /** Paragraph layout as a derivation operator on executor workers (native/android/derive.c). */
+    static native long deriveOpen(int workers, int paragraphs);
+    static native int deriveText(long deriver, int paragraph, String text);
+    static native void deriveWidth(long deriver, int width);
+    static native int deriveDemand(long deriver, int paragraph, boolean on);
+    static native long deriveSettle(long deriver);
+    static native long deriveValue(long deriver, int paragraph);
+    static native byte[] deriveBytes(long deriver, int paragraph);
+    static native long[] deriveStats(long deriver);
+    static native void deriveClose(long deriver);
     static native byte[] sceneRender(int w, int h, float[] rects, float[] glyphs, byte[] atlas, int aw, int ah);
     static native byte[] textRender(int w, int h, float[] glyphs, byte[] atlas, int aw, int ah, double[] timing);
     static native long externalEdit(long keeper, long document, int start, int end, String text);

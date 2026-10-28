@@ -3,6 +3,7 @@ bionic.sh
 outputs-bionic.list
 android/jni.c
 android/present.c
+android/derive.c
 present/scene.c
 present/scene.h
 present/oracle.c

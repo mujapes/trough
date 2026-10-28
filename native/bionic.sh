@@ -40,5 +40,6 @@ done
 for scenario in store documents streams tasks workspace drafts text keeper; do
     $CLANG $T $CORE -fPIE -pie -I"$S/store" -I"$SQL" "$S/scenarios/$scenario.c" "$@" $L -lm -ldl -lc -o "$O/bin/android-core-$scenario"
 done
-$CLANG $T $CORE -shared -I"$S/store" -isystem "$INC" -I"$S/present" "$S/android/jni.c" "$S/android/present.c" "$S/present/scene.c" "$S/present/oracle.c" "$@" $L -lm -ldl -llog -landroid -lvulkan -lc -Wl,-soname,libtrough-android.so \
+$CLANG $T $CORE -shared -I"$S/store" -I"$S/core" -isystem "$INC" -I"$S/present" "$S/android/jni.c" "$S/android/present.c" "$S/android/derive.c" \
+    "$S/core/world.c" "$S/core/derive.c" "$S/core/blobs.c" "$S/core/exec.c" "$S/present/scene.c" "$S/present/oracle.c" "$@" $L -lm -ldl -llog -landroid -lvulkan -lc -Wl,-soname,libtrough-android.so \
     -o "$O/lib/libtrough-android.so"

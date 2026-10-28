@@ -255,7 +255,8 @@ cancellation when demand drops, settling and a job trace ring ([contract](EXEC.m
 by bytes, leases, priorities and measured worker placement remain stage-3 work.
 `native/core/blobs` interns immutable byte values under a byte limit. Handles are canonical,
 so early cutoff covers large outputs. The graph and the executor retain values across memo
-replacement and job lifetimes ([contract](BLOBS.md)).
+replacement and job lifetimes ([contract](BLOBS.md)). The first real operator, platform
+paragraph layout on executor workers through JNI, is verified on the Pixel ([LAYOUT_DERIVE.md](LAYOUT_DERIVE.md)).
 
 ## Agent implementation discipline
 

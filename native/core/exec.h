@@ -55,6 +55,7 @@ typedef struct {
     uint64_t jobs, cancelled, stale;
     void (*on_settled)(void *, uint64_t publication); void *settled_ctx;
     bl_store *blobs;
+    void (*thread_start)(void *), (*thread_stop)(void *); void *thread_hooks;
 } ex_exec;
 
 /* Registration happens before ex_start. */
@@ -63,6 +64,8 @@ tr_status ex_register(ex_exec *, tr_id op, ex_operator, void *ctx);
 /* Blob values: node values become owned by the store through graph hooks, job inputs are
  * retained until the job retires, and operators may return bytes. Before ex_start. */
 void ex_use_blobs(ex_exec *, bl_store *);
+/* Run on each worker thread as it starts and before it exits (e.g. attach to a JVM). */
+void ex_on_worker(ex_exec *, void (*start)(void *), void (*stop)(void *), void *ctx);
 /* on_settled runs on the owner thread each time demand is verified at a new publication. */
 void ex_on_settled(ex_exec *, void (*fn)(void *, uint64_t), void *ctx);
 tr_status ex_start(ex_exec *);

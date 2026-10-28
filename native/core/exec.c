@@ -29,6 +29,9 @@ tr_status ex_register(ex_exec *e, tr_id op, ex_operator fn, void *ctx) {
     return TR_OK;
 }
 void ex_use_blobs(ex_exec *e, bl_store *b) { e->blobs = b; dv_set_hooks(e->graph, bl_hook_retain, bl_hook_release, b); }
+void ex_on_worker(ex_exec *e, void (*start)(void *), void (*stop)(void *), void *ctx) {
+    e->thread_start = start; e->thread_stop = stop; e->thread_hooks = ctx;
+}
 void ex_on_settled(ex_exec *e, void (*fn)(void *, uint64_t), void *ctx) { e->on_settled = fn; e->settled_ctx = ctx; }
 
 /* ---- operator helpers ---- */
@@ -62,6 +65,7 @@ int ex_cancelled(const dv_job *job) {
 static void *worker(void *arg) {
     ex_exec *e = ((ex_worker *)arg)->ex;
     uint32_t id = ((ex_worker *)arg)->id;
+    if (e->thread_start) e->thread_start(e->thread_hooks);
     pthread_mutex_lock(&e->lock);
     while (!e->stop) {
         int found = -1;
@@ -79,6 +83,7 @@ static void *worker(void *arg) {
         pthread_cond_signal(&e->owner_wake);
     }
     pthread_mutex_unlock(&e->lock);
+    if (e->thread_stop) e->thread_stop(e->thread_hooks);
     return NULL;
 }
 
