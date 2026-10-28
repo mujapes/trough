@@ -27,7 +27,7 @@ final class ImeOracle {
             for (int seed = 1; seed <= seeds; seed++) {
                 long doc = NativeCore.create(k), q = NativeCore.attach(k, doc);
                 View view = new View(activity);
-                BaseInputConnection ref = new BaseInputConnection(view, false);
+                BaseInputConnection ref = new BaseInputConnection(view, true);   // full editor: false is the key-event fallback, which clears its Editable
                 TextInput ours = new TextInput(view, k, q);
                 Random r = new Random(seed);
                 Deque<String> recent = new ArrayDeque<>();

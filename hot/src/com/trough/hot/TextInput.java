@@ -13,7 +13,7 @@ final class TextInput extends BaseInputConnection {
     private int batchDepth;
 
     TextInput(View view, long keeper, long queue) {
-        super(view, false);
+        super(view, true);    // a full editor; false is the key-event fallback mode
         this.keeper = keeper; this.queue = queue;
     }
 
