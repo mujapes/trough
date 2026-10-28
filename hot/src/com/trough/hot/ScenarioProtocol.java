@@ -41,7 +41,7 @@ final class ScenarioProtocol {
         result.put("expires_ms",expires);
         Set<String> fields=new HashSet<>(Arrays.asList("version","id","scenario","bundle","runtime","issued_ms","expires_ms"));
         if(!fields.equals(q.keySet()) || number(q,"version")!=1 || issued<0 || expires<issued ||
-            expires-issued>300000 || issued>now+10000 || expires<=now) return reject(result,"schema or expiry");
+            expires-issued>900000 || issued>now+10000 || expires<=now) return reject(result,"schema or expiry");
         if(!handler.supports(scenario)) return reject(result,"unknown scenario");
         boolean inspect="app.observe".equals(scenario);
         if(!(bundle.equals(Json.str(q,"bundle")) || inspect && "*".equals(Json.str(q,"bundle"))) ||
