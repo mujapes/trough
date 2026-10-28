@@ -79,8 +79,9 @@ jobs:
       - name: Diagnose a loader failure
         if: failure()
         run: |
-          gdb -batch -ex 'set pagination off' -ex run -ex 'info registers pc sp x0 x1 x2 x16 x17' -ex 'x/8i $pc' -ex bt --args /data/data/t.t/bin/threadtest
           objdump -d /data/data/t.t/x > loader-disassembly.txt
+          sudo apt-get update -qq && sudo apt-get install -y -qq gdb
+          gdb -batch -ex 'set pagination off' -ex run -ex 'info registers pc sp x0 x1 x2 x16 x17' -ex 'x/8i $pc' -ex bt --args /data/data/t.t/bin/threadtest
       - uses: actions/upload-artifact@v4
         if: failure()
         with: { name: loader-diagnostics, path: loader-disassembly.txt, retention-days: 3 }
