@@ -240,6 +240,10 @@ revisions ([contract](DRAFTS.md)). No IME adapter or storage worker drives it ye
 snapshots and chunk-level durable storage ([contract](TEXT.md)). Documents and drafts do not use
 it yet.
 
+`native/store/keeper` is the storage owner thread: it drives attached drafts (coalesced saves,
+backoff, flush-to-durable for Ask) and delivers agent/external revisions to them
+([contract](KEEPER.md)).
+
 `native/store/workspace` supplies stable roots that publish a draft and stream atomically,
 and recover their current state without view/module-owned IDs ([contract](WORKSPACES.md)).
 

@@ -27,7 +27,7 @@ final class Development implements AutoCloseable, ScenarioProtocol.Handler {
     public boolean supports(String name) {
         return "app.observe".equals(name) || "core.publication".equals(name) ||
             "core.resources".equals(name) || "core.replacement".equals(name) || "core.store".equals(name) ||
-            "core.documents".equals(name) || "core.streams".equals(name) || "core.tasks".equals(name) || "core.workspace".equals(name) || "core.drafts".equals(name) || "core.text".equals(name) || "core.processes".equals(name) || "build.native".equals(name);
+            "core.documents".equals(name) || "core.streams".equals(name) || "core.tasks".equals(name) || "core.workspace".equals(name) || "core.drafts".equals(name) || "core.text".equals(name) || "core.keeper".equals(name) || "core.processes".equals(name) || "build.native".equals(name);
     }
     public Map<String,Object> execute(String name) throws Exception {
         if(closed) throw new InterruptedException();
@@ -40,7 +40,7 @@ final class Development implements AutoCloseable, ScenarioProtocol.Handler {
                         "density",activity.getResources().getDisplayMetrics().density,
                         "sdk",android.os.Build.VERSION.SDK_INT,"device",android.os.Build.MODEL,
                         "multi_window",activity.isInMultiWindowMode(),
-                        "scenarios",Arrays.asList("app.observe","core.publication","core.resources","core.replacement","core.store","core.documents","core.streams","core.tasks","core.workspace","core.drafts","core.text","core.processes","build.native"));
+                        "scenarios",Arrays.asList("app.observe","core.publication","core.resources","core.replacement","core.store","core.documents","core.streams","core.tasks","core.workspace","core.drafts","core.text","core.keeper","core.processes","build.native"));
                 }
             });
             activity.runOnUiThread(result);
@@ -54,7 +54,7 @@ final class Development implements AutoCloseable, ScenarioProtocol.Handler {
             "/system/bin/sh",new File(activity.getDataDir(),"d/usr/libexec/trough/tfix").getAbsolutePath());
         if("core.replacement".equals(name)) return ScenarioProcess.run(supervisor,activity.getCacheDir(),env,20,executable,
             new File(bundle,"fixtures/module-1.so").getPath(),new File(bundle,"fixtures/module-2.so").getPath());
-        if("core.store".equals(name) || "core.documents".equals(name) || "core.streams".equals(name) || "core.tasks".equals(name) || "core.workspace".equals(name) || "core.drafts".equals(name) || "core.text".equals(name) || "core.processes".equals(name)) {
+        if("core.store".equals(name) || "core.documents".equals(name) || "core.streams".equals(name) || "core.tasks".equals(name) || "core.workspace".equals(name) || "core.drafts".equals(name) || "core.text".equals(name) || "core.keeper".equals(name) || "core.processes".equals(name)) {
             File data=new File(activity.getCacheDir(),"scenario-"+name.replace('.','-'));
             Main.deleteTree(data);
             try { return ScenarioProcess.run(supervisor,activity.getCacheDir(),env,60,executable,data.getPath()); }

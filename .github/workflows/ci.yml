@@ -50,6 +50,8 @@ jobs:
           CORE_CFLAGS='-fsanitize=thread' tests/core_drafts.sh
           CORE_CFLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer' tests/core_text.sh
           CORE_CFLAGS='-fsanitize=thread' tests/core_text.sh
+          CORE_CFLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer' tests/core_keeper.sh
+          CORE_CFLAGS='-fsanitize=thread' tests/core_keeper.sh
           CORE_CFLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer' tests/core_processes.sh
 
   bench-arm64:
@@ -69,6 +71,7 @@ jobs:
           tests/core_workspace.sh
           tests/core_drafts.sh
           tests/core_text.sh
+          tests/core_keeper.sh
           tests/core_processes.sh
       - name: Namespace capability probe oracle
         run: python3 tests/namespaces.py

@@ -2,6 +2,11 @@
 
 ## Active continuation (2026-10-28)
 
+Latest (late night): `native/store/keeper`, the storage owner thread ([contract](docs/KEEPER.md)):
+attach/poke/flush/run/stop over draft queues, backoff, external-revision rebasing after tk_run.
+`core.keeper` passes locally (ASan/UBSan, TSan, 7/8 mutants, survivor equivalent). Next: the
+Java/JNI binding and Android InputConnection adapter that drive it, or stage-3 work planning.
+
 Latest (night): store schema v3. Writes declare referenced objects (checked to exist,
 recorded atomically); `ts_object_collect` removes unreferenced objects (crash/failed-save
 orphans) and refuses on stores migrated with untracked revisions. td_save_text declares its
