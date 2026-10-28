@@ -46,6 +46,7 @@ final class DeriveLayout {
         }
     }
     private static final Map<Face, Integer> FONTS = new HashMap<>();
+    private static final java.util.List<Font> FACES = new java.util.ArrayList<>();   /* id -> a Font of that face */
     private static final ThreadLocal<IdentityHashMap<Font, Integer>> SEEN = new ThreadLocal<IdentityHashMap<Font, Integer>>() {
         @Override protected IdentityHashMap<Font, Integer> initialValue() { return new IdentityHashMap<>(); }
     };
@@ -57,12 +58,15 @@ final class DeriveLayout {
         Face face = new Face(f);
         synchronized (FONTS) {
             id = FONTS.get(face);
-            if (id == null) { id = FONTS.size(); FONTS.put(face, id); }
+            if (id == null) { id = FONTS.size(); FONTS.put(face, id); FACES.add(f); }
         }
         if (seen.size() > 4096) seen.clear();
         seen.put(f, id);
         return id;
     }
+
+    /** A Font object for a face id (for rasterising its glyphs). */
+    static Font face(int id) { synchronized (FONTS) { return FACES.get(id); } }
 
     /** Lines (start, end, baseline, top, bottom, width, rtl), then glyphs (font, id, x, y). */
     static byte[] layout(String text, int width) {

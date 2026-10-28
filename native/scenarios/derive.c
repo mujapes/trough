@@ -118,7 +118,7 @@ static int job_read(reader *r, dv_ref ref, uint64_t *v, uint32_t *p) {
     }
     return 0;
 }
-static uint64_t restarts;
+static uint64_t restarts, jobs_run;
 static tr_status run(const dv_job *job) {
     reader r = {job_read, {{0}}, 0, {0}, 0};
     current_job = job;
@@ -153,12 +153,14 @@ static uint32_t node(int o, uint64_t key) { uint32_t n; OK(dv_intern(&g, op[o], 
 static uint64_t value(uint32_t n) { uint64_t v; OK(dv_get(&g, n, &v)); return v; }
 static uint64_t sum_computed(void) { uint64_t s = 0; for (int i = 0; i <= OPS; i++) s += computed[i]; return s; }
 
+static int static_ops;   /* op0, op3, op4 always read the same dependencies */
 static void setup(void) {
     OK(tr_world_init(&world, cells, 64));
     OK(tr_create(&world, 1, &driver));
     for (int i = 0; i < K; i++) OK(tr_create(&world, (uint64_t)i * 7 + 1, &cell[i]));
     for (int i = 0; i <= OPS; i++) OK(tr_create(&world, 1, &op[i]));
     OK(dv_init(&g, &world, nodes, 256, blocks, 1024, table, 512, path));
+    if (static_ops) { OK(dv_set_static(&g, op[0])); OK(dv_set_static(&g, op[3])); OK(dv_set_static(&g, op[4])); }
     memset(computed, 0, sizeof computed);
 }
 
@@ -394,6 +396,7 @@ static void randomized(int rounds) {
         /* Cost of answering the same demand from scratch: one evaluation per reachable node. */
         scratch_total += (uint64_t)nroots;
     }
+    jobs_run = jobs_total;
     printf("ok random: %d rounds, %llu checks equal the reference; %llu jobs, %llu restarts, %llu edits "
            "(%llu while jobs ran), %llu cancelled, %llu evicted, %llu removed inputs\n",
            rounds, (unsigned long long)checks, (unsigned long long)jobs_total, (unsigned long long)restarts,
@@ -408,6 +411,16 @@ int main(int argc, char **argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
     deterministic();
     restarts = 0;
-    randomized(argc > 1 ? atoi(argv[1]) : 3000);
+    int rounds = argc > 1 ? atoi(argv[1]) : 3000;
+    uint64_t seed = rng;
+    randomized(rounds);
+    uint64_t dynamic_restarts = restarts, dynamic_jobs = jobs_run;
+    /* Again with op0, op3 and op4 declared static: the same reference, fewer restarts. */
+    static_ops = 1; restarts = 0; rng = seed;
+    randomized(rounds);
+    /* The random stream also drives job interleaving, so the runs differ: compare ratios. */
+    CHECK(restarts * dynamic_jobs < dynamic_restarts * jobs_run);
+    printf("ok static dependencies: restarts per job %.3f -> %.3f, both runs equal the reference\n",
+           (double)dynamic_restarts / (double)dynamic_jobs, (double)restarts / (double)jobs_run);
     return 0;
 }

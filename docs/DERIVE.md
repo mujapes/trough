@@ -84,7 +84,7 @@ A memo-free reference evaluates the current world from scratch.
 
 ## Not yet built
 
-- Restart cost: 35% of random-run jobs are restarts. Batching needs (an operator asks for
+- Restart cost: 35% of random-run jobs are restarts (29% with static operators, `dv_set_static`). Batching needs (an operator asks for
   every dependency it can name before it stops) and per-operator dependency hints are the
   known fixes; measure them on real operators first.
 - A root list instead of scanning every node per poll, plus incremental sweeps.

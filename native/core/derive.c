@@ -77,6 +77,16 @@ void dv_set_hooks(dv_graph *g, void (*retain)(void *, uint64_t), void (*release)
     g->retain = retain; g->release = release; g->hooks = ctx;
 }
 
+tr_status dv_set_static(dv_graph *g, tr_id op) {
+    if (!g || g->nstatic == sizeof g->static_ops / sizeof g->static_ops[0]) return TR_CAPACITY;
+    g->static_ops[g->nstatic++] = op;
+    return TR_OK;
+}
+static int is_static(const dv_graph *g, tr_id op) {
+    for (size_t i = 0; i < g->nstatic; i++) if (same_id(g->static_ops[i], op)) return 1;
+    return 0;
+}
+
 static void rebuild(dv_graph *g) {
     memset(g->table, 0, g->table_capacity * sizeof *g->table);
     size_t mask = g->table_capacity - 1;
@@ -139,10 +149,11 @@ static dv_node *dep_node(const dv_graph *g, const dv_dep *d) {
 static void begin_recompute(dv_graph *g, dv_node *n, uint64_t r) {
     n->recompute = 1;
     uint32_t keep = 0;
+    int all = is_static(g, n->op);                    /* static: every live dependency, verified by the walk */
     for (uint32_t i = 0; i < n->count; i++) {
         dv_dep d = *dep_at(g, n, i);
         dv_node *m = d.kind == DV_NODE ? dep_node(g, &d) : NULL;
-        if (d.kind == DV_CELL || (m && clean(m, r))) *dep_at(g, n, keep++) = d;
+        if (d.kind == DV_CELL || (m && (all || clean(m, r)))) *dep_at(g, n, keep++) = d;
     }
     /* Truncate to keep: free whole blocks past it. */
     if (!keep) { deps_free(g, n); return; }

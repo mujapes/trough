@@ -33,10 +33,13 @@ final class NativeCore {
     static native int deriveText(long deriver, int paragraph, String text);
     static native void deriveWidth(long deriver, int width);
     static native int deriveDemand(long deriver, int paragraph, boolean on);
+    static native void deriveViewport(long deriver, int scroll, int height);
+    static native int deriveDemandScene(long deriver, boolean on);
     static native long deriveSettle(long deriver);
     static native long deriveValue(long deriver, int paragraph);
     static native byte[] deriveBytes(long deriver, int paragraph);
     static native long[] deriveStats(long deriver);
+    static native long[] deriveTrace(long deriver);
     static native void deriveClose(long deriver);
     static native byte[] sceneRender(int w, int h, float[] rects, float[] glyphs, byte[] atlas, int aw, int ah);
     static native byte[] textRender(int w, int h, float[] glyphs, byte[] atlas, int aw, int ah, double[] timing);

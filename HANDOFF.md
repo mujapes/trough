@@ -17,6 +17,10 @@ Done: android.derive ([doc](docs/LAYOUT_DERIVE.md)): 240 paragraphs byte-identic
 exact job counts, duplicates share handles. Font identity by source id (Font.hashCode is 46 us).
 Layout stops scaling at ~1.5x for both executor and raw Java threads (platform-side). Next: scene
 compilation from layout blobs; glyph atlas as a fenced resource; simpleperf the layout ceiling.
+Done: android.view ([doc](docs/VIEW.md)): layout -> height summaries -> viewport scene; scene bytes
+equal a flat reference, edit costs exact (below viewport 0 jobs, same-height edit cuts off the scene),
+GPU pixels equal platform. dv_set_static for fixed-dep operators. Next: glyph-mask nodes + atlas
+resource with fence leases in the presenter; estimated heights for unmeasured paragraphs.
 
 DECIDED (2026-10-28): the Java/native boundary is a bionic build of the same sources, loaded
 in-process (docs/BIONIC.md). All store oracles pass as bionic programs on the Pixel; android.jni

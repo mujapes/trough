@@ -257,6 +257,8 @@ by bytes, leases, priorities and measured worker placement remain stage-3 work.
 so early cutoff covers large outputs. The graph and the executor retain values across memo
 replacement and job lifetimes ([contract](BLOBS.md)). The first real operator, platform
 paragraph layout on executor workers through JNI, is verified on the Pixel ([LAYOUT_DERIVE.md](LAYOUT_DERIVE.md)).
+A viewport scene derives from layouts through height summaries, and the GPU draws it
+identically to the platform ([VIEW.md](VIEW.md)).
 
 ## Agent implementation discipline
 
