@@ -29,6 +29,8 @@ core/modules.c
 core/modules.h
 core/derive.c
 core/derive.h
+core/exec.c
+core/exec.h
 store/store.c
 store/store.h
 store/document.c
@@ -62,5 +64,6 @@ scenarios/publication.c
 scenarios/resources.c
 scenarios/replacement.c
 scenarios/derive.c
+scenarios/exec.c
 scenarios/fixtures/api.h
 scenarios/fixtures/implementation.c

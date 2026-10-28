@@ -7,6 +7,9 @@ demand, red-green verification on the world clock, early cutoff, Skyframe-style 
 dynamic deps, snapshot jobs, cancellation, cycles, eviction. `core.derive` matches a memo-free
 reference (653795 checks / 30000 rounds), 10/10 mutants. Next: batch needs (35% restarts), then
 real operators (layout/scene as nodes) and admission/leases.
+Then `native/core/exec` ([contract](docs/EXEC.md)): owner thread + workers + cancellation + trace;
+`core.exec` passes on the Pixel (bundle 1353a0fd5380), TSan/ASan clean. Next: real operators
+(text layout via JNI, scene compilation) registered on the executor, then admission/leases.
 
 DECIDED (2026-10-28): the Java/native boundary is a bionic build of the same sources, loaded
 in-process (docs/BIONIC.md). All store oracles pass as bionic programs on the Pixel; android.jni

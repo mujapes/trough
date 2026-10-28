@@ -250,7 +250,9 @@ and recover their current state without view/module-owned IDs ([contract](WORKSP
 `native/core/derive` is the first stage-3 piece: demand-driven derivation over the world, with
 Salsa-style red-green verification, early cutoff, dynamic dependencies by restart, concurrent
 snapshot jobs, cancellation and bounded storage ([contract](DERIVE.md)). No real operator uses
-it yet, and admission by bytes, leases and tracing remain stage-3 work.
+it yet. `native/core/exec` runs it: one owner thread, a fixed worker pool, cooperative
+cancellation when demand drops, settling and a job trace ring ([contract](EXEC.md)). Admission
+by bytes, leases, priorities and measured worker placement remain stage-3 work.
 
 ## Agent implementation discipline
 

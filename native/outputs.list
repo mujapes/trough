@@ -11,6 +11,7 @@ bin/core-publication
 bin/core-resources
 bin/core-replacement
 bin/core-derive
+bin/core-exec
 bin/core-store
 bin/core-documents
 bin/core-streams
