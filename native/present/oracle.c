@@ -8,7 +8,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 static uint64_t rng;
 static uint32_t next(uint32_t n) { rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17; return (uint32_t)(rng >> 33) % n; }
@@ -49,11 +48,6 @@ static void reference(const ps_rect *rects, size_t n, uint32_t w, uint32_t h, ui
         }
     }
 }
-static double now_ms(void) {
-    struct timespec t;
-    clock_gettime(CLOCK_MONOTONIC, &t);
-    return t.tv_sec * 1e3 + t.tv_nsec / 1e6;
-}
 
 int ps_oracle(char *out, size_t capacity) {
     char info[300] = "";
@@ -86,27 +80,112 @@ int ps_oracle(char *out, size_t capacity) {
         }
         pixels += (size_t)w * h;
     }
-    /* Throughput on a phone-sized target: clear+readback alone, then 20000 rectangles. */
+    /* Throughput on a phone-sized target: clear+readback alone, then 20000 UI-sized rectangles
+     * (up to 64 px on a side, so overdraw stays like an interface rather than a stress test). */
     double base = 0, draw = 0;
+    int stress = 0;
     uint32_t W = 1080, H = 1920;
     ps_rect *many = malloc(20000 * sizeof *many);
     uint8_t *big = malloc((size_t)W * H * 4);
     if (!st && many && big) {
         rng = 42;
-        for (int i = 0; i < 20000; i++) random_rect(&many[i], W, H);
-        double t0 = now_ms(); (void)t0;
-        ps_render(g, many, 0, W, H, big, &base);
-        ps_render(g, many, 0, W, H, big, &base);
-        ps_render(g, many, 20000, W, H, big, &draw);
-        ps_render(g, many, 20000, W, H, big, &draw);
+        for (int i = 0; i < 20000; i++) {
+            random_rect(&many[i], W, H);
+            many[i].x1 = many[i].x0 + (float)next(64 * 16) / 16.0f;
+            many[i].y1 = many[i].y0 + (float)next(64 * 16) / 16.0f;
+        }
+        stress = ps_render(g, many, 0, W, H, big, &base);
+        if (!stress) stress = ps_render(g, many, 0, W, H, big, &base);
+        if (!stress) stress = ps_render(g, many, 20000, W, H, big, &draw);
+        if (!stress) stress = ps_render(g, many, 20000, W, H, big, &draw);
     }
     free(many); free(big); free(rects); free(gpu); free(ref);
     ps_close(g);
     for (char *c = info; *c; c++) if (*c == '"' || *c == '\\') *c = '\'';
     snprintf(out, capacity, "{\"ok\":%s,\"device\":\"%s\",\"render_status\":%d,\"scenes\":%d,\"pixels\":%llu,"
         "\"bad_pixels\":%llu,\"coverage_errors\":%llu,\"max_channel_diff\":%d,\"first_bad\":\"%s\","
-        "\"clear_readback_1080x1920_ms\":%.2f,\"draw_20000_rects_1080x1920_ms\":%.2f}",
-        !st && !bad && pixels ? "true" : "false", info, st, SCENES, (unsigned long long)pixels,
-        (unsigned long long)bad, (unsigned long long)coverage, max_diff, first, base, draw);
-    return !st && !bad && pixels;
+        "\"stress_status\":%d,\"clear_readback_1080x1920_ms\":%.2f,\"draw_20000_ui_rects_1080x1920_ms\":%.2f}",
+        !st && !stress && !bad && pixels ? "true" : "false", info, st, SCENES, (unsigned long long)pixels,
+        (unsigned long long)bad, (unsigned long long)coverage, max_diff, first, stress, base, draw);
+    return !st && !stress && !bad && pixels;
+}
+
+/* Glyph composition oracle: random coverage masks packed in an atlas, drawn at random integer
+ * positions with clips and premultiplied colours over a few rectangles. Reference: src-over of
+ * colour * coverage/255, the same rule the glyph shader applies to the R8 texel. */
+int ps_glyph_oracle(char *out, size_t capacity) {
+    ps_gpu *g;
+    char info[300] = "";
+    int st = ps_open(&g, info, sizeof info);
+    if (st) { snprintf(out, capacity, "{\"ok\":false,\"error\":\"open %d\"}", st); return 0; }
+    enum { AW = 512, AH = 512, MASKS = 64, SCENES = 40 };
+    uint8_t *atlas = malloc(AW * AH), *gpu = malloc(256 * 256 * 4), *ref = malloc(256 * 256 * 4);
+    ps_glyph *glyphs = malloc(300 * sizeof *glyphs);
+    ps_rect rects[4];
+    uint32_t mx[MASKS], my[MASKS], mw[MASKS], mh[MASKS];
+    uint64_t pixels = 0, bad = 0, large = 0;
+    int max_diff = 0;
+    char first[200] = "";
+    uint8_t *depth = malloc(256 * 256);
+    rng = 7;
+    memset(atlas, 0, AW * AH);
+    for (uint32_t i = 0, x = 0, y = 0, row = 0; i < MASKS; i++) {      /* shelf packing */
+        mw[i] = 1 + next(40); mh[i] = 1 + next(40);
+        if (x + mw[i] > AW) { x = 0; y += row; row = 0; }
+        mx[i] = x; my[i] = y; x += mw[i]; if (mh[i] > row) row = mh[i];
+        for (uint32_t v = 0; v < mh[i]; v++) for (uint32_t u = 0; u < mw[i]; u++)
+            atlas[(my[i] + v) * AW + mx[i] + u] = (uint8_t)(next(3) ? next(256) : next(2) * 255);
+    }
+    if (!st) st = ps_atlas(g, atlas, AW, AH);
+    for (int s = 1; s <= SCENES && !st && gpu && ref && glyphs && depth; s++) {
+        rng = 0x51ed27ull * (uint64_t)s;
+        uint32_t w = 16 + next(240), h = 16 + next(240), n = 1 + next(300), nr = next(4);
+        for (uint32_t i = 0; i < nr; i++) random_rect(&rects[i], w, h);
+        for (uint32_t i = 0; i < n; i++) {
+            uint32_t m = next(MASKS);
+            float x0 = (float)next(w + 40) - 20, y0 = (float)next(h + 40) - 20;
+            ps_glyph *q = &glyphs[i];
+            q->x0 = x0; q->y0 = y0; q->x1 = x0 + (float)mw[m]; q->y1 = y0 + (float)mh[m];
+            q->u = (float)mx[m]; q->v = (float)my[m]; q->unused0 = q->unused1 = 0;
+            ps_rect c; random_rect(&c, w, h);
+            q->cx0 = c.cx0; q->cy0 = c.cy0; q->cx1 = c.cx1; q->cy1 = c.cy1;
+            q->r = c.r; q->g = c.g; q->b = c.b; q->a = c.a;
+        }
+        if ((st = ps_render_text(g, rects, nr, glyphs, n, w, h, gpu, NULL))) break;
+        reference(rects, nr, w, h, ref);
+        memset(depth, 0, (size_t)w * h);
+        for (uint32_t i = 0; i < n; i++) {
+            const ps_glyph *q = &glyphs[i];
+            for (int y = (int)q->y0; y < (int)q->y1; y++) for (int x = (int)q->x0; x < (int)q->x1; x++) {
+                if (x < 0 || y < 0 || x >= (int)w || y >= (int)h) continue;
+                float cx = (float)x + 0.5f, cy = (float)y + 0.5f;
+                if (cx < q->cx0 || cx >= q->cx1 || cy < q->cy0 || cy >= q->cy1) continue;
+                float cov = (float)atlas[((int)q->v + y - (int)q->y0) * AW + (int)q->u + x - (int)q->x0] / 255.0f;
+                float src[4] = {q->r * cov, q->g * cov, q->b * cov, q->a * cov};
+                uint8_t *p = ref + ((size_t)y * w + x) * 4;
+                for (int ch = 0; ch < 4; ch++) p[ch] = unorm(src[ch] + (float)p[ch] / 255.0f * (1.0f - src[3]));
+                if (depth[(size_t)y * w + x] < 255) depth[(size_t)y * w + x]++;
+            }
+        }
+        /* Each UNORM blend may round differently by one, and later blends never amplify an
+         * earlier error (the factor 1 - alpha is at most 1): allow 1 plus the layers at the pixel,
+         * rectangles included. Coverage or texel-addressing errors are far larger (counted apart). */
+        for (size_t p = 0; p < (size_t)w * h; p++) {
+            int worst = 0;
+            for (int ch = 0; ch < 4; ch++) { int d = abs(gpu[p * 4 + ch] - ref[p * 4 + ch]); if (d > worst) worst = d; }
+            if (worst > max_diff) max_diff = worst;
+            if (worst > 16) large++;
+            if (worst > 1 + (int)nr + depth[p] && !bad++)
+                snprintf(first, sizeof first, "scene %d pixel %zu,%zu ref %u,%u,%u,%u gpu %u,%u,%u,%u", s, p % w, p / w,
+                         ref[p*4], ref[p*4+1], ref[p*4+2], ref[p*4+3], gpu[p*4], gpu[p*4+1], gpu[p*4+2], gpu[p*4+3]);
+        }
+        pixels += (size_t)w * h;
+    }
+    free(atlas); free(gpu); free(ref); free(glyphs); free(depth);
+    ps_close(g);
+    for (char *c = info; *c; c++) if (*c == '"' || *c == '\\') *c = '\'';
+    snprintf(out, capacity, "{\"ok\":%s,\"device\":\"%s\",\"status\":%d,\"scenes\":%d,\"pixels\":%llu,\"bad_pixels\":%llu,"
+        "\"large_diffs\":%llu,\"max_channel_diff\":%d,\"first_bad\":\"%s\"}", !st && !bad && !large && pixels ? "true" : "false",
+        info, st, SCENES, (unsigned long long)pixels, (unsigned long long)bad, (unsigned long long)large, max_diff, first);
+    return !st && !bad && !large && pixels;
 }

@@ -19,8 +19,14 @@ struct ps_gpu {
     VkCommandBuffer cmd;
     VkFence fence;
     VkRenderPass pass;
-    VkPipelineLayout layout;
-    VkPipeline pipeline;
+    VkPipelineLayout layout, glyph_layout;
+    VkPipeline pipeline, glyph_pipeline;
+    VkDescriptorSetLayout set_layout;
+    VkDescriptorPool descriptors;
+    VkDescriptorSet set;
+    VkSampler sampler;
+    VkImage atlas; VkDeviceMemory atlas_mem; VkImageView atlas_view; uint32_t atlas_w, atlas_h;
+    VkBuffer glyphs; VkDeviceMemory glyphs_mem; void *glyphs_map; size_t glyph_capacity;
     /* Sized on demand. */
     uint32_t w, h;
     VkImage target; VkDeviceMemory target_mem; VkImageView view; VkFramebuffer framebuffer;
@@ -68,6 +74,7 @@ static VkShaderModule module(ps_gpu *g, const uint32_t *code, size_t size) {
     return m;
 }
 
+static VkResult build(ps_gpu *, const uint32_t *, size_t, const uint32_t *, size_t, uint32_t, uint32_t, VkPipelineLayout, VkPipeline *);
 static VkResult pipeline(ps_gpu *g) {
     VkAttachmentDescription color = {0, FORMAT, VK_SAMPLE_COUNT_1_BIT, VK_ATTACHMENT_LOAD_OP_CLEAR,
         VK_ATTACHMENT_STORE_OP_STORE, VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE,
@@ -82,16 +89,39 @@ static VkResult pipeline(ps_gpu *g) {
     VkPushConstantRange push = {VK_SHADER_STAGE_VERTEX_BIT, 0, 8};
     VkPipelineLayoutCreateInfo li = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, NULL, 0, 0, NULL, 1, &push};
     if ((r = vkCreatePipelineLayout(g->device, &li, NULL, &g->layout))) return r;
-    VkShaderModule vs = module(g, rect_vert, sizeof rect_vert), fs = module(g, rect_frag, sizeof rect_frag);
+    if ((r = build(g, rect_vert, sizeof rect_vert, rect_frag, sizeof rect_frag, sizeof(ps_rect), 3, g->layout, &g->pipeline))) return r;
+    /* Glyphs: one combined image sampler (texelFetch ignores its filtering). */
+    VkDescriptorSetLayoutBinding binding = {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL};
+    VkDescriptorSetLayoutCreateInfo sl = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, NULL, 0, 1, &binding};
+    if ((r = vkCreateDescriptorSetLayout(g->device, &sl, NULL, &g->set_layout))) return r;
+    VkPipelineLayoutCreateInfo gl = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, NULL, 0, 1, &g->set_layout, 1, &push};
+    if ((r = vkCreatePipelineLayout(g->device, &gl, NULL, &g->glyph_layout))) return r;
+    if ((r = build(g, glyph_vert, sizeof glyph_vert, glyph_frag, sizeof glyph_frag, sizeof(ps_glyph), 4, g->glyph_layout, &g->glyph_pipeline))) return r;
+    VkDescriptorPoolSize size = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1};
+    VkDescriptorPoolCreateInfo dp = {VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, NULL, 0, 1, 1, &size};
+    if ((r = vkCreateDescriptorPool(g->device, &dp, NULL, &g->descriptors))) return r;
+    VkDescriptorSetAllocateInfo da = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, NULL, g->descriptors, 1, &g->set_layout};
+    if ((r = vkAllocateDescriptorSets(g->device, &da, &g->set))) return r;
+    VkSamplerCreateInfo si = {VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO, NULL, 0, VK_FILTER_NEAREST, VK_FILTER_NEAREST,
+        VK_SAMPLER_MIPMAP_MODE_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, 0, VK_FALSE, 1, VK_FALSE, VK_COMPARE_OP_ALWAYS, 0, 0,
+        VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK, VK_FALSE};
+    return vkCreateSampler(g->device, &si, NULL, &g->sampler);
+}
+
+/* A pipeline over the shared render pass: per-instance vec4 attributes, src-over blending. */
+static VkResult build(ps_gpu *g, const uint32_t *vcode, size_t vsize, const uint32_t *fcode, size_t fsize,
+                      uint32_t stride, uint32_t attributes, VkPipelineLayout layout, VkPipeline *out) {
+    VkResult r;
+    VkShaderModule vs = module(g, vcode, vsize), fs = module(g, fcode, fsize);
     if (!vs || !fs) { r = VK_ERROR_INITIALIZATION_FAILED; goto out; }
     VkPipelineShaderStageCreateInfo stages[2] = {
         {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, NULL, 0, VK_SHADER_STAGE_VERTEX_BIT, vs, "main", NULL},
         {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, NULL, 0, VK_SHADER_STAGE_FRAGMENT_BIT, fs, "main", NULL}};
-    VkVertexInputBindingDescription bind = {0, sizeof(ps_rect), VK_VERTEX_INPUT_RATE_INSTANCE};
-    VkVertexInputAttributeDescription attrs[3] = {
-        {0, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 0}, {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 16},
-        {2, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 32}};
-    VkPipelineVertexInputStateCreateInfo vi = {VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO, NULL, 0, 1, &bind, 3, attrs};
+    VkVertexInputBindingDescription bind = {0, stride, VK_VERTEX_INPUT_RATE_INSTANCE};
+    VkVertexInputAttributeDescription attrs[4];
+    for (uint32_t i = 0; i < attributes; i++) attrs[i] = (VkVertexInputAttributeDescription){i, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 16 * i};
+    VkPipelineVertexInputStateCreateInfo vi = {VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO, NULL, 0, 1, &bind, attributes, attrs};
     VkPipelineInputAssemblyStateCreateInfo ia = {VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO, NULL, 0,
         VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VK_FALSE};
     VkPipelineViewportStateCreateInfo vp = {VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO, NULL, 0, 1, NULL, 1, NULL};
@@ -106,8 +136,8 @@ static VkResult pipeline(ps_gpu *g) {
     VkDynamicState dyn[2] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
     VkPipelineDynamicStateCreateInfo ds = {VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO, NULL, 0, 2, dyn};
     VkGraphicsPipelineCreateInfo pi = {VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, NULL, 0, 2, stages, &vi, &ia, NULL,
-        &vp, &rs, &ms, NULL, &cb, &ds, g->layout, g->pass, 0, VK_NULL_HANDLE, -1};
-    r = vkCreateGraphicsPipelines(g->device, VK_NULL_HANDLE, 1, &pi, NULL, &g->pipeline);
+        &vp, &rs, &ms, NULL, &cb, &ds, layout, g->pass, 0, VK_NULL_HANDLE, -1};
+    r = vkCreateGraphicsPipelines(g->device, VK_NULL_HANDLE, 1, &pi, NULL, out);
 out:
     if (vs) vkDestroyShaderModule(g->device, vs, NULL);
     if (fs) vkDestroyShaderModule(g->device, fs, NULL);
@@ -201,11 +231,91 @@ static VkResult ensure_vertices(ps_gpu *g, size_t count) {
     return r;
 }
 
+static VkResult ensure_glyphs(ps_gpu *g, size_t count) {
+    if (count <= g->glyph_capacity) return VK_SUCCESS;
+    if (g->glyphs) vkDestroyBuffer(g->device, g->glyphs, NULL);
+    if (g->glyphs_mem) vkFreeMemory(g->device, g->glyphs_mem, NULL);
+    g->glyphs = VK_NULL_HANDLE; g->glyphs_mem = VK_NULL_HANDLE; g->glyph_capacity = 0;
+    size_t cap = count < 1024 ? 1024 : count * 2;
+    VkResult r = host_buffer(g, cap * sizeof(ps_glyph), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, 0,
+                             &g->glyphs, &g->glyphs_mem, &g->glyphs_map);
+    if (!r) g->glyph_capacity = cap;
+    return r;
+}
+static void drop_atlas(ps_gpu *g) {
+    if (g->atlas_view) vkDestroyImageView(g->device, g->atlas_view, NULL);
+    if (g->atlas) vkDestroyImage(g->device, g->atlas, NULL);
+    if (g->atlas_mem) vkFreeMemory(g->device, g->atlas_mem, NULL);
+    g->atlas_view = VK_NULL_HANDLE; g->atlas = VK_NULL_HANDLE; g->atlas_mem = VK_NULL_HANDLE;
+    g->atlas_w = g->atlas_h = 0;
+}
+/* Fences are waited without a timeout: completion is guaranteed (a hung device reports
+ * VK_ERROR_DEVICE_LOST), so no call returns while the GPU still uses its resources. */
+static int fail(VkResult r) { return r < 0 ? (int)r : -(int)r; }
+
+int ps_atlas(ps_gpu *g, const uint8_t *coverage, uint32_t w, uint32_t h) {
+    if (!g || !coverage || !w || !h) return fail(VK_ERROR_INITIALIZATION_FAILED);
+    vkDeviceWaitIdle(g->device);
+    drop_atlas(g);
+    VkImageCreateInfo ii = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, NULL, 0, VK_IMAGE_TYPE_2D, VK_FORMAT_R8_UNORM, {w, h, 1}, 1, 1,
+        VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        VK_SHARING_MODE_EXCLUSIVE, 0, NULL, VK_IMAGE_LAYOUT_UNDEFINED};
+    VkResult r = vkCreateImage(g->device, &ii, NULL, &g->atlas);
+    VkMemoryRequirements req;
+    if (!r) { vkGetImageMemoryRequirements(g->device, g->atlas, &req); r = allocate(g, req, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 0, &g->atlas_mem); }
+    if (!r) r = vkBindImageMemory(g->device, g->atlas, g->atlas_mem, 0);
+    VkImageViewCreateInfo vi = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, NULL, 0, g->atlas, VK_IMAGE_VIEW_TYPE_2D,
+        VK_FORMAT_R8_UNORM, {0, 0, 0, 0}, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
+    if (!r) r = vkCreateImageView(g->device, &vi, NULL, &g->atlas_view);
+    /* Upload through a staging buffer, then leave the atlas shader-readable. */
+    VkBuffer staging = VK_NULL_HANDLE; VkDeviceMemory staging_mem = VK_NULL_HANDLE; void *map = NULL;
+    if (!r) r = host_buffer(g, (VkDeviceSize)w * h, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, 0, &staging, &staging_mem, &map);
+    if (!r) {
+        memcpy(map, coverage, (size_t)w * h);
+        vkResetCommandBuffer(g->cmd, 0);
+        VkCommandBufferBeginInfo bi = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, NULL, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT, NULL};
+        vkBeginCommandBuffer(g->cmd, &bi);
+        VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        VkImageMemoryBarrier to_dst = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, NULL, 0, VK_ACCESS_TRANSFER_WRITE_BIT,
+            VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, g->atlas, range};
+        vkCmdPipelineBarrier(g->cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 0, NULL, 1, &to_dst);
+        VkBufferImageCopy copy = {0, 0, 0, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, {0, 0, 0}, {w, h, 1}};
+        vkCmdCopyBufferToImage(g->cmd, staging, g->atlas, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+        VkImageMemoryBarrier to_read = to_dst;
+        to_read.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT; to_read.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        to_read.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL; to_read.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        vkCmdPipelineBarrier(g->cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, NULL, 0, NULL, 1, &to_read);
+        vkEndCommandBuffer(g->cmd);
+        VkSubmitInfo si = {VK_STRUCTURE_TYPE_SUBMIT_INFO, NULL, 0, NULL, NULL, 1, &g->cmd, 0, NULL};
+        vkResetFences(g->device, 1, &g->fence);
+        r = vkQueueSubmit(g->queue, 1, &si, g->fence);
+        if (!r) r = vkWaitForFences(g->device, 1, &g->fence, VK_TRUE, UINT64_MAX);
+    }
+    if (staging) vkDestroyBuffer(g->device, staging, NULL);
+    if (staging_mem) vkFreeMemory(g->device, staging_mem, NULL);
+    if (!r) {
+        VkDescriptorImageInfo image = {g->sampler, g->atlas_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        VkWriteDescriptorSet write = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, NULL, g->set, 0, 0, 1,
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, &image, NULL, NULL};
+        vkUpdateDescriptorSets(g->device, 1, &write, 0, NULL);
+        g->atlas_w = w; g->atlas_h = h;
+    } else drop_atlas(g);
+    return r ? fail(r) : 0;
+}
+
 int ps_render(ps_gpu *g, const ps_rect *rects, size_t count, uint32_t w, uint32_t h, uint8_t *rgba, double *gpu_ms) {
-    if (!g || !w || !h || (count && !rects) || !rgba) return -(int)-VK_ERROR_INITIALIZATION_FAILED;
+    return ps_render_text(g, rects, count, NULL, 0, w, h, rgba, gpu_ms);
+}
+
+int ps_render_text(ps_gpu *g, const ps_rect *rects, size_t count, const ps_glyph *glyphs, size_t nglyphs,
+                   uint32_t w, uint32_t h, uint8_t *rgba, double *gpu_ms) {
+    if (!g || !w || !h || (count && !rects) || (nglyphs && (!glyphs || !g->atlas_w)) || !rgba)
+        return fail(VK_ERROR_INITIALIZATION_FAILED);
     VkResult r;
-    if ((r = ensure_target(g, w, h)) || (r = ensure_vertices(g, count ? count : 1))) return -(int)(r < 0 ? -r : r);
+    if ((r = ensure_target(g, w, h)) || (r = ensure_vertices(g, count ? count : 1)) ||
+        (r = ensure_glyphs(g, nglyphs ? nglyphs : 1))) return fail(r);
     if (count) memcpy(g->vertices_map, rects, count * sizeof *rects);
+    if (nglyphs) memcpy(g->glyphs_map, glyphs, nglyphs * sizeof *glyphs);
     vkResetCommandBuffer(g->cmd, 0);
     VkCommandBufferBeginInfo bi = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, NULL, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT, NULL};
     vkBeginCommandBuffer(g->cmd, &bi);
@@ -216,12 +326,21 @@ int ps_render(ps_gpu *g, const ps_rect *rects, size_t count, uint32_t w, uint32_
     VkRect2D scissor = {{0, 0}, {w, h}};
     vkCmdSetViewport(g->cmd, 0, 1, &viewport);
     vkCmdSetScissor(g->cmd, 0, 1, &scissor);
-    vkCmdBindPipeline(g->cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g->pipeline);
     float size[2] = {(float)w, (float)h};
-    vkCmdPushConstants(g->cmd, g->layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof size, size);
     VkDeviceSize offset = 0;
-    vkCmdBindVertexBuffers(g->cmd, 0, 1, &g->vertices, &offset);
-    if (count) vkCmdDraw(g->cmd, 6, (uint32_t)count, 0, 0);
+    if (count) {
+        vkCmdBindPipeline(g->cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g->pipeline);
+        vkCmdPushConstants(g->cmd, g->layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof size, size);
+        vkCmdBindVertexBuffers(g->cmd, 0, 1, &g->vertices, &offset);
+        vkCmdDraw(g->cmd, 6, (uint32_t)count, 0, 0);
+    }
+    if (nglyphs) {
+        vkCmdBindPipeline(g->cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g->glyph_pipeline);
+        vkCmdBindDescriptorSets(g->cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g->glyph_layout, 0, 1, &g->set, 0, NULL);
+        vkCmdPushConstants(g->cmd, g->glyph_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof size, size);
+        vkCmdBindVertexBuffers(g->cmd, 0, 1, &g->glyphs, &offset);
+        vkCmdDraw(g->cmd, 6, (uint32_t)nglyphs, 0, 0);
+    }
     vkCmdEndRenderPass(g->cmd);
     VkBufferImageCopy copy = {0, 0, 0, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, {0, 0, 0}, {w, h, 1}};
     vkCmdCopyImageToBuffer(g->cmd, g->target, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, g->readback, 1, &copy);
@@ -233,7 +352,7 @@ int ps_render(ps_gpu *g, const ps_rect *rects, size_t count, uint32_t w, uint32_
     double t = now_ms();
     vkResetFences(g->device, 1, &g->fence);
     if ((r = vkQueueSubmit(g->queue, 1, &si, g->fence)) ||
-        (r = vkWaitForFences(g->device, 1, &g->fence, VK_TRUE, 10000000000ull))) return -(int)(r < 0 ? -r : r);
+        (r = vkWaitForFences(g->device, 1, &g->fence, VK_TRUE, UINT64_MAX))) return fail(r);
     if (gpu_ms) *gpu_ms = now_ms() - t;
     memcpy(rgba, g->readback_map, (size_t)w * h * 4);
     return 0;
@@ -246,6 +365,14 @@ void ps_close(ps_gpu *g) {
         drop_target(g);
         if (g->vertices) vkDestroyBuffer(g->device, g->vertices, NULL);
         if (g->vertices_mem) vkFreeMemory(g->device, g->vertices_mem, NULL);
+        if (g->glyphs) vkDestroyBuffer(g->device, g->glyphs, NULL);
+        if (g->glyphs_mem) vkFreeMemory(g->device, g->glyphs_mem, NULL);
+        drop_atlas(g);
+        if (g->sampler) vkDestroySampler(g->device, g->sampler, NULL);
+        if (g->descriptors) vkDestroyDescriptorPool(g->device, g->descriptors, NULL);
+        if (g->glyph_pipeline) vkDestroyPipeline(g->device, g->glyph_pipeline, NULL);
+        if (g->glyph_layout) vkDestroyPipelineLayout(g->device, g->glyph_layout, NULL);
+        if (g->set_layout) vkDestroyDescriptorSetLayout(g->device, g->set_layout, NULL);
         if (g->pipeline) vkDestroyPipeline(g->device, g->pipeline, NULL);
         if (g->layout) vkDestroyPipelineLayout(g->device, g->layout, NULL);
         if (g->pass) vkDestroyRenderPass(g->device, g->pass, NULL);

@@ -238,3 +238,37 @@ JNIEXPORT jstring JNICALL CLASS(sceneOracle)(JNIEnv *env, jclass c) {
     ps_oracle(out, sizeof out);
     return (*env)->NewStringUTF(env, out);
 }
+
+int ps_glyph_oracle(char *out, size_t capacity);
+JNIEXPORT jstring JNICALL CLASS(glyphOracle)(JNIEnv *env, jclass c) {
+    (void)c;
+    static char out[4096];
+    ps_glyph_oracle(out, sizeof out);
+    return (*env)->NewStringUTF(env, out);
+}
+/* Composes glyph instances (16 floats each, ps_glyph layout) from an R8 atlas on the GPU and
+ * returns the RGBA result, or null. timing[0] receives the GPU time in ms. */
+#include "scene.h"
+JNIEXPORT jbyteArray JNICALL CLASS(textRender)(JNIEnv *env, jclass c, jint w, jint h, jfloatArray glyphs,
+                                                jbyteArray atlas, jint aw, jint ah, jdoubleArray timing) {
+    (void)c;
+    if (w <= 0 || h <= 0 || aw <= 0 || ah <= 0) return NULL;
+    jsize nf = (*env)->GetArrayLength(env, glyphs);
+    if (nf % 16 || (*env)->GetArrayLength(env, atlas) != aw * ah) return NULL;
+    ps_gpu *g;
+    if (ps_open(&g, NULL, 0)) return NULL;
+    jfloat *f = (*env)->GetFloatArrayElements(env, glyphs, NULL);
+    jbyte *a = (*env)->GetByteArrayElements(env, atlas, NULL);
+    uint8_t *rgba = malloc((size_t)w * h * 4);
+    double ms = 0;
+    int st = !f || !a || !rgba ? -1 : ps_atlas(g, (const uint8_t *)a, (uint32_t)aw, (uint32_t)ah);
+    if (!st) st = ps_render_text(g, NULL, 0, (const ps_glyph *)f, (size_t)nf / 16, (uint32_t)w, (uint32_t)h, rgba, &ms);
+    if (f) (*env)->ReleaseFloatArrayElements(env, glyphs, f, JNI_ABORT);
+    if (a) (*env)->ReleaseByteArrayElements(env, atlas, a, JNI_ABORT);
+    ps_close(g);
+    jbyteArray out = NULL;
+    if (!st && (out = (*env)->NewByteArray(env, w * h * 4))) (*env)->SetByteArrayRegion(env, out, 0, w * h * 4, (const jbyte *)rgba);
+    free(rgba);
+    if (timing && (*env)->GetArrayLength(env, timing) > 0) (*env)->SetDoubleArrayRegion(env, timing, 0, 1, &ms);
+    return out;
+}

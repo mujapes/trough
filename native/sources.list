@@ -9,6 +9,8 @@ present/oracle.c
 present/shaders.h
 present/rect.vert
 present/rect.frag
+present/glyph.vert
+present/glyph.frag
 scenarios/scene.c
 sources.list
 outputs.list

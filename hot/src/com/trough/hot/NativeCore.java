@@ -22,6 +22,8 @@ final class NativeCore {
     static native int notifyFd(long keeper);
     static native String presentProbe(android.view.Surface surface, int frames);
     static native String sceneOracle();
+    static native String glyphOracle();
+    static native byte[] textRender(int w, int h, float[] glyphs, byte[] atlas, int aw, int ah, double[] timing);
     static native long externalEdit(long keeper, long document, int start, int end, String text);
     static native String slice(long queue, int start, int end);
     static native long batch(long keeper, long queue, int[] ranges, String[] texts, int anchor, int caret, int cs, int ce);
