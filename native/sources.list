@@ -3,6 +3,13 @@ bionic.sh
 outputs-bionic.list
 android/jni.c
 android/present.c
+present/scene.c
+present/scene.h
+present/oracle.c
+present/shaders.h
+present/rect.vert
+present/rect.frag
+scenarios/scene.c
 sources.list
 outputs.list
 bench/bench.c

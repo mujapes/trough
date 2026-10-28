@@ -229,3 +229,12 @@ JNIEXPORT jlong JNICALL CLASS(externalEdit)(JNIEnv *env, jclass c, jlong k, jlon
     if (units) (*env)->ReleaseStringChars(env, text, units);
     return -(jlong)st;
 }
+
+/* The rectangle renderer's pixel oracle (native/present/oracle.c) on the device GPU. */
+int ps_oracle(char *out, size_t capacity);
+JNIEXPORT jstring JNICALL CLASS(sceneOracle)(JNIEnv *env, jclass c) {
+    (void)c;
+    static char out[4096];
+    ps_oracle(out, sizeof out);
+    return (*env)->NewStringUTF(env, out);
+}
