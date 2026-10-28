@@ -1,7 +1,7 @@
 #include "stream.h"
 #include <string.h>
 
-enum { HEAD_SIZE = 40, ENTRY_HEADER = 96, ENTRY_LIMIT = ENTRY_HEADER + 24 * TL_PROVENANCE_LIMIT };
+enum { HEAD_SIZE = TL_HEAD_SIZE, ENTRY_HEADER = 96, ENTRY_LIMIT = ENTRY_HEADER + 24 * TL_PROVENANCE_LIMIT };
 static uint32_t get32(const uint8_t *p) { return p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24; }
 static uint64_t get64(const uint8_t *p) { return get32(p) | (uint64_t)get32(p + 4) << 32; }
 static void put32(uint8_t *p, uint32_t n) { for (unsigned i = 0; i < 4; i++) p[i] = (uint8_t)(n >> (8 * i)); }
@@ -17,6 +17,14 @@ static void putref(uint8_t *p, const td_reference *r) { put64(p, r->id); put64(p
 static td_reference getref(const uint8_t *p) { return (td_reference){get64(p), get64(p + 8), get32(p + 16)}; }
 static void encode_head(const tl_head *h, uint8_t p[HEAD_SIZE]) {
     memcpy(p, "THED", 4); put32(p + 4, 1); put64(p + 8, h->length); memcpy(p + 16, h->last, 16); put64(p + 32, 0);
+}
+ts_status tl_head_encode(const tl_head *head, void *wire, size_t capacity, size_t *size) {
+    if (!size) return TS_INVALID;
+    *size = 0;
+    if (!head || head->length > INT64_MAX || (head->length == 0) != zero(head->last) || (capacity && !wire)) return TS_INVALID;
+    *size = HEAD_SIZE;
+    if (capacity < HEAD_SIZE) return TS_CAPACITY;
+    encode_head(head, wire); return TS_OK;
 }
 static ts_status decode_head(const uint8_t *p, size_t n, tl_head *h) {
     if (n != HEAD_SIZE || memcmp(p, "THED", 4) || get32(p + 4) != 1 || get64(p + 32)) return TS_INVALID;
@@ -102,7 +110,8 @@ static ts_status check_reference(ts_store *s, const td_reference *ref) {
     if (st != TS_OK && st != TS_CAPACITY) return st;
     return r.schema == ref->schema ? TS_OK : TS_INVALID;
 }
-ts_status tl_append(ts_store *s, ts_read expected, const uint8_t key[16], const tl_value *value, tl_entry *out) {
+static ts_status append_entry(ts_store *s, ts_read expected, const uint8_t key[16], const tl_value *value,
+                               const ts_read *guards, size_t count, const ts_effect *effect, tl_entry *out) {
     if (!out) return TS_INVALID;
     uint8_t saved_key[16]; tl_value saved_value;
     if (key) { memcpy(saved_key, key, 16); key = saved_key; }
@@ -110,6 +119,8 @@ ts_status tl_append(ts_store *s, ts_read expected, const uint8_t key[16], const 
     memset(out, 0, sizeof *out);
     if (!s || !key || zero(key) || !expected.id || expected.id > INT64_MAX ||
         !expected.revision || expected.revision > INT64_MAX || !value_ok(value)) return TS_INVALID;
+    if (count > TD_DEPENDENCY_LIMIT + 1) return TS_CAPACITY;
+    if ((count && !guards) || (effect && (effect->from || effect->to != TS_PREPARED || memcmp(effect->intent, key, 16)))) return TS_INVALID;
     tl_entry e = {0};
     ts_status st = tl_get(s, key, &e);
     if (st == TS_OK) {
@@ -119,9 +130,20 @@ ts_status tl_append(ts_store *s, ts_read expected, const uint8_t key[16], const 
         tl_entry candidate = e; candidate.value = *value;
         size_t m = encode_entry(&candidate, retry);
         if (n != m || memcmp(original, retry, n)) return TS_CONFLICT;
+        if (effect) {
+            st = ts_effect_get(s, key, NULL, NULL);
+            if (st != TS_OK) return st == TS_NOT_FOUND ? TS_CONFLICT : st;
+            ts_receipt receipt;
+            st = ts_commit(s, NULL, 0, NULL, 0, effect, 1, &receipt);
+            if (st) return st;
+        }
         *out = e; return TS_OK;
     }
     if (st != TS_NOT_FOUND) return st == TS_INVALID ? TS_CONFLICT : st;
+    if (effect) {
+        st = ts_effect_get(s, key, NULL, NULL);
+        if (st != TS_NOT_FOUND) return st == TS_OK ? TS_CONFLICT : st;
+    }
     tl_head head;
     st = tl_load(s, expected.id, 0, &head);
     if (st) return st;
@@ -140,9 +162,20 @@ ts_status tl_append(ts_store *s, ts_read expected, const uint8_t key[16], const 
     ts_write writes[] = {{head.record.id, TL_HEAD_SCHEMA, head_wire, sizeof head_wire, 0},
                          {0, TL_ENTRY_SCHEMA, entry_wire, size, 0}};
     ts_name name = {1, {0}}; memcpy(name.key, key, 16); ts_receipt receipt;
-    st = ts_commit_named(s, &expected, 1, writes, 2, NULL, 0, &name, 1, &receipt);
+    ts_read reads[TD_DEPENDENCY_LIMIT + 2]; reads[0] = expected;
+    if (count) memcpy(reads + 1, guards, count * sizeof *guards);
+    st = ts_commit_named(s, reads, count + 1, writes, 2, effect, effect ? 1 : 0, &name, 1, &receipt);
     if (!st) { e.record = (ts_record){writes[1].id, 1, receipt.commit, TL_ENTRY_SCHEMA, size}; *out = e; }
     return st;
+}
+
+ts_status tl_append(ts_store *s, ts_read expected, const uint8_t key[16], const tl_value *value, tl_entry *out) {
+    return append_entry(s, expected, key, value, NULL, 0, NULL, out);
+}
+ts_status tl_append_prepared(ts_store *s, ts_read expected, const uint8_t key[16], const tl_value *value,
+                             const ts_read *guards, size_t count, const ts_effect *effect, tl_entry *out) {
+    if (!effect) { if (out) memset(out, 0, sizeof *out); return TS_INVALID; }
+    return append_entry(s, expected, key, value, guards, count, effect, out);
 }
 
 ts_status tl_begin(const tl_head *head, tl_cursor *out) {

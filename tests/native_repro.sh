@@ -9,7 +9,7 @@ R=/data/data/t.t; F=0
 A="$(mktemp -d)"; B=$R/cache/native-repro; trap 'rm -rf "$A" "$B"' EXIT
 rm -rf "$B"; mkdir -p "$B/src"
 sh "$ROOT/native/build.sh" "$ROOT/native" "$A" || exit 1
-python3 "$ROOT/tools/set_interp.py" "$A/bin/threadtest" "$A/bin/dnstest" "$A/bin/nsprobe" "$A/bin/core-publication" "$A/bin/core-resources" "$A/bin/core-replacement" "$A/bin/core-store" "$A/bin/core-documents" "$A/bin/core-streams" >/dev/null
+python3 "$ROOT/tools/set_interp.py" "$A/bin/"* >/dev/null
 tar -C "$ROOT/native" -cf - -T "$ROOT/native/sources.list" | tar -C "$B/src" -xf -
 "$ROOT/tests/phonefs.sh" $R/d/usr/bin/sh $B/src/build.sh $B/src $B/out > "$A/phone.log" 2>&1
 [ $? = 0 ]; r=$?; [ $r = 0 ] && echo "ok    phone-side build (root gcc, phone filesystem, app filter)" || { echo "FAIL  phone-side build"; tail -5 "$A/phone.log"; F=$((F+1)); }

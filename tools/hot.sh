@@ -19,7 +19,9 @@ mkdir -p "$B/z/bin"
 # Native code, by the same script Trough runs on the phone (native/build.sh). Sources ship too,
 # so the phone can rebuild them (Self.buildNative) and compare (SelfTest.nativeRepro).
 CC="$CC_ARM64" sh "$ROOT/native/build.sh" "$ROOT/native" "$B/z"
-python3 "$ROOT/tools/set_interp.py" "$B/z/bin/threadtest" "$B/z/bin/dnstest" "$B/z/bin/nsprobe" "$B/z/bin/core-publication" "$B/z/bin/core-resources" "$B/z/bin/core-replacement" "$B/z/bin/core-store" "$B/z/bin/core-documents" "$B/z/bin/core-streams"
+# Inspect every executable so a newly added scenario cannot miss the phone interpreter fix.
+# Static executables are recognised and left byte-for-byte unchanged.
+python3 "$ROOT/tools/set_interp.py" "$B/z/bin/"*
 mkdir -p "$B/native"
 tar -C "$ROOT/native" -cf - -T "$ROOT/native/sources.list" | tar -C "$B/native" -xf -
 

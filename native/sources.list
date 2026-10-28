@@ -20,9 +20,15 @@ store/document.c
 store/document.h
 store/stream.c
 store/stream.h
+store/task.c
+store/task.h
+store/workspace.c
+store/workspace.h
 scenarios/store.c
 scenarios/documents.c
 scenarios/streams.c
+scenarios/tasks.c
+scenarios/workspace.c
 packages.list
 scenarios/publication.c
 scenarios/resources.c

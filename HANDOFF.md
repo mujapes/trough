@@ -38,6 +38,26 @@ Phone evidence so far: `core.documents` passed against bundle
 `out/evidence/core.documents.json` and `.sig`. This was before the stream/schema-v2 changes;
 those still require publication/device verification at this checkpoint.
 
+Update 07:30 UTC: source checkpoint `b944df7` was published as bundle
+`bbd56708620936a106869a622bf7bb8add681db4b21ef977daa81dfc61699cb6`.
+Both `core.store` (including schema-v2 migration/object repair) and `core.streams` passed
+on the Pixel; signed receipts are in `out/evidence/core.store.json` and `core.streams.json`.
+
+The next source checkpoint adds `native/store/task` and `workspace`: Ask now has one
+atomic effect/stream acceptance; stable workspace roots publish draft + stream + key links
+together. [Task contract](docs/TASKS.md), [workspace contract](docs/WORKSPACES.md).
+Their oracles include full-store rollback, idempotent recovery without resetting edits,
+missing-child errors, ten task SIGKILL cycles and a combined root -> Ask -> later composing
+draft -> SIGKILL -> root-only recovery case. Both pass locally under ASan/UBSan; device
+publication/verification is next. Executable interpreter fixing now inspects all bin outputs,
+so adding a scenario cannot accidentally omit the phone's texec path.
+
+Next automation issue found by inspection: `ScenarioProcess` only destroys its direct child,
+although store scenarios fork and native builds spawn compiler descendants. Before exposing
+build scenarios, add owned descendant cleanup with a native supervisor (process groups,
+subreaper adoption and guarded child enumeration), then prove it on the phone. This is a
+new work item, not an implemented capability at this checkpoint.
+
 Next: finish verifying/publishing this stage-2 work, then continue the remaining ownership
 contracts (workspace/artifact/task records, input persistence queue, indexed text/range
 storage and work planning), preserving the existing loader and autonomous phone loop.

@@ -66,5 +66,9 @@ typedef struct {
 } td_captured;
 ts_status td_capture_encode(const td_capture *, void *, size_t capacity, size_t *size);
 ts_status td_capture_decode(const void *, size_t, td_captured *);
+/* Validate new capture inputs and return their exact read guards for a larger atomic
+ * publication. The owner must pass every returned guard to that same store's commit.
+ * Pure retry acknowledgement should compare the existing capsule without revalidating. */
+ts_status td_capture_validate(ts_store *, const td_capture *, ts_read *, size_t capacity, size_t *count);
 ts_status td_ask(ts_store *, const uint8_t intent[16], const td_capture *, ts_receipt *);
 #endif

@@ -6,7 +6,7 @@
  * A mutable head and an immutable, named entry publish in one durable transaction.
  * Record revisions referenced here must be retained. All calls belong to the store owner. */
 enum { TL_HEAD_SCHEMA = 0x54530101, TL_ENTRY_SCHEMA = 0x54530201,
-       TL_PROVENANCE_LIMIT = 32, TL_PAGE_LIMIT = 64 };
+       TL_PROVENANCE_LIMIT = 32, TL_PAGE_LIMIT = 64, TL_HEAD_SIZE = 40 };
 typedef struct {
     uint32_t kind;                  /* concrete stream family, interpreted by its owner */
     uint64_t created_ms;            /* caller event time; never used to determine order */
@@ -23,6 +23,10 @@ typedef struct {
 } tl_entry;
 typedef struct { uint64_t stream, remaining; uint8_t next[16]; } tl_cursor;
 
+/* Canonical head bytes for typed owners publishing a larger atomic record set (workspace
+ * bootstrap). It serializes only length/last, not the transient ts_record metadata. */
+ts_status tl_head_encode(const tl_head *, void *, size_t capacity, size_t *size);
+
 /* Create/reopen by a stable nonzero key. Reopening preserves all entries. */
 ts_status tl_open(ts_store *, const uint8_t key[16], tl_head *);
 ts_status tl_load(ts_store *, uint64_t id, uint64_t revision, tl_head *);
@@ -31,6 +35,12 @@ ts_status tl_get(ts_store *, const uint8_t key[16], tl_entry *);
  * even when the head has advanced. Different stream/content under that key conflicts.
  * Provenance resolves immutable historical revisions; later edits do not invalidate it. */
 ts_status tl_append(ts_store *, ts_read head, const uint8_t key[16], const tl_value *, tl_entry *);
+/* Atomically append with one prepared effect carrying the same identity and extra captured
+ * read guards (at most TD_DEPENDENCY_LIMIT+1). Both must be new, or both an identical retry.
+ * Existing unrelated entries/effects cannot be retroactively attached. Retry comparisons
+ * ignore current guards, preserve advanced effect state and return the original entry. */
+ts_status tl_append_prepared(ts_store *, ts_read head, const uint8_t key[16], const tl_value *,
+                             const ts_read *, size_t, const ts_effect *, tl_entry *);
 /* Freeze a traversal at this exact head. Page newest-to-oldest, then reverse for display.
  * Concurrent appends cannot move the cursor or introduce duplicate/skipped entries.
  * count=0 on failure; cursor advances only on success, outputs valid only on TS_OK. */

@@ -207,25 +207,16 @@ ts_status td_capture_decode(const void *wire, size_t size, td_captured *out) {
     return TS_OK;
 }
 
-ts_status td_ask(ts_store *s, const uint8_t intent[16], const td_capture *capture, ts_receipt *receipt) {
-    if (!receipt) return TS_INVALID;
-    memset(receipt, 0, sizeof *receipt);
-    if (!s || !intent) return TS_INVALID;
-    uint8_t wire[TD_CAPTURE_LIMIT];
-    size_t size;
-    ts_status st = td_capture_encode(capture, wire, sizeof wire, &size);
-    if (st) return st;
-    ts_effect effect = {{0}, 0, TS_PREPARED, TD_ASK_KIND, wire, size};
-    memcpy(effect.intent, intent, 16);
-    st = ts_effect_get(s, intent, NULL, NULL);
-    if (st == TS_OK) return ts_commit(s, NULL, 0, NULL, 0, &effect, 1, receipt);
-    if (st != TS_NOT_FOUND) return st;
+ts_status td_capture_validate(ts_store *s, const td_capture *capture, ts_read *reads, size_t capacity, size_t *count) {
+    if (!count) return TS_INVALID;
+    *count = 0;
+    if (!s || !capture_valid(capture) || (capacity && !reads)) return TS_INVALID;
+    if (capacity < capture->count + 1) return TS_CAPACITY;
     /* Validate actual typed document bytes, not only a schema tag on arbitrary data. */
     td_snapshot document;
-    st = td_load(s, capture->document.id, 0, &document, NULL, 0);
+    ts_status st = td_load(s, capture->document.id, 0, &document, NULL, 0);
     if (st != TS_OK && st != TS_CAPACITY) return st;
     if (document.record.revision != capture->document.revision) return TS_CONFLICT;
-    ts_read reads[TD_DEPENDENCY_LIMIT + 1];
     reads[0] = capture->document;
     for (size_t i = 0; i < capture->count; i++) {
         const td_reference *r = &capture->dependencies[i];
@@ -236,5 +227,24 @@ ts_status td_ask(ts_store *s, const uint8_t intent[16], const td_capture *captur
         if (current.schema != r->schema) return TS_INVALID;
         reads[i + 1] = (ts_read){r->id, r->revision};
     }
-    return ts_commit(s, reads, capture->count + 1, NULL, 0, &effect, 1, receipt);
+    *count = capture->count + 1;
+    return TS_OK;
+}
+
+ts_status td_ask(ts_store *s, const uint8_t intent[16], const td_capture *capture, ts_receipt *receipt) {
+    if (!receipt) return TS_INVALID;
+    memset(receipt, 0, sizeof *receipt);
+    if (!s || !intent) return TS_INVALID;
+    uint8_t wire[TD_CAPTURE_LIMIT]; size_t size;
+    ts_status st = td_capture_encode(capture, wire, sizeof wire, &size);
+    if (st) return st;
+    ts_effect effect = {{0}, 0, TS_PREPARED, TD_ASK_KIND, wire, size};
+    memcpy(effect.intent, intent, 16);
+    st = ts_effect_get(s, intent, NULL, NULL);
+    if (st == TS_OK) return ts_commit(s, NULL, 0, NULL, 0, &effect, 1, receipt);
+    if (st != TS_NOT_FOUND) return st;
+    ts_read reads[TD_DEPENDENCY_LIMIT + 1]; size_t count;
+    st = td_capture_validate(s, capture, reads, TD_DEPENDENCY_LIMIT + 1, &count);
+    if (st) return st;
+    return ts_commit(s, reads, count, NULL, 0, &effect, 1, receipt);
 }

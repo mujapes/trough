@@ -224,6 +224,13 @@ adds atomic named entries, ordered tails, historical provenance and stable snaps
 ([contract](STREAMS.md)). Retention, indexed text/range storage and actual input/task owners remain construction
 work. Passing these semantic oracles does not establish a complete document engine or UI.
 
+`native/store/task` now joins new Ask capture, its stream entry and the prepared effect in
+one durable publication ([contract](TASKS.md)). Dispatch authority, provider execution and
+output/artifact ownership remain downstream work; the task store itself cannot send requests.
+
+`native/store/workspace` supplies stable roots that publish a draft and stream atomically,
+and recover their current state without view/module-owned IDs ([contract](WORKSPACES.md)).
+
 ## Agent implementation discipline
 
 Before adding code, name the end-state contract it implements and its upstream/downstream

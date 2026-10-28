@@ -32,7 +32,7 @@ def atomic(path, data):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('scenario', choices=['app.observe', 'core.publication', 'core.resources', 'core.replacement', 'core.store', 'core.documents', 'core.streams'])
+    ap.add_argument('scenario', choices=['app.observe', 'core.publication', 'core.resources', 'core.replacement', 'core.store', 'core.documents', 'core.streams', 'core.tasks', 'core.workspace'])
     ap.add_argument('--shared', type=Path, default=Path('/mnt/shared/Download/trough'))
     ap.add_argument('--key', type=Path, default=Path.home()/'.trough/hot-key.pem')
     ap.add_argument('--device-key', type=Path, default=Path.home()/'.trough/device-pubkey.der')

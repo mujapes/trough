@@ -13,5 +13,7 @@ bin/core-replacement
 bin/core-store
 bin/core-documents
 bin/core-streams
+bin/core-tasks
+bin/core-workspace
 fixtures/module-1.so
 fixtures/module-2.so
