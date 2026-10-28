@@ -58,7 +58,9 @@ Evidence:
   the right clip edge exclusive gives 430 bad pixels, exactly those whose centres lie on clip
   edges.
 - Pixel 7, Mali-G710 (`android.scene`, bundle `17eb422716f5...`): 1047177 pixels, 0 bad, max
-  channel diff 0. Clear+readback 1.73 ms; 20000-rectangle stress 374 ms.
+  channel diff 0. Clear+readback 1.73 ms; 20000-rectangle stress 374 ms. With UI-sized
+  rectangles (up to 64 px), 20000 take 9.95 ms at 1080x1920.
+- Glyphs and platform text: [TEXT_RENDERING.md](TEXT_RENDERING.md).
 
 ## Not yet built
 
