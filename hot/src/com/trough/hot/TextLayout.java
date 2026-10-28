@@ -67,10 +67,11 @@ final class TextLayout {
             int lineEnd = result.getLineBreakOffset(i);
             Line l = new Line();
             l.start = start + lineStart; l.end = start + lineEnd; l.rtl = paragraphRtl;
-            /* Per-line extents include fallback fonts on the line (taller scripts), rounded to
-             * whole pixels as the platform's integer font metrics are, so lines stack on pixels. */
-            l.top = top; l.baseline = top - Math.round(result.getLineAscent(i));
-            l.bottom = l.baseline + Math.round(result.getLineDescent(i));
+            /* The paint's own metrics, extended (never shrunk) by fallback fonts on the line, in
+             * whole pixels as the platform's integer font metrics are (StaticLayout's rule). */
+            int lineAscent = Math.max(Math.round(ascent), Math.round(-result.getLineAscent(i)));
+            int lineDescent = Math.max(Math.round(descent), Math.round(result.getLineDescent(i)));
+            l.top = top; l.baseline = top + lineAscent; l.bottom = l.baseline + lineDescent;
             l.width = result.getLineWidth(i);
             /* Trailing whitespace is not drawn; the line's runs in visual order. */
             int visibleEnd = lineEnd;
