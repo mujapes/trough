@@ -13,6 +13,7 @@ bin/core-replacement
 bin/core-derive
 bin/core-exec
 bin/core-blobs
+bin/core-atlas
 bin/core-store
 bin/core-documents
 bin/core-streams

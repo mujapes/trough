@@ -21,6 +21,8 @@ Done: android.view ([doc](docs/VIEW.md)): layout -> height summaries -> viewport
 equal a flat reference, edit costs exact (below viewport 0 jobs, same-height edit cuts off the scene),
 GPU pixels equal platform. dv_set_static for fixed-dep operators. Next: glyph-mask nodes + atlas
 resource with fence leases in the presenter; estimated heights for unmeasured paragraphs.
+Done: native/core/atlas ([doc](docs/ATLAS.md)), fence-watermark residency, size-class pages, reclamation;
+core.atlas shadow-GPU oracle 6/6 mutants. Next: presenter integration (mask nodes, partial uploads, N frames in flight).
 
 DECIDED (2026-10-28): the Java/native boundary is a bionic build of the same sources, loaded
 in-process (docs/BIONIC.md). All store oracles pass as bionic programs on the Pixel; android.jni

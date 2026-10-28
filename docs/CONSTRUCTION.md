@@ -258,7 +258,8 @@ so early cutoff covers large outputs. The graph and the executor retain values a
 replacement and job lifetimes ([contract](BLOBS.md)). The first real operator, platform
 paragraph layout on executor workers through JNI, is verified on the Pixel ([LAYOUT_DERIVE.md](LAYOUT_DERIVE.md)).
 A viewport scene derives from layouts through height summaries, and the GPU draws it
-identically to the platform ([VIEW.md](VIEW.md)).
+identically to the platform ([VIEW.md](VIEW.md)). Atlas residency with fence lifetimes
+(`native/core/atlas`, [ATLAS.md](ATLAS.md)) is the first GPU-fenced resource contract.
 
 ## Agent implementation discipline
 

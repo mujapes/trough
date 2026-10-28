@@ -34,6 +34,8 @@ core/exec.c
 core/exec.h
 core/blobs.c
 core/blobs.h
+core/atlas.c
+core/atlas.h
 store/store.c
 store/store.h
 store/document.c
@@ -69,5 +71,6 @@ scenarios/replacement.c
 scenarios/derive.c
 scenarios/exec.c
 scenarios/blobs.c
+scenarios/atlas.c
 scenarios/fixtures/api.h
 scenarios/fixtures/implementation.c
