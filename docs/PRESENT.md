@@ -62,14 +62,33 @@ Evidence:
   rectangles (up to 64 px), 20000 take 9.95 ms at 1080x1920.
 - Glyphs and platform text: [TEXT_RENDERING.md](TEXT_RENDERING.md).
 
+## Presenter on a Surface
+
+`ps_swapchain` / `ps_present` (scene.c) render the rectangle and glyph scene into a FIFO
+swapchain. `ps_present` reports 1 when the swapchain is out of date or suboptimal, and the
+caller rebuilds it. `android.surface` presents rectangles and shaped text (Latin, Arabic,
+Devanagari, CJK, Greek) to a SurfaceView. It copies each presented image before present, and
+the copy must equal the offscreen render of the same scene byte for byte, both before and
+after the view grows from 480 to 760 px (the swapchain is rebuilt).
+
+The swapchain extent is the caller's size from `surfaceChanged`, clamped to the surface's
+min/max. It is not `currentExtent`. The first Pixel run used `currentExtent`, which still
+said 1080x480 after `surfaceChanged(1080x760)`. The swapchain kept the old size, and the
+readback differed in exactly the 280 new rows (1209600 bytes). Android's swapchain sizes the
+window's buffers from `imageExtent`, so the callback's size is authoritative. On X11 and
+lavapipe, min = max = current, so the clamp still gives the current size. The JNI now refuses
+a readback whose size disagrees with the swapchain (status -2), so this fault cannot be silent again.
+Bundle `231f03730cdb...`: 0 differing bytes at 1080x480 and at 1080x760. Steady FIFO presents
+take 14.6 ms of CPU wall time on average, which includes waiting for the next 60 Hz image.
+
 ## Not yet built
 
 The presenter proper:
-- swapchain recreation on resize and rotation (`VK_ERROR_OUT_OF_DATE_KHR`, `SUBOPTIMAL`);
-- pipelines and shaders for the retained scene; glyph atlas and text;
+- rotation (pre-transform) and recreation driven by `SurfaceHolder` callbacks, not by the test;
+- pipelines for the retained scene beyond rectangles and glyph masks;
 - damage, so an unchanged scene presents nothing;
 - presentation timing via `VK_GOOGLE_display_timing` or Choreographer and fences;
-- surface lifetime tied to `SurfaceHolder` callbacks;
+- surface lifetime tied to `SurfaceHolder` callbacks (destroy, recreate, background);
 - protected and HDR formats.
 
 The probe proves the substrate on the device; it is not a renderer.

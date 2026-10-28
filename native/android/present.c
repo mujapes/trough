@@ -249,8 +249,12 @@ JNIEXPORT jbyteArray JNICALL CLASS(surfacePresent)(JNIEnv *env, jclass c, jlong 
     double out[2] = {-1, 0};
     jbyteArray pixels = NULL;
     jsize nr = rects ? (*env)->GetArrayLength(env, rects) : 0, ng = glyphs ? (*env)->GetArrayLength(env, glyphs) : 0;
+    uint32_t ew, eh;
+    ps_extent(p->g, &ew, &eh);
     uint8_t *rgba = shot ? malloc((size_t)w * h * 4) : NULL;
-    int st = nr % 12 || ng % 16 || (shot && !rgba) ? -1 : upload(env, p->g, atlas, aw, ah);
+    /* A shot is only taken at the swapchain's own size (-2: the caller's size disagrees). */
+    int st = nr % 12 || ng % 16 || (shot && !rgba) ? -1 : shot && (ew != (uint32_t)w || eh != (uint32_t)h) ? -2
+        : upload(env, p->g, atlas, aw, ah);
     jfloat *r = !st && nr ? (*env)->GetFloatArrayElements(env, rects, NULL) : NULL;
     jfloat *g = !st && ng ? (*env)->GetFloatArrayElements(env, glyphs, NULL) : NULL;
     if (!st) st = ps_present(p->g, (const ps_rect *)r, (size_t)nr / 12, (const ps_glyph *)g, (size_t)ng / 16, rgba, &out[1]);

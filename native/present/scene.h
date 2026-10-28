@@ -46,6 +46,8 @@ int ps_swapchain(ps_gpu *, uint64_t surface, uint32_t w, uint32_t h);
 /* Draws one frame (rects, then glyphs) into the next swapchain image and presents it. If rgba
  * is non-null the presented image is also copied there (w*h*4). Returns 0, 1 if the swapchain
  * is out of date or suboptimal (call ps_swapchain again), or a negative VkResult. */
+/* The swapchain's extent (0 x 0 without one): the size of ps_present's rgba. */
+void ps_extent(ps_gpu *, uint32_t *w, uint32_t *h);
 int ps_present(ps_gpu *, const ps_rect *, size_t rects, const ps_glyph *, size_t glyphs, uint8_t *rgba, double *cpu_ms);
 void ps_close(ps_gpu *);
 #endif

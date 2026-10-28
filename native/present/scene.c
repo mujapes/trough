@@ -423,8 +423,13 @@ int ps_swapchain(ps_gpu *g, uint64_t handle, uint32_t w, uint32_t h) {
     for (uint32_t i = 0; i < nf; i++) if (formats[i].format == FORMAT) found = (int)i;
     /* The scene's render pass is RGBA8 UNORM; a surface without it is not supported yet. */
     if (found < 0) return fail(VK_ERROR_FORMAT_NOT_SUPPORTED);
-    VkExtent2D extent = caps.currentExtent;
-    if (extent.width == UINT32_MAX) extent = (VkExtent2D){w, h};
+    /* The caller's size (the platform's resize callback) wins within the surface's limits:
+     * Android's currentExtent lags a resize, and its swapchain sizes the window's buffers from
+     * imageExtent. Where min = max = current (X11), the clamp gives the current size. */
+    if (!w || !h) return fail(VK_ERROR_OUT_OF_DATE_KHR);
+    VkExtent2D extent = {
+        w < caps.minImageExtent.width ? caps.minImageExtent.width : w > caps.maxImageExtent.width ? caps.maxImageExtent.width : w,
+        h < caps.minImageExtent.height ? caps.minImageExtent.height : h > caps.maxImageExtent.height ? caps.maxImageExtent.height : h};
     if (!extent.width || !extent.height) return fail(VK_ERROR_OUT_OF_DATE_KHR);
     uint32_t want = caps.minImageCount + 1;
     if (caps.maxImageCount && want > caps.maxImageCount) want = caps.maxImageCount;
@@ -463,6 +468,11 @@ int ps_swapchain(ps_gpu *g, uint64_t handle, uint32_t w, uint32_t h) {
         g->shot_size = need;
     }
     return 0;
+}
+
+void ps_extent(ps_gpu *g, uint32_t *w, uint32_t *h) {
+    *w = g && g->swapchain ? g->extent.width : 0;
+    *h = g && g->swapchain ? g->extent.height : 0;
 }
 
 int ps_present(ps_gpu *g, const ps_rect *rects, size_t count, const ps_glyph *glyphs, size_t nglyphs, uint8_t *rgba, double *cpu_ms) {

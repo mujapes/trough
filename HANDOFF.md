@@ -14,7 +14,10 @@ damage), or stage-3 work planning. Rectangle and glyph renderer with pixel oracl
 Mali exact); text = platform TextRunShaper + Canvas.drawGlyphs masks + Trough GPU composition,
 pixel-identical to the platform across 7 scripts (docs/TEXT_RENDERING.md).
 TextLayout (Bidi + LineBreaker + TextRunShaper) equals StaticLayout on 115 lines (android.layout).
-Presenter swapchain path written; android.surface needs Trough visible and has not run yet. The InputConnection adapter exists
+Carets and taps follow Layout's rules (primary-caret levels, nearest cursor stop): 0/2132 caret and
+0/7653 tap mismatches vs StaticLayout on bundle fc978451ba7c.
+Presenter on a Surface verified (android.surface, bundle 231f03730cdb): byte-identical to offscreen before and
+after a resize; the swapchain extent now comes from surfaceChanged, not the lagging currentExtent. The InputConnection adapter exists
 (docs/INPUT.md): android.ime matches SDK 37's BaseInputConnection over 16000 random IME ops.
 
 Latest (late night): `native/store/keeper`, the storage owner thread ([contract](docs/KEEPER.md)):
