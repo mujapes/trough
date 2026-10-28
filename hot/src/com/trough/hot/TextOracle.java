@@ -48,9 +48,11 @@ final class TextOracle {
                 int id = pg.getGlyphId(j);
                 int x = Math.round(pg.getGlyphX(j)), y = Math.round(pg.getGlyphY(j));
                 fonts.add(font);
-                String key = System.identityHashCode(font) + ":" + id;
+                /* The platform's glyph masks depend on the text colour's luminance (Skia's
+                 * contrast/gamma preblend), so masks are made with the run's opaque colour. */
+                String key = System.identityHashCode(font) + ":" + id + ":" + (COLORS[i] & 0xffffff);
                 int[] m = cache.get(key);
-                if (m == null) { m = rasterise(font, id, base, atlas, shelf); cache.put(key, m); }
+                if (m == null) { m = rasterise(font, id, base, COLORS[i] | 0xff000000, atlas, shelf); cache.put(key, m); }
                 if (m == null) continue;                       // empty glyph (space)
                 glyphCount++;
                 float x0 = x + m[4], y0 = y + m[5];
@@ -94,7 +96,7 @@ final class TextOracle {
     }
 
     /** Rasterises one glyph's coverage into the atlas; {ax, ay, w, h, left, top} or null if empty. */
-    private static int[] rasterise(Font font, int id, Paint base, byte[] atlas, int[] shelf) {
+    private static int[] rasterise(Font font, int id, Paint base, int opaque, byte[] atlas, int[] shelf) {
         RectF b = new RectF();
         font.getGlyphBounds(id, base, b);
         if (b.isEmpty()) return null;
@@ -106,7 +108,7 @@ final class TextOracle {
         shelf[0] += w; shelf[2] = Math.max(shelf[2], h);
         Bitmap mask = Bitmap.createBitmap(w, h, Bitmap.Config.ALPHA_8);
         Paint p = new Paint(base);
-        p.setColor(Color.BLACK);
+        p.setColor(opaque);
         new Canvas(mask).drawGlyphs(new int[]{id}, 0, new float[]{-left, -top}, 0, 1, font, p);
         ByteBuffer buf = ByteBuffer.allocate(mask.getRowBytes() * h);
         mask.copyPixelsToBuffer(buf);
