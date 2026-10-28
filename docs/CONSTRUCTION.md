@@ -215,6 +215,10 @@ and dynamic-library replacement scenarios. The signed development controller run
 scenarios on the phone and binds receipts to the exact bundle/runtime. Full presentation,
 input, audio and application-owned orchestration remain downstream obligations.
 
+`build.native` now rebuilds the signed bundle's native sources under owned process supervision
+and compares the complete output inventory on the phone ([contract](BUILDS.md)). It does not
+activate the candidate or complete the build-task/resource-admission integration.
+
 Stage 2 includes `native/store/store` (SQLite revisions, atomic read-validated commits,
 durable effect lifecycle, bounded outbox recovery, verified immutable objects) and
 `native/store/document` (canonical UTF-16 documents, pure edit batches, durable save receipts,

@@ -2,6 +2,15 @@
 
 ## Active continuation (2026-10-28)
 
+The next automation dependency is now implemented: `build.native` uses `NativeReproduction`
+and the native supervisor to rebuild immutable bundle sources, run tfix and compare all 22
+outputs byte-for-byte, with bounded memory/output and scratch/descendant cleanup. No candidate
+installation. `SelfTest.nativeRepro` uses the same executor; the signed controller/loop include
+the scenario. See [BUILDS.md](docs/BUILDS.md). All 25 protocol + 16 reproduction JVM checks and
+the Android DEX build pass. Phone bundle `53c97e3ffb698f7ac79bae2a4f828f206a0d4a8dd6cd0c36373c684c55230f8a`
+passed all output comparisons (native build 8515 ms); signed evidence in `out/evidence/`.
+Continue remaining stage-2 ownership, indexed text and work planning after CI/loader verification.
+
 Resumed after the user's VM interruption. User clarified free compute means **GitHub Actions
 standard runners for this public repository**, not Codespaces. The mistakenly created unused
 Codespace was deleted and the account's list confirmed empty. Do not create another for this

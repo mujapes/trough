@@ -182,10 +182,7 @@ final class Self {
     }
 
     static String[] nativeOutputs(File build) throws Exception {
-        String[] paths = new String(Payloads.readSmall(new File(build, "outputs.list")), "UTF-8").trim().split("\\s+");
-        for (String path : paths) if (!path.matches("(bin|lib|fixtures)/[a-zA-Z0-9_.-]+"))
-            throw new IllegalArgumentException("invalid native output path");
-        return paths;
+        return NativeReproduction.outputs(build);
     }
 
     /**

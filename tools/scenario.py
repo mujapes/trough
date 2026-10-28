@@ -32,16 +32,18 @@ def atomic(path, data):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('scenario', choices=['app.observe', 'core.publication', 'core.resources', 'core.replacement', 'core.store', 'core.documents', 'core.streams', 'core.tasks', 'core.workspace', 'core.processes'])
+    ap.add_argument('scenario', choices=['app.observe', 'core.publication', 'core.resources', 'core.replacement', 'core.store', 'core.documents', 'core.streams', 'core.tasks', 'core.workspace', 'core.processes', 'build.native'])
     ap.add_argument('--shared', type=Path, default=Path('/mnt/shared/Download/trough'))
     ap.add_argument('--key', type=Path, default=Path.home()/'.trough/hot-key.pem')
     ap.add_argument('--device-key', type=Path, default=Path.home()/'.trough/device-pubkey.der')
     ap.add_argument('--pin-device-key', action='store_true')
-    ap.add_argument('--timeout', type=int, default=45)
+    ap.add_argument('--timeout', type=int, help='seconds (default: 240 for build.native, otherwise 45)')
     ap.add_argument('--out', type=Path)
     args = ap.parse_args()
-    if not 1 <= args.timeout <= 120:
-        ap.error('timeout must be 1..120 seconds')
+    if args.timeout is None:
+        args.timeout = 240 if args.scenario == 'build.native' else 45
+    if not 1 <= args.timeout <= 290:
+        ap.error('timeout must be 1..290 seconds')
     if not args.device_key.exists():
         if not args.pin_device_key:
             ap.error('device key is not pinned; use --pin-device-key for initial pairing')

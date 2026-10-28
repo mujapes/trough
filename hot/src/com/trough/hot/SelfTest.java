@@ -67,23 +67,8 @@ final class SelfTest {
      * its sources) is byte-identical to what the VM built into this bundle.
      */
     static JSONObject nativeRepro(Context ctx, File bundle) throws Exception {
-        File out = new File(ctx.getCacheDir(), "native-repro");
-        Main.deleteTree(out);
-        String d = new File(ctx.getDataDir(), "d").getPath();
-        JSONObject r = new JSONObject();
-        r.put("build", exec(ctx.getCacheDir(), ctx, null, 600, "/system/bin/sh",
-            new File(bundle, "src/native/build.sh").getPath(), new File(bundle, "src/native").getPath(), out.getPath()));
-        r.put("tfix", exec(ctx.getCacheDir(), ctx, null, 60, d + "/usr/libexec/trough/tfix", out.getPath()));
-        JSONObject same = new JSONObject();
-        boolean all = true;
-        for (String f : Self.nativeOutputs(bundle)) {
-            File a = new File(bundle, f), b = new File(out, f);
-            boolean eq = a.isFile() && b.isFile() && java.util.Arrays.equals(Payloads.readSmall(a), Payloads.readSmall(b));
-            same.put(f, eq);
-            all &= eq;
-        }
-        Main.deleteTree(out);
-        return r.put("identical", same).put("ok", all);
+        return new JSONObject(Json.write(NativeReproduction.run(bundle,ctx.getCacheDir(),Root.env(ctx,ctx.getCacheDir()),
+            "/system/bin/sh",new File(ctx.getDataDir(),"d/usr/libexec/trough/tfix").getAbsolutePath())));
     }
 
     /**

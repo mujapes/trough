@@ -27,7 +27,7 @@ final class Development implements AutoCloseable, ScenarioProtocol.Handler {
     public boolean supports(String name) {
         return "app.observe".equals(name) || "core.publication".equals(name) ||
             "core.resources".equals(name) || "core.replacement".equals(name) || "core.store".equals(name) ||
-            "core.documents".equals(name) || "core.streams".equals(name) || "core.tasks".equals(name) || "core.workspace".equals(name) || "core.processes".equals(name);
+            "core.documents".equals(name) || "core.streams".equals(name) || "core.tasks".equals(name) || "core.workspace".equals(name) || "core.processes".equals(name) || "build.native".equals(name);
     }
     public Map<String,Object> execute(String name) throws Exception {
         if(closed) throw new InterruptedException();
@@ -40,7 +40,7 @@ final class Development implements AutoCloseable, ScenarioProtocol.Handler {
                         "density",activity.getResources().getDisplayMetrics().density,
                         "sdk",android.os.Build.VERSION.SDK_INT,"device",android.os.Build.MODEL,
                         "multi_window",activity.isInMultiWindowMode(),
-                        "scenarios",Arrays.asList("app.observe","core.publication","core.resources","core.replacement","core.store","core.documents","core.streams","core.tasks","core.workspace","core.processes"));
+                        "scenarios",Arrays.asList("app.observe","core.publication","core.resources","core.replacement","core.store","core.documents","core.streams","core.tasks","core.workspace","core.processes","build.native"));
                 }
             });
             activity.runOnUiThread(result);
@@ -50,6 +50,8 @@ final class Development implements AutoCloseable, ScenarioProtocol.Handler {
         String executable=new File(bundle,"bin/"+name.replace('.','-')).getPath();
         File supervisor=new File(bundle,"bin/trough-run");
         Map<String,String> env=Root.env(activity,activity.getCacheDir());
+        if("build.native".equals(name)) return NativeReproduction.run(bundle,activity.getCacheDir(),env,
+            "/system/bin/sh",new File(activity.getDataDir(),"d/usr/libexec/trough/tfix").getAbsolutePath());
         if("core.replacement".equals(name)) return ScenarioProcess.run(supervisor,activity.getCacheDir(),env,20,executable,
             new File(bundle,"fixtures/module-1.so").getPath(),new File(bundle,"fixtures/module-2.so").getPath());
         if("core.store".equals(name) || "core.documents".equals(name) || "core.streams".equals(name) || "core.tasks".equals(name) || "core.workspace".equals(name) || "core.processes".equals(name)) {
