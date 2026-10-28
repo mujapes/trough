@@ -5,7 +5,7 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 W=$(mktemp -d)
 trap 'rm -rf "$W"' EXIT
-${CC:-cc} -std=c11 -O2 -g -Wall -Wextra -Werror ${CORE_CFLAGS:-} -I"$ROOT/native/present" \
-    "$ROOT/native/present/scene.c" "$ROOT/native/present/oracle.c" "$ROOT/native/scenarios/scene.c" \
+${CC:-cc} -std=c11 -O2 -g -Wall -Wextra -Werror ${CORE_CFLAGS:-} -I"$ROOT/native/present" -I"$ROOT/native/core" \
+    "$ROOT/native/present/scene.c" "$ROOT/native/present/oracle.c" "$ROOT/native/core/atlas.c" "$ROOT/native/scenarios/scene.c" \
     -lvulkan -lm -o "$W/oracle"
 VK_ICD_FILENAMES=${VK_ICD_FILENAMES:-/usr/share/vulkan/icd.d/lvp_icd.json} "$W/oracle"

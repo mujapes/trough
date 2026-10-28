@@ -23,6 +23,9 @@ GPU pixels equal platform. dv_set_static for fixed-dep operators. Next: glyph-ma
 resource with fence leases in the presenter; estimated heights for unmeasured paragraphs.
 Done: native/core/atlas ([doc](docs/ATLAS.md)), fence-watermark residency, size-class pages, reclamation;
 core.atlas shadow-GPU oracle 6/6 mutants. Next: presenter integration (mask nodes, partial uploads, N frames in flight).
+Done: ps_frames_* (3-frame ring, GENERAL-layout atlas, partial uploads, in-order fence retirement);
+android.frames on Mali: 300 frames, 200 overlapped, 0 bad; fence-ignoring mutant gives 1527 bad pixels.
+Next: glyph-mask nodes + view scene through the frame ring to the swapchain (needs Trough visible).
 
 DECIDED (2026-10-28): the Java/native boundary is a bionic build of the same sources, loaded
 in-process (docs/BIONIC.md). All store oracles pass as bionic programs on the Pixel; android.jni

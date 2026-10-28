@@ -189,3 +189,120 @@ int ps_glyph_oracle(char *out, size_t capacity) {
         info, st, SCENES, (unsigned long long)pixels, (unsigned long long)bad, (unsigned long long)large, max_diff, first);
     return !st && !bad && !large && pixels;
 }
+
+/* Frames in flight over a residency-managed atlas (docs/ATLAS.md). Glyph keys drift so the
+ * small atlas evicts constantly; up to PS_FRAMES frames are in flight. Each upload must avoid
+ * every rectangle an unretired frame samples (shadow check); each retired frame's pixels must
+ * equal a CPU composition from the true masks, so a stale or overwritten atlas texel would
+ * show. overlapped counts submissions made while earlier frames were still pending. */
+#include "atlas.h"
+static void mask_of(uint64_t key, uint8_t *m, uint16_t *w, uint16_t *h) {
+    uint64_t s = key * 0x9e3779b97f4a7c15ULL;
+    *w = (uint16_t)(4 + (s >> 20) % 37); *h = (uint16_t)(4 + (s >> 30) % 37);
+    for (uint32_t i = 0; i < (uint32_t)*w * *h; i++) { s ^= s << 13; s ^= s >> 7; s ^= s << 17; m[i] = (uint8_t)(s >> 24); }
+}
+int ps_frames_oracle(char *out, size_t capacity) {
+    enum { FW = 256, FH = 192, AW = 512, AH = 512, FRAMES = 300, PER = 90, KEYS = 2000 };
+    ps_gpu *g;
+    char info[300] = "";
+    int st = ps_open(&g, info, sizeof info);
+    if (st) { snprintf(out, capacity, "{\"ok\":false,\"error\":\"open %d\"}", st); return 0; }
+    if (!st) st = ps_frames_init(g, FW, FH, AW, AH);
+    at_atlas atlas; static at_cell cells[(AW / 16) * (AH / 16)]; static uint32_t idx[8192]; int32_t pages[(AW / 256) * (AH / 256)];
+    if (!st && at_init(&atlas, AW, AH, 256, cells, sizeof cells / sizeof cells[0], idx, 8192, pages)) st = -1;
+    typedef struct { ps_glyph q[PER]; uint64_t key[PER]; uint16_t x[PER], y[PER]; int n; uint64_t number; } frame_rec;
+    frame_rec *rec = calloc(2 * PS_FRAMES, sizeof *rec);
+    /* Frames are built in bursts of PS_FRAMES and then submitted back to back, so later
+     * submissions really go in while earlier frames are pending. */
+    uint8_t *pixels = malloc((size_t)PS_FRAMES * PER * 40 * 40), *gpu = malloc(FW * FH * 4), *ref = malloc(FW * FH * 4), *depth = malloc(FW * FH);
+    uint8_t mask[40 * 40];
+    ps_upload up[PS_FRAMES][PER]; size_t nup[PS_FRAMES], bytes[PS_FRAMES]; frame_rec *built[PS_FRAMES];
+    uint64_t bad = 0, checked = 0, uploads = 0, refused = 0, overlapped = 0, violations = 0;
+    int max_diff = 0; char first[200] = "";
+    rng = 99;
+    for (int fno = 0; fno < FRAMES && !st && rec && pixels && gpu && ref && depth; ) {
+        int burst = 0;
+        for (; burst < PS_FRAMES && fno < FRAMES; burst++, fno++) {
+            frame_rec *fr = &rec[fno % (2 * PS_FRAMES)];
+            fr->n = 0; fr->number = 0;
+            uint8_t *px = pixels + (size_t)burst * PER * 40 * 40;
+            nup[burst] = 0; bytes[burst] = 0; built[burst] = fr;
+            for (int k = 0; k < PER; k++) {
+                uint64_t key = next(10) < 8 ? (uint64_t)fno / 6 * 5 + next(60) + 1 : next(KEYS) + 1;   /* drifting hot set */
+                uint16_t w, h; mask_of(key, mask, &w, &h);
+                at_rect r;
+                tr_status sr = at_use(&atlas, key, w, h, &r);
+                if (sr == TR_CAPACITY) { refused++; continue; }
+                if (sr == TR_STALE) {
+                    /* Shadow: no frame still in flight, already built in this burst, or this one,
+                     * samples this origin for another key. */
+                    uint64_t done = ps_frames_retired(g);
+                    for (int o = 0; o < 2 * PS_FRAMES; o++) {
+                        frame_rec *x = &rec[o];
+                        int live = x == fr || (x->number && x->number > done);
+                        for (int b = 0; b < burst; b++) if (built[b] == x) live = 1;
+                        for (int j = 0; live && j < x->n; j++) if (x->x[j] == r.x && x->y[j] == r.y && x->key[j] != key) violations++;
+                    }
+                    memcpy(px + bytes[burst], mask, (size_t)w * h);
+                    up[burst][nup[burst]++] = (ps_upload){r.x, r.y, w, h, (uint32_t)bytes[burst]};
+                    bytes[burst] += (size_t)w * h; uploads++;
+                }
+                ps_glyph *q = &fr->q[fr->n];
+                float x0 = (float)next(FW + 20) - 10, y0 = (float)next(FH + 20) - 10;
+                q->x0 = x0; q->y0 = y0; q->x1 = x0 + w; q->y1 = y0 + h; q->u = r.x; q->v = r.y; q->unused0 = q->unused1 = 0;
+                q->cx0 = -1e6f; q->cy0 = -1e6f; q->cx1 = 1e6f; q->cy1 = 1e6f;
+                float a = (float)(1 + next(255)) / 255.0f;
+                q->r = a * (float)next(256) / 255.0f; q->g = a * (float)next(256) / 255.0f; q->b = a * (float)next(256) / 255.0f; q->a = a;
+                fr->key[fr->n] = key; fr->x[fr->n] = r.x; fr->y[fr->n] = r.y; fr->n++;
+            }
+            at_submit(&atlas);                            /* the atlas's frame order = submission order */
+        }
+        for (int b = 0; b < burst && !st; b++) {
+            if (ps_frames_pending(g) > 0) overlapped++;
+            st = ps_frame_submit(g, up[b], nup[b], pixels + (size_t)b * PER * 40 * 40, bytes[b], NULL, 0,
+                                 built[b]->q, (size_t)built[b]->n, &built[b]->number);
+        }
+        if (st) break;
+        /* Let the burst retire (its slots are needed next), then check every retired frame. */
+        if ((st = ps_frames_wait(g, built[burst - 1]->number))) break;
+        uint64_t done = ps_frames_retired(g);
+        at_retire(&atlas, done);
+        for (int o = 0; o < 2 * PS_FRAMES; o++) {
+            frame_rec *x = &rec[o];
+            if (!x->number || x->number > done) continue;
+            if (ps_frame_pixels(g, x->number, gpu)) { x->number = 0; continue; }
+            memset(ref, 0, FW * FH * 4); memset(depth, 0, FW * FH);
+            for (int j = 0; j < x->n; j++) {
+                const ps_glyph *q = &x->q[j]; uint16_t w, h; mask_of(x->key[j], mask, &w, &h);
+                for (int y = (int)q->y0; y < (int)q->y1; y++) for (int xx = (int)q->x0; xx < (int)q->x1; xx++) {
+                    if (xx < 0 || y < 0 || xx >= FW || y >= FH) continue;
+                    float cov = (float)mask[(y - (int)q->y0) * w + xx - (int)q->x0] / 255.0f;
+                    float src[4] = {q->r * cov, q->g * cov, q->b * cov, q->a * cov};
+                    uint8_t *p = ref + ((size_t)y * FW + xx) * 4;
+                    for (int ch = 0; ch < 4; ch++) p[ch] = unorm(src[ch] + (float)p[ch] / 255.0f * (1.0f - src[3]));
+                    if (depth[(size_t)y * FW + xx] < 255) depth[(size_t)y * FW + xx]++;
+                }
+            }
+            for (size_t p = 0; p < (size_t)FW * FH; p++) {
+                int worst = 0;
+                for (int ch = 0; ch < 4; ch++) { int d = abs(gpu[p * 4 + ch] - ref[p * 4 + ch]); if (d > worst) worst = d; }
+                if (worst > max_diff) max_diff = worst;
+                if (worst > 1 + depth[p] && !bad++)
+                    snprintf(first, sizeof first, "frame %llu pixel %zu,%zu ref %u,%u,%u,%u gpu %u,%u,%u,%u", (unsigned long long)x->number,
+                             p % FW, p / FW, ref[p*4], ref[p*4+1], ref[p*4+2], ref[p*4+3], gpu[p*4], gpu[p*4+1], gpu[p*4+2], gpu[p*4+3]);
+            }
+            checked++;
+            x->number = 0;
+        }
+    }
+    ps_close(g);
+    free(rec); free(pixels); free(gpu); free(ref); free(depth);
+    for (char *c = info; *c; c++) if (*c == '"' || *c == '\\') *c = '\'';
+    int ok = !st && !bad && !violations && checked == FRAMES && overlapped >= FRAMES / 2;
+    snprintf(out, capacity, "{\"ok\":%s,\"device\":\"%s\",\"status\":%d,\"frames\":%d,\"checked\":%llu,\"overlapped\":%llu,"
+        "\"uploads\":%llu,\"evictions\":%llu,\"refused\":%llu,\"violations\":%llu,\"bad_pixels\":%llu,\"max_channel_diff\":%d,\"first_bad\":\"%s\"}",
+        ok ? "true" : "false", info, st, FRAMES, (unsigned long long)checked, (unsigned long long)overlapped,
+        (unsigned long long)uploads, (unsigned long long)atlas.evictions, (unsigned long long)refused,
+        (unsigned long long)violations, (unsigned long long)bad, max_diff, first);
+    return ok;
+}

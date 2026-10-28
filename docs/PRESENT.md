@@ -81,6 +81,10 @@ a readback whose size disagrees with the swapchain (status -2), so this fault ca
 Bundle `231f03730cdb...`: 0 differing bytes at 1080x480 and at 1080x760. Steady FIFO presents
 take 14.6 ms of CPU wall time on average, which includes waiting for the next 60 Hz image.
 
+## Frames in flight
+
+Offscreen frame ring with partial atlas uploads and fence retirement: see [ATLAS.md](ATLAS.md).
+
 ## Not yet built
 
 The presenter proper:

@@ -42,11 +42,44 @@ Results (ASan/UBSan):
   marking the frame, eviction leaving the old key indexed, retiring the recording frame, no
   reclamation.
 
+## On the GPU: frames in flight (`ps_frames_*`, `android.frames`)
+
+`native/present/scene.c` keeps a ring of `PS_FRAMES` (3) offscreen frames. Each has its own
+command buffer, fence, target, readback, instance buffers and upload staging. The atlas is
+created once, cleared, and kept in `VK_IMAGE_LAYOUT_GENERAL` for its whole life.
+
+A frame records three things:
+- its uploads, one `vkCmdCopyBufferToImage` region per rectangle;
+- a barrier from those writes to its own fragment reads;
+- the draw and a readback.
+
+Nothing orders a frame's uploads after earlier frames' sampling: the residency rule (no
+overwrite of a region an unretired frame samples) is what makes that safe.
+`ps_frames_retired` reads fences in submission order and feeds `at_retire`.
+
+`ps_frames_oracle` (lavapipe in the VM through `tests/core_scene.sh`; Mali through
+`android.frames`) draws 300 frames of 90 glyphs from a drifting key set over a 512x512 atlas.
+Frames are built in bursts of 3 and submitted back to back, so 200 submissions go in while
+earlier frames are pending. Each upload is checked against a shadow of what unretired frames
+sample. Each retired frame's readback is compared with a CPU composition from the true masks.
+
+| run | frames checked | overlapped | evictions | violations | bad pixels |
+|---|---|---|---|---|---|
+| lavapipe | 300 | 200 | 4254 | 0 | 0 |
+| Mali-G710 (bundle `e1cbd3e1a3cb`, twice) | 300 | 200 | 4254 | 0 | 0 (max diff 1) |
+| Mali-G710, eviction ignoring fences (mutant) | 300 | 199 | 5852 | 1932 | **1527 (max diff 204)** |
+
+The mutant shows the hazard is real on this GPU: overwriting cells that in-flight frames
+sample corrupts their pixels.
+
+The Khronos validation layer (1.4.309, synchronization validation enabled and confirmed
+active) reported nothing for this path. It also reported nothing when the frame's own
+copy-to-sample barrier was deliberately removed, so its silence is not evidence here.
+
 ## Not yet built
 
-- **Presenter integration:** glyph-mask nodes (derived and canonical), partial texture uploads
-  (`vkCmdCopyBufferToImage` per rectangle), several frames in flight, and real fences feeding
-  `at_retire`.
+- **Glyph-mask nodes and the view presenter:** derived, canonical masks feeding `at_use`; the
+  view's scene drawn through `ps_frame_submit` to the swapchain; atlas sized from the display.
 - **When refused:** split the frame, or fall back to drawing the glyph from a per-frame
   upload; never stall.
 - **Cost:** placement scans the pages of a class (O(cells)). A per-class free list and an LRU

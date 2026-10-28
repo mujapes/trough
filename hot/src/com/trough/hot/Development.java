@@ -32,7 +32,7 @@ final class Development implements AutoCloseable, ScenarioProtocol.Handler {
         all.add("core.processes"); all.add("build.native");
         if(new File(bundle,"lib/libtrough-android.so").isFile()) {
             for(String s:STORE) all.add("android."+s);
-            all.add("android.jni"); all.add("android.ime"); all.add("android.editor"); all.add("android.vulkan"); all.add("android.scene"); all.add("android.glyphs"); all.add("android.text"); all.add("android.surface"); all.add("android.layout"); all.add("android.derive"); all.add("android.view");
+            all.add("android.jni"); all.add("android.ime"); all.add("android.editor"); all.add("android.vulkan"); all.add("android.scene"); all.add("android.glyphs"); all.add("android.text"); all.add("android.surface"); all.add("android.layout"); all.add("android.derive"); all.add("android.view"); all.add("android.frames");
             all.add("android.retire.setup"); all.add("android.retire.check");
         }
         return all;
@@ -64,9 +64,9 @@ final class Development implements AutoCloseable, ScenarioProtocol.Handler {
         if("android.layout".equals(name)) return LayoutOracle.run();
         if("android.derive".equals(name)) return LayoutDeriveOracle.run(bundle);
         if("android.view".equals(name)) return ViewOracle.run(bundle);
-        if("android.scene".equals(name) || "android.glyphs".equals(name)) {
+        if("android.scene".equals(name) || "android.glyphs".equals(name) || "android.frames".equals(name)) {
             NativeCore.load(bundle);
-            org.json.JSONObject o=new org.json.JSONObject("android.scene".equals(name)?NativeCore.sceneOracle():NativeCore.glyphOracle());
+            org.json.JSONObject o=new org.json.JSONObject("android.scene".equals(name)?NativeCore.sceneOracle():"android.glyphs".equals(name)?NativeCore.glyphOracle():NativeCore.framesOracle());
             Map<String,Object> m=new LinkedHashMap<>();
             for(Iterator<String> it=o.keys();it.hasNext();) { String key=it.next(); m.put(key,o.get(key)); }
             return m;

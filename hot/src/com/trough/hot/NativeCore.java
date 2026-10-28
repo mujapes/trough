@@ -23,6 +23,7 @@ final class NativeCore {
     static native String presentProbe(android.view.Surface surface, int frames);
     static native String sceneOracle();
     static native String glyphOracle();
+    static native String framesOracle();
     static native long surfaceOpen(android.view.Surface surface, int w, int h);
     static native int surfaceResize(long presenter, int w, int h);
     static native byte[] surfacePresent(long presenter, float[] rects, float[] glyphs, byte[] atlas, int aw, int ah,

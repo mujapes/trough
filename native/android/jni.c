@@ -240,6 +240,13 @@ JNIEXPORT jstring JNICALL CLASS(sceneOracle)(JNIEnv *env, jclass c) {
 }
 
 int ps_glyph_oracle(char *out, size_t capacity);
+int ps_frames_oracle(char *out, size_t capacity);
+JNIEXPORT jstring JNICALL CLASS(framesOracle)(JNIEnv *env, jclass c) {
+    (void)c;
+    static char out[4096];
+    ps_frames_oracle(out, sizeof out);
+    return (*env)->NewStringUTF(env, out);
+}
 JNIEXPORT jstring JNICALL CLASS(glyphOracle)(JNIEnv *env, jclass c) {
     (void)c;
     static char out[4096];

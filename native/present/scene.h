@@ -49,5 +49,25 @@ int ps_swapchain(ps_gpu *, uint64_t surface, uint32_t w, uint32_t h);
 /* The swapchain's extent (0 x 0 without one): the size of ps_present's rgba. */
 void ps_extent(ps_gpu *, uint32_t *w, uint32_t *h);
 int ps_present(ps_gpu *, const ps_rect *, size_t rects, const ps_glyph *, size_t glyphs, uint8_t *rgba, double *cpu_ms);
+/* Frames in flight, offscreen (docs/ATLAS.md). ps_frames_init creates a persistent w x h R8
+ * atlas (cleared, kept in GENERAL layout so a frame can upload into some regions while earlier
+ * frames still sample others) and a ring of PS_FRAMES targets. A frame uploads its rectangles
+ * into the atlas, then draws, then copies its target for readback, and is submitted without
+ * waiting; the caller's residency (core/atlas) guarantees no frame in flight samples a region
+ * a later frame overwrites, which is why no barrier orders uploads after earlier frames. */
+#define PS_FRAMES 3
+typedef struct { uint16_t x, y, w, h; uint32_t offset; } ps_upload;   /* offset into pixels; rows of w bytes */
+int ps_frames_init(ps_gpu *, uint32_t w, uint32_t h, uint32_t atlas_w, uint32_t atlas_h);
+/* Waits only when the ring slot's previous frame is still pending. *number = this frame (1, 2, ...). */
+int ps_frame_submit(ps_gpu *, const ps_upload *, size_t uploads, const uint8_t *pixels, size_t pixel_bytes,
+                    const ps_rect *, size_t rects, const ps_glyph *, size_t glyphs, uint64_t *number);
+/* Non-blocking: the newest frame number whose fence (and all earlier ones) has signalled. */
+uint64_t ps_frames_retired(ps_gpu *);
+/* A retired frame's pixels (w*h*4), while its ring slot has not been reused. */
+int ps_frame_pixels(ps_gpu *, uint64_t number, uint8_t *rgba);
+/* Blocks until frame `number` (and all before it) has retired. */
+int ps_frames_wait(ps_gpu *, uint64_t number);
+/* How many submitted frames are not yet retired. */
+int ps_frames_pending(ps_gpu *);
 void ps_close(ps_gpu *);
 #endif
