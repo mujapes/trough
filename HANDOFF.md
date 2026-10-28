@@ -8,7 +8,8 @@ assuming zeros, so ELF note bytes became link_map pointers (`0x696e6900646c7472`
 `40709414561` contains register/mapping evidence. Clear the full page tail. New independent
 `tests/loader_pages.py` poisons non-load bytes: native Linux passed, old texec failed with 23,
 fixed texec matches Linux for both small and multi-page BSS. CI now gates this before loader
-integration. Await fresh CI before claiming the Ubuntu integration crash resolved.
+integration. CI run `40710673505` at `40fbc2c`: all four jobs green, including the ARM texec
+seccomp-simulated loader oracle. The Ubuntu integration crash is resolved by evidence.
 References: [Linux ELF loading](https://codebrowser.dev/linux/linux/fs/binfmt_elf.c.html),
 [glibc initial allocation](https://codebrowser.dev/glibc/glibc/elf/dl-minimal-malloc.c.html).
 
