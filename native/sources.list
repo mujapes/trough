@@ -31,6 +31,8 @@ core/derive.c
 core/derive.h
 core/exec.c
 core/exec.h
+core/blobs.c
+core/blobs.h
 store/store.c
 store/store.h
 store/document.c
@@ -65,5 +67,6 @@ scenarios/resources.c
 scenarios/replacement.c
 scenarios/derive.c
 scenarios/exec.c
+scenarios/blobs.c
 scenarios/fixtures/api.h
 scenarios/fixtures/implementation.c

@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include "exec.h"
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -27,6 +28,7 @@ tr_status ex_register(ex_exec *e, tr_id op, ex_operator fn, void *ctx) {
     e->ops[e->nops].op = op; e->ops[e->nops].fn = fn; e->ops[e->nops].ctx = ctx; e->nops++;
     return TR_OK;
 }
+void ex_use_blobs(ex_exec *e, bl_store *b) { e->blobs = b; dv_set_hooks(e->graph, bl_hook_retain, bl_hook_release, b); }
 void ex_on_settled(ex_exec *e, void (*fn)(void *, uint64_t), void *ctx) { e->on_settled = fn; e->settled_ctx = ctx; }
 
 /* ---- operator helpers ---- */
@@ -89,8 +91,31 @@ static void trace(ex_exec *e, const ex_slot *s, uint32_t outcome) {
     t->queued_ns = s->queued_ns; t->start_ns = s->start_ns; t->end_ns = s->end_ns;
 }
 
+/* A job's inputs are held from issue until it retires, so a worker can read them while the
+ * graph moves on. */
+static void hold(ex_exec *e, ex_slot *s, int retain) {
+    dv_graph *g = e->graph;
+    void (*f)(void *, uint64_t) = retain ? g->retain : g->release;
+    if (!f) return;
+    for (size_t k = 0; k < s->job.count; k++) if (s->job.values[k].presence == DV_PRESENT) f(g->hooks, s->job.values[k].value);
+}
+
 static void complete(ex_exec *e, ex_slot *s) {
     uint32_t outcome;
+    uint64_t made = 0;                                /* an interned output: our reference */
+    if (s->out.blob && !s->stopped && !atomic_load(&s->cancel) && s->out.kind == DV_RESULT_VALUE && !s->out.overflow) {
+        void *bytes = s->out.blob;
+        s->out.blob = NULL;                           /* bl_intern takes it, success or not */
+        tr_status st = e->blobs ? bl_intern(e->blobs, bytes, s->out.blob_length, 1, &made) : TR_INVALID;
+        if (st) {
+            if (!e->blobs) free(bytes);
+            dv_cancel(e->graph, &s->job);
+            e->error = st; e->jobs++; trace(e, s, EX_TRACE_INVALID); hold(e, s, 0); s->state = EX_FREE;
+            return;
+        }
+        s->out.value = made;
+    }
+    free(s->out.blob); s->out.blob = NULL;
     if (s->stopped || atomic_load(&s->cancel)) {
         dv_cancel(e->graph, &s->job);                 /* TR_STALE when already withdrawn */
         outcome = EX_TRACE_CANCELLED; e->cancelled++;
@@ -104,8 +129,10 @@ static void complete(ex_exec *e, ex_slot *s) {
         else if (st) { e->error = st; outcome = EX_TRACE_INVALID; }
         else outcome = r.kind == DV_RESULT_NEED ? EX_TRACE_NEED : EX_TRACE_VALUE;
     }
+    if (made) bl_release(e->blobs, made);              /* the memo holds its own reference */
     e->jobs++;
     trace(e, s, outcome);
+    hold(e, s, 0);
     s->state = EX_FREE;
 }
 
@@ -127,6 +154,7 @@ static dv_progress schedule(ex_exec *e) {
             if (same_id(e->ops[o].op, s->job.op)) { e->slot_fn[index[k]] = e->ops[o].fn; e->slot_ctx[index[k]] = e->ops[o].ctx; }
         if (!e->slot_fn[index[k]]) { dv_cancel(e->graph, &s->job); e->error = TR_INVALID; continue; }
         atomic_store(&s->cancel, 0); s->stopped = 0; s->queued_ns = now; s->start_ns = s->end_ns = 0;
+        hold(e, s, 1);
         s->state = EX_READY;
     }
     if (n) pthread_cond_broadcast(&e->worker_wake);
@@ -221,6 +249,14 @@ void ex_stop(ex_exec *e) {
     pthread_mutex_unlock(&e->lock);
     pthread_join(e->owner, NULL);
     for (size_t i = 0; i < e->nworkers; i++) pthread_join(e->workers[i], NULL);
+    for (int i = 0; i < EX_SLOTS; i++) {             /* retire what was left in flight */
+        ex_slot *s = &e->slots[i];
+        if (s->state == EX_FREE) continue;
+        if (s->state == EX_DONE) { free(s->out.blob); s->out.blob = NULL; }
+        dv_cancel(e->graph, &s->job);
+        hold(e, s, 0);
+        s->state = EX_FREE;
+    }
 }
 
 size_t ex_trace_copy(const ex_exec *e, ex_trace *out, size_t n) {

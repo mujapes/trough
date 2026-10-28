@@ -32,7 +32,7 @@ def atomic(path, data):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('scenario', choices=['app.observe', 'core.publication', 'core.resources', 'core.replacement', 'core.derive', 'core.exec', 'core.store', 'core.documents', 'core.streams', 'core.tasks', 'core.workspace', 'core.drafts', 'core.text', 'core.keeper', 'core.processes', 'build.native'] + ['android.' + n for n in ('store', 'documents', 'streams', 'tasks', 'workspace', 'drafts', 'text', 'keeper', 'jni', 'ime', 'editor', 'vulkan', 'scene', 'glyphs', 'text', 'surface', 'layout', 'retire.setup', 'retire.check')])
+    ap.add_argument('scenario', choices=['app.observe', 'core.publication', 'core.resources', 'core.replacement', 'core.derive', 'core.exec', 'core.blobs', 'core.store', 'core.documents', 'core.streams', 'core.tasks', 'core.workspace', 'core.drafts', 'core.text', 'core.keeper', 'core.processes', 'build.native'] + ['android.' + n for n in ('store', 'documents', 'streams', 'tasks', 'workspace', 'drafts', 'text', 'keeper', 'jni', 'ime', 'editor', 'vulkan', 'scene', 'glyphs', 'text', 'surface', 'layout', 'retire.setup', 'retire.check')])
     ap.add_argument('--shared', type=Path, default=Path('/mnt/shared/Download/trough'))
     ap.add_argument('--key', type=Path, default=Path.home()/'.trough/hot-key.pem')
     ap.add_argument('--device-key', type=Path, default=Path.home()/'.trough/device-pubkey.der')

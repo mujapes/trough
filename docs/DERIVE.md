@@ -90,3 +90,4 @@ A memo-free reference evaluates the current world from scratch.
 - A root list instead of scanning every node per poll, plus incremental sweeps.
 - Byte/resource admission and cancellation leases joined to `resources.h`, IO workers and tracing.
 - Real operators: document layout and scene compilation as nodes, which is the next consumer.
+- Value ownership: done through `dv_set_hooks` ([BLOBS.md](BLOBS.md)).

@@ -49,6 +49,8 @@ typedef struct {
     uint32_t *table; size_t table_capacity;      /* (op, key) -> node + 1; UINT32_MAX = tombstone */
     dv_frame *path;                               /* walk stack, node_capacity frames */
     uint64_t next_ticket, sweep, computations;
+    size_t interned, tombstones;
+    void (*retain)(void *, uint64_t), (*release)(void *, uint64_t); void *hooks;
 } dv_graph;
 
 /* A unit of work: run node's operator (op_value is the module identity) on key with values. */
@@ -67,6 +69,9 @@ typedef enum { DV_IDLE = 0, DV_READY, DV_WAITING } dv_progress;
 /* table_capacity must be a power of two >= 2 * node_capacity. */
 tr_status dv_init(dv_graph *, tr_world *, dv_node *, size_t node_capacity, dv_block *, size_t block_capacity,
                   uint32_t *table, size_t table_capacity, dv_frame *path);
+/* Value ownership: the graph retains a node's value while it is the memo, and releases it when
+ * replaced or evicted (e.g. bl_hook_retain/bl_hook_release with a blob store). */
+void dv_set_hooks(dv_graph *, void (*retain)(void *, uint64_t), void (*release)(void *, uint64_t), void *ctx);
 /* The node for (op, key), created empty if new. TR_CAPACITY when full. */
 tr_status dv_intern(dv_graph *, tr_id op, uint64_t key, uint32_t *node);
 /* Owner roots: demanded nodes are kept verified by dv_poll. Counted. */

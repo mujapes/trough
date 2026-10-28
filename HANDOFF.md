@@ -10,6 +10,9 @@ real operators (layout/scene as nodes) and admission/leases.
 Then `native/core/exec` ([contract](docs/EXEC.md)): owner thread + workers + cancellation + trace;
 `core.exec` passes on the Pixel (bundle 1353a0fd5380), TSan/ASan clean. Next: real operators
 (text layout via JNI, scene compilation) registered on the executor, then admission/leases.
+Then `native/core/blobs` ([contract](docs/BLOBS.md)): canonical interned values with graph/executor
+retain hooks; core.blobs passes on the Pixel (bundle e36731edbc61), 8/8 mutants. Next: layout operator
+in libtrough-android.so (JNI trampoline into TextLayout on exec workers), android.derive oracle.
 
 DECIDED (2026-10-28): the Java/native boundary is a bionic build of the same sources, loaded
 in-process (docs/BIONIC.md). All store oracles pass as bionic programs on the Pixel; android.jni

@@ -73,8 +73,25 @@ static size_t slot_of(const dv_graph *g, tr_id op, uint64_t key, int *found) {
     }
 }
 
+void dv_set_hooks(dv_graph *g, void (*retain)(void *, uint64_t), void (*release)(void *, uint64_t), void *ctx) {
+    g->retain = retain; g->release = release; g->hooks = ctx;
+}
+
+static void rebuild(dv_graph *g) {
+    memset(g->table, 0, g->table_capacity * sizeof *g->table);
+    size_t mask = g->table_capacity - 1;
+    for (uint32_t k = 0; k < g->node_capacity; k++) {
+        if (!g->nodes[k].live) continue;
+        size_t i = hash(g->nodes[k].op, g->nodes[k].key) & mask;
+        while (g->table[i]) i = (i + 1) & mask;
+        g->table[i] = k + 1;
+    }
+    g->tombstones = 0;
+}
+
 tr_status dv_intern(dv_graph *g, tr_id op, uint64_t key, uint32_t *out) {
     if (!g || !out) return TR_INVALID;
+    if ((g->interned + g->tombstones + 1) * 4 > g->table_capacity * 3) rebuild(g);
     int found;
     size_t s = slot_of(g, op, key, &found);
     if (found) { *out = g->table[s] - 1; return TR_OK; }
@@ -86,7 +103,9 @@ tr_status dv_intern(dv_graph *g, tr_id op, uint64_t key, uint32_t *out) {
     uint64_t generation = n->generation + 1;
     memset(n, 0, sizeof *n);
     n->op = op; n->key = key; n->generation = generation; n->live = 1; n->head = NONE;
+    if (g->table[s] == TOMB) g->tombstones--;
     g->table[s] = free + 1;
+    g->interned++;
     *out = free;
     return TR_OK;
 }
@@ -318,6 +337,8 @@ tr_status dv_complete(dv_graph *g, const dv_job *job, const dv_result *res) {
     deps_free(g, n);
     n->head = head; n->count = count;
     if (!n->memo || n->value != res->value) n->changed_at = job->revision;
+    if (g->retain) g->retain(g->hooks, res->value);
+    if (n->memo && g->release) g->release(g->hooks, n->value);
     n->value = res->value; n->memo = 1; n->verified_at = job->revision; n->recompute = 0; n->volatile_ = (uint8_t)cyclic;
     n->op_absent = (uint8_t)!job->op_present;
     return TR_OK;
@@ -349,8 +370,10 @@ tr_status dv_evict(dv_graph *g, uint32_t i) {
     if (!n || n->demand || n->running) return TR_INVALID;
     int found;
     size_t s = slot_of(g, n->op, n->key, &found);
-    if (found) g->table[s] = TOMB;
+    if (found) { g->table[s] = TOMB; g->tombstones++; }
+    g->interned--;
     deps_free(g, n);
+    if (n->memo && g->release) g->release(g->hooks, n->value);
     uint64_t generation = n->generation;
     memset(n, 0, sizeof *n);
     n->generation = generation; n->head = NONE;          /* the next intern bumps it */

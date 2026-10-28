@@ -1,6 +1,7 @@
 #ifndef TROUGH_EXEC_H
 #define TROUGH_EXEC_H
 #include "derive.h"
+#include "blobs.h"
 #include <pthread.h>
 #include <stdatomic.h>
 
@@ -16,7 +17,9 @@
 #define EX_TRACE 1024
 
 /* What an operator writes: a value and the refs it read, or the refs it needs. */
-typedef struct { uint32_t kind; uint64_t value; dv_ref refs[EX_VALUES]; size_t count; int overflow; } ex_out;
+/* Instead of value, an operator may return bytes (malloc'd; ownership passes to the executor),
+ * which the owner interns into a canonical blob handle (ex_use_blobs). */
+typedef struct { uint32_t kind; uint64_t value; dv_ref refs[EX_VALUES]; size_t count; int overflow; void *blob; size_t blob_length; } ex_out;
 /* An operator: a pure function of the job. Returns 0, or nonzero when it stopped because it
  * was cancelled. ctx is the registration's. */
 typedef int (*ex_operator)(void *ctx, const dv_job *, ex_out *);
@@ -51,11 +54,15 @@ typedef struct {
     ex_trace trace[EX_TRACE]; uint64_t traced;
     uint64_t jobs, cancelled, stale;
     void (*on_settled)(void *, uint64_t publication); void *settled_ctx;
+    bl_store *blobs;
 } ex_exec;
 
 /* Registration happens before ex_start. */
 tr_status ex_init(ex_exec *, tr_world *, dv_graph *, size_t workers);
 tr_status ex_register(ex_exec *, tr_id op, ex_operator, void *ctx);
+/* Blob values: node values become owned by the store through graph hooks, job inputs are
+ * retained until the job retires, and operators may return bytes. Before ex_start. */
+void ex_use_blobs(ex_exec *, bl_store *);
 /* on_settled runs on the owner thread each time demand is verified at a new publication. */
 void ex_on_settled(ex_exec *, void (*fn)(void *, uint64_t), void *ctx);
 tr_status ex_start(ex_exec *);
