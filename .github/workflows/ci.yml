@@ -76,3 +76,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: texec oracle (Android's app seccomp filter + /data/data/t.t, simulated)
         run: tests/run.sh
+      - name: Diagnose a loader failure
+        if: failure()
+        run: |
+          gdb -batch -ex 'set pagination off' -ex run -ex 'info registers pc sp x0 x1 x2 x16 x17' -ex 'x/8i $pc' -ex bt --args /data/data/t.t/bin/threadtest
+          objdump -d /data/data/t.t/x > loader-disassembly.txt
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with: { name: loader-diagnostics, path: loader-disassembly.txt, retention-days: 3 }

@@ -2,6 +2,15 @@
 
 ## Active continuation (2026-10-28)
 
+Resumed after the user's VM interruption. User clarified free compute means **GitHub Actions
+standard runners for this public repository**, not Codespaces. The mistakenly created unused
+Codespace was deleted and the account's list confirmed empty. Do not create another for this
+work. CI at `b02a407` exposed Ubuntu's fortified `write` warning in the supervisor; handle the
+atomic exec-error pipe write and EINTR, preserving failed-command status if reporting fails.
+Fortified ASan/UBSan process tests (both child enumeration paths) and all 25 JVM scenario
+checks pass locally. Add ARM loader failure diagnostics to obtain evidence for its remaining
+SIGSEGV; the previously saved loader failure is not resolved yet.
+
 Resumed again at 14:09 UTC on the user's `continue`, followed by confirmation to use GitHub's
 free compute. The earlier five-hour window below is historical, not an instruction to abandon
 the resumed work. No subagents are authorised by the current session instructions.

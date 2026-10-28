@@ -126,8 +126,10 @@ int tp_run(char *const argv[], const tp_options *options, tp_result *result) {
         sigset_t child_mask; sigemptyset(&child_mask);
         if (sigprocmask(SIG_SETMASK, &child_mask, NULL) && !failed) failed = errno;
         if (!failed) { execv(argv[0], argv); failed = errno; }
-        (void)write(pipefd[1], &failed, sizeof failed);
-        _exit(127);
+        ssize_t written;
+        do { written = write(pipefd[1], &failed, sizeof failed); } while (written < 0 && errno == EINTR);
+        /* This is one atomic pipe record. A failed report must still fail the command. */
+        _exit(written == sizeof failed ? 127 : 126);
     }
     close(pipefd[1]); pipefd[1] = -1; result->pid = (int)child;
     if (setpgid(child, child) && errno != EACCES && errno != ESRCH) result->error = errno;
