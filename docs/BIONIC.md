@@ -32,9 +32,16 @@ Outputs:
   fixed APK marks only `bin/` executable.
 - `lib/libtrough-android.so`: the JNI library (`native/android/jni.c`, `NativeCore.java`).
 
-The bionic outputs are not in `outputs.list`: the phone's root has no clang yet, so
-`build.native` cannot rebuild them. Adding clang-19/lld-19 plus the two verified inputs to the
-root closes that gap.
+Self-hosted since 2026-10-28:
+- The bundle carries the verified inputs in `native/bionic-inputs/`.
+- `build.sh` runs `bionic.sh` when they are present and appends `outputs-bionic.list` to the
+  inventory.
+- clang-19 and lld-19 are in the root's package list.
+- Pixel bundle `fd1a907464b2...`: `build.native` rebuilt all 34 outputs in 44 s with the
+  phone's own clang, every one byte-identical to the VM build.
+- Getting there exposed a stale root `tfix` from an old `rootfiles.zip`; bundles now carry a
+  `tfix` built from current source.
+- Scenario requests may now run up to 15 minutes.
 
 Glibc-side tooling adjustments:
 - `set_interp.py` and `tfix` leave a `/system/bin/linker*` interpreter alone.
