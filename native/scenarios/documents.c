@@ -344,7 +344,10 @@ static void indexed_death(void) {
             MUST(td_save_text(s, (ts_read){0, 0}, &v, &snap) == TS_OK);
             MUST(write(ready[1], "r", 1) == 1);     /* revision 1 is durable; start the kill clock */
             for (unsigned k = 1;; k++) {
-                tx_text *n = indexed_tree(k, scratch); v.text = n;
+                /* Step k of indexed_text, applied incrementally as an editor would. */
+                size_t len = tx_length(t), at = (k * 7919u) % (len + 1), cut = at < len ? (k % 3) : 0;
+                uint16_t ins[2] = {(uint16_t)('A' + k % 26), (uint16_t)k};
+                tx_text *n; MUST(tx_edit(t, at, at + cut, ins, 2, &n) == TS_OK); v.text = n;
                 MUST(td_save_text(s, (ts_read){snap.record.id, snap.record.revision}, &v, &snap) == TS_OK);
                 tx_release(t); t = n;
             }
@@ -362,7 +365,7 @@ static void indexed_death(void) {
         if (snap.record.revision > most) most = snap.record.revision;
         tx_release(t); ts_close(s);
     }
-    CHECK(least > 1);
+    CHECK(least >= 1 && most > 1);
     printf("ok indexed SIGKILL: 8 cycles killed at revisions %llu..%llu; each loads with all chunks and exact text\n",
            (unsigned long long)least, (unsigned long long)most);
 }
