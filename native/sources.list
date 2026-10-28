@@ -26,12 +26,15 @@ store/workspace.c
 store/workspace.h
 store/draft.c
 store/draft.h
+store/text.c
+store/text.h
 scenarios/store.c
 scenarios/documents.c
 scenarios/streams.c
 scenarios/tasks.c
 scenarios/workspace.c
 scenarios/drafts.c
+scenarios/text.c
 runtime/process.h
 runtime/process.c
 runtime/run.c
