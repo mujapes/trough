@@ -44,7 +44,7 @@ final class TextLayout {
         float ascent = -fm.ascent, descent = fm.descent;
         if (start == end) {                               // empty paragraph: one empty line
             Line l = new Line();
-            l.start = l.end = start; l.top = top; l.baseline = top + ascent; l.bottom = l.baseline + descent;
+            l.start = l.end = start; l.top = top; l.baseline = top + Math.round(ascent); l.bottom = l.baseline + Math.round(descent);
             out.lines.add(l);
             return l.bottom;
         }
@@ -67,8 +67,10 @@ final class TextLayout {
             int lineEnd = result.getLineBreakOffset(i);
             Line l = new Line();
             l.start = start + lineStart; l.end = start + lineEnd; l.rtl = paragraphRtl;
-            /* Per-line extents include fallback fonts on the line (taller scripts). */
-            l.top = top; l.baseline = top - result.getLineAscent(i); l.bottom = l.baseline + result.getLineDescent(i);
+            /* Per-line extents include fallback fonts on the line (taller scripts), rounded to
+             * whole pixels as the platform's integer font metrics are, so lines stack on pixels. */
+            l.top = top; l.baseline = top - Math.round(result.getLineAscent(i));
+            l.bottom = l.baseline + Math.round(result.getLineDescent(i));
             l.width = result.getLineWidth(i);
             /* Trailing whitespace is not drawn; the line's runs in visual order. */
             int visibleEnd = lineEnd;
