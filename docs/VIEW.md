@@ -9,13 +9,19 @@ viewport. A presenter draws the scene with the GPU glyph renderer.
 
 - **layout(i):** paragraph i at the width, through the platform stack
   ([LAYOUT_DERIVE.md](LAYOUT_DERIVE.md)). A blob.
-- **summary(level, j):** the total height of 16 children: paragraph layouts at level 0,
-  summaries above. A scalar, so a recomputed summary with the same height cuts off.
-- **scene:** reads the viewport cell (scroll and height), then walks the tree depth-first in
-  order. A subtree's total is read only when the subtree starts above the scroll position
-  (to skip it or enter it). A subtree that starts inside the viewport is entered directly,
-  and the walk stops at the viewport's end. Output is a blob: count, then (face, glyph, x, y)
-  in viewport coordinates, for glyphs whose line intersects the viewport.
+- **viewport cell:** (anchor paragraph, offset into it, height). This is scroll anchoring:
+  what is shown is defined relative to a paragraph, so edits above it cannot move it.
+- **scene:** stacks exact layouts from the anchor (its top at -offset) until the viewport is
+  full, and emits the glyphs whose line intersects it. Output is a blob: count, then (face,
+  glyph, x, y) in viewport coordinates. It reads only the viewport cell and the visible layouts.
+- **summary(level, j):** the total *estimated* height of 16 children. An estimate is
+  ceil(units x 17 / width) lines of 48 px: pure and cheap. It serves the scrollbar and jumps;
+  nothing is drawn at estimated positions. Level-0 summaries read their 16 text cells and the
+  width and estimate inline (operator fusion). One node per estimate made the first jump
+  cost 1200 tiny jobs and 900 ms of owner scheduling.
+- **jump:** `deriveJump(per mille)` demands the root summary and walks the tree on the owner
+  thread to the paragraph at that fraction of the estimated height. That paragraph becomes
+  the anchor.
 - **static operators:** layout and summary are declared static (`dv_set_static`), so a
   recompute keeps all old dependencies and runs once rather than once per unverified child.
   In `core.derive` the same mechanism cuts restarts per job from 0.354 to 0.290, and a mutant
@@ -23,19 +29,24 @@ viewport. A presenter draws the scene with the GPU glyph renderer.
 
 ## Oracle (`android.view`, 600 paragraphs, width 1000, viewport 1080x1400, 2 workers)
 
-Every step's scene is byte-identical to a flat Java walk over directly computed layouts.
-Operator runs per step, the same in three runs on bundle `07ee550eef85`:
+Every step's scene is byte-identical to a flat Java walk from the anchor over directly
+computed layouts. The jump's anchor equals a flat Java scan of the same estimates. Operator
+runs per step, the same in two runs on bundle `96f2a2bd429f`:
 
-| step | layout | summary | scene | time |
-|---|---|---|---|---|
-| top of document | 16 (8 paragraphs) | 0 | 10 | 65-111 ms |
-| scroll to the middle | 1008 | 68 | 13 | 1.8-3.0 s |
-| edit below the viewport | 0 | 0 | 0 | about 1 ms |
-| edit in the viewport | 1 | 1 | 1 | 3-14 ms |
-| edit above, same height | 1 | 1 | **0** (cutoff) | 3-5 ms |
-| edit above, taller | 1 | 2 | 12 | 12-14 ms |
+| step | layout | summary | scene | estimated | time |
+|---|---|---|---|---|---|
+| top of document | 16 (8 paragraphs) | 0 | 10 | 0 | 95-199 ms |
+| jump to the middle | **12** (6 paragraphs) | 84 | 7 | 600 | 105-253 ms |
+| edit below the viewport | 0 | 1 | 0 | 8 | 1-2 ms |
+| edit in the viewport | 1 | 1 | 5 | 16 | 7-17 ms |
+| edit above the anchor, adding lines | **0** | 3 | **0** | 16 | 1-3 ms |
+| scroll 40 px within the anchor | 0 | 0 | 7 | 0 | 6-9 ms |
 
-- **Pixels:** the final scene (1372 glyphs, 73 unique masks), drawn by the GPU renderer, is
+Before anchoring, positions were exact sums of layout heights. Jumping to the middle then
+laid out 504 paragraphs (1008 runs, 1.8-3.0 s), and an edit above the viewport that added
+lines re-ran the scene, moving everything shown.
+
+- **Pixels:** the scene (about 1430 glyphs, 73 unique masks), drawn by the GPU renderer, is
   compared with the platform drawing the same glyphs at the same snapped positions: 0 bad
   pixels, max channel diff 1.
 - **Trace:** each job's operator, key and outcome are available through `deriveTrace`. The
@@ -70,15 +81,12 @@ presentation cost.
 
 ## Known costs and their workarounds
 
-- **Exact positions are expensive.** Scrolling to the middle lays out every paragraph above
-  the viewport, plus the rest of the top-level subtree that holds the scroll line (504
-  paragraphs here). Editors avoid this with estimated heights for unmeasured content, refined
-  as layouts arrive and with scroll anchoring so content does not jump (CodeMirror's height
-  map, Zed's sum tree). In this model an estimate is a cheap node a summary can use until the
-  real layout is clean.
-- **Dynamic restarts.** The scene is dynamic, so after a height change above the viewport it
-  re-asks for its visible layouts one by one (12 runs, about 14 ms). Fixes: batched needs, or
-  hinting old dependencies that are already memoized.
+- **Scrolling by pixels across paragraphs** belongs to the owner: move the anchor across
+  exact heights of the paragraphs scrolled past, which are visible and so already laid out.
+  Flings and the scrollbar map through the estimate tree.
+- **Dynamic restarts.** The scene is dynamic, so after a change it re-asks for its visible
+  layouts one by one (5-7 runs). Fixes: batched needs, or hinting old dependencies that are
+  already memoized.
 - **Presentation:** frames are drawn offscreen and read back. The swapchain path
   (`ps_present`) must take the frame ring and its atlas; `android.surface` needs Trough
   visible to check it.

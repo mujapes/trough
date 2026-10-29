@@ -29,6 +29,9 @@ Next: glyph-mask nodes + view scene through the frame ring to the swapchain (nee
 Done: mask nodes + deriveFrame: android.view renders 5 scrolled frames from derived masks/atlas/ring,
 0 bad pixels; masks rasterised once (73), later frames 0 uploads, 2-7 ms build. Next: swapchain
 presentation of the ring (visible), estimated heights for unmeasured paragraphs.
+Done: scroll anchoring + estimate summaries (fused into level-0): jump to middle lays out 6 paragraphs
+(was 504; 105-253 ms), edits above the anchor run no layout/scene. Next: swapchain presentation
+of the frame ring (needs Trough visible), owner scroll-by-pixels.
 
 DECIDED (2026-10-28): the Java/native boundary is a bionic build of the same sources, loaded
 in-process (docs/BIONIC.md). All store oracles pass as bionic programs on the Pixel; android.jni

@@ -8,10 +8,10 @@ import java.util.*;
 
 /** android.view: a viewport over many paragraphs, derived (docs/VIEW.md). Layout nodes feed a
  * tree of height summaries; the scene node walks it in order and emits the glyphs visible in the
- * viewport. The scene's bytes must equal a flat Java walk over directly computed layouts; edits
- * must cost only what they touch (nothing below the viewport; no scene rerun when a height is
- * unchanged); and the GPU drawing the derived scene must match the platform drawing the same
- * glyphs. Offscreen. */
+ * viewport, stacked from an anchor paragraph (scroll anchoring); estimated heights summed in a
+ * tree serve jumps. The scene's bytes must equal a flat Java walk from the anchor; edits must
+ * cost only what they touch (nothing shown moves for edits above the anchor); and the GPU
+ * drawing the derived scene must match the platform drawing the same glyphs. Offscreen. */
 final class ViewOracle {
     static final int WIDTH = 1000, VIEW_W = 1080, VIEW_H = 1400;
 
@@ -27,59 +27,47 @@ final class ViewOracle {
         try {
             NativeCore.deriveWidth(d, WIDTH);
             for (int i = 0; i < n; i++) NativeCore.deriveText(d, i, corpus.get(i));
-            NativeCore.deriveViewport(d, 0, VIEW_H);
+            NativeCore.deriveViewport(d, 0, 0, VIEW_H);
             List<Object> steps = new ArrayList<>();
             long[] before = NativeCore.deriveStats(d);       /* before the demand: work starts at once */
             long t0 = System.nanoTime();
             NativeCore.deriveDemandScene(d, true);
             NativeCore.deriveSettle(d);
-            long[] tr = NativeCore.deriveTrace(d);
-            List<Object> layoutJobs = new ArrayList<>();
-            for (int k = 0; k < tr.length; k += 4) if (tr[k] == 0) layoutJobs.add(tr[k + 1] + ":" + tr[k + 2]);
-            out.put("top_layout_jobs", layoutJobs);          /* key:outcome (1 value, 2 need, 3 cancelled, 4 stale) */
-            out.put("visible_at_start", visibleCount(corpus, 0));
-            ok &= step(d, corpus, 0, "top", before, t0, steps, failures, 2L * visibleCount(corpus, 0), 0, -1);
-            int middle = documentHeight(corpus) / 2;
+            ok &= step(d, corpus, 0, 0, "top", before, t0, steps, failures, 2L * visibleCount(corpus, 0, 0), 0, -1, 0);
+            /* Jump to the middle through the estimate tree: estimates everywhere, layouts only
+             * for what is shown. */
             before = NativeCore.deriveStats(d); t0 = System.nanoTime();
-            NativeCore.deriveViewport(d, middle, VIEW_H);
+            int anchor = NativeCore.deriveJump(d, 500);
+            int expectAnchor = estimateAnchor(corpus, 500);
+            NativeCore.deriveViewport(d, anchor, 0, VIEW_H);
             NativeCore.deriveSettle(d);
-            ok &= step(d, corpus, middle, "scroll to middle", before, t0, steps, failures, -1, -1, -1);
-            /* An edit far below the viewport: nothing runs. */
+            ok &= step(d, corpus, anchor, 0, "jump to middle", before, t0, steps, failures, 2L * visibleCount(corpus, anchor, 0), -1, -1, n);
+            out.put("anchor", anchor); out.put("expected_anchor", expectAnchor);
+            if (anchor != expectAnchor) { ok = false; failures.add(Json.map("anchor", anchor, "expected", expectAnchor)); }
+            /* An edit below the viewport: its estimate and summary chain only. */
             int below = n - 3;
             corpus.set(below, corpus.get(below) + " below");
             before = NativeCore.deriveStats(d); t0 = System.nanoTime();
             NativeCore.deriveText(d, below, corpus.get(below));
             NativeCore.deriveSettle(d);
-            ok &= step(d, corpus, middle, "edit below viewport", before, t0, steps, failures, 0, 0, 0);
-            /* An edit inside the viewport: its layout, its summary chain, the scene. */
-            int visible = firstVisible(corpus, middle) + 1;
-            corpus.set(visible, corpus.get(visible) + " seen");
+            ok &= step(d, corpus, anchor, 0, "edit below viewport", before, t0, steps, failures, 0, -1, 0, block(n, below));
+            /* An edit inside the viewport: its layout and the scene. */
+            corpus.set(anchor + 1, corpus.get(anchor + 1) + " seen");
             before = NativeCore.deriveStats(d); t0 = System.nanoTime();
-            NativeCore.deriveText(d, visible, corpus.get(visible));
+            NativeCore.deriveText(d, anchor + 1, corpus.get(anchor + 1));
             NativeCore.deriveSettle(d);
-            ok &= step(d, corpus, middle, "edit in viewport", before, t0, steps, failures, 1, -1, -1);
-            /* An edit above the viewport that keeps the paragraph's height: layout and its
-             * level-0 summary rerun, the summary value is equal, the scene does not rerun. */
-            int above = 5;
-            String kept = corpus.get(above).replaceFirst("fox", "dog");
-            if (kept.equals(corpus.get(above))) kept = corpus.get(above).replaceFirst(" ", "  ");
-            boolean sameHeight = height(DeriveLayout.layout(kept, WIDTH)) == height(DeriveLayout.layout(corpus.get(above), WIDTH));
-            corpus.set(above, kept);
+            ok &= step(d, corpus, anchor, 0, "edit in viewport", before, t0, steps, failures, 1, -1, -1, block(n, anchor + 1));
+            /* An edit above the anchor that adds lines: nothing shown moves, no layout, no scene. */
+            corpus.set(anchor - 3, corpus.get(anchor - 3) + " " + corpus.get(anchor - 2) + " " + corpus.get(anchor - 1));
             before = NativeCore.deriveStats(d); t0 = System.nanoTime();
-            NativeCore.deriveText(d, above, kept);
+            NativeCore.deriveText(d, anchor - 3, corpus.get(anchor - 3));
             NativeCore.deriveSettle(d);
-            ok &= step(d, corpus, middle, "edit above, same height", before, t0, steps, failures, 1, 1, sameHeight ? 0 : -1);
-            /* An edit above the viewport that adds lines: everything visible moves. */
-            corpus.set(above + 1, corpus.get(above + 1) + " " + corpus.get(above + 2));
+            ok &= step(d, corpus, anchor, 0, "edit above anchor, taller", before, t0, steps, failures, 0, -1, 0, block(n, anchor - 3));
+            /* Scrolling within a paragraph: the offset moves, the same layouts are reused. */
             before = NativeCore.deriveStats(d); t0 = System.nanoTime();
-            NativeCore.deriveText(d, above + 1, corpus.get(above + 1));
+            NativeCore.deriveViewport(d, anchor, 40, VIEW_H);
             NativeCore.deriveSettle(d);
-            ok &= step(d, corpus, middle, "edit above, taller", before, t0, steps, failures, 1, -1, -1);
-            out.put("same_height_case", sameHeight);
-            List<Integer> heads = new ArrayList<>();
-            for (int i = 0; i < 12; i++) heads.add(height(DeriveLayout.layout(corpus.get(i), WIDTH)));
-            out.put("first_heights", heads);
-            out.put("visible_at_top", visibleCount(corpus, 0));
+            ok &= step(d, corpus, anchor, 40, "scroll 40 px", before, t0, steps, failures, -1, 0, -1, 0);
             out.put("steps", steps);
             Map<String, Object> pixels = pixels(NativeCore.deriveBytes(d, -1));
             out.put("pixels", pixels);
@@ -88,16 +76,16 @@ final class ViewOracle {
             int fo = NativeCore.deriveFrameOpen(d, VIEW_W, VIEW_H, 1024, 1024);
             List<Object> frames = new ArrayList<>();
             boolean framesOk = fo == 0;
-            int[] scrolls = {middle, middle + 300, middle + 900, middle + 2400, middle};
-            for (int k = 0; k < scrolls.length && framesOk; k++) {
-                NativeCore.deriveViewport(d, scrolls[k], VIEW_H);
+            int[] anchors = {anchor, anchor + 3, anchor + 10, anchor + 30, anchor};
+            for (int k = 0; k < anchors.length && framesOk; k++) {
+                NativeCore.deriveViewport(d, anchors[k], 0, VIEW_H);
                 NativeCore.deriveSettle(d);
                 double[] timing = new double[5];
                 byte[] got = NativeCore.deriveFrame(d, true, timing);
                 byte[] scene = NativeCore.deriveBytes(d, -1);
                 Map<String, Object> cmp = got == null ? Json.map("ok", false, "error", "no frame") : compare(got, reference(scene));
                 long[] st = NativeCore.deriveStats(d);
-                frames.add(Json.map("scroll", scrolls[k], "mask_settle_ms", timing[0], "build_ms", timing[1], "gpu_ms", timing[2],
+                frames.add(Json.map("anchor", anchors[k], "mask_settle_ms", timing[0], "build_ms", timing[1], "gpu_ms", timing[2],
                     "glyphs", (long) timing[3], "uploads", (long) timing[4], "bad_pixels", cmp.get("bad_pixels"),
                     "max_channel_diff", cmp.get("max_channel_diff"), "mask_runs", st[14], "atlas_hits", st[16], "atlas_evictions", st[17]));
                 framesOk &= Boolean.TRUE.equals(cmp.get("ok"));
@@ -117,22 +105,22 @@ final class ViewOracle {
         return out;
     }
 
-    /** Checks the scene against the flat reference; expected job deltas (-1 = any, >= 1 means
-     * exactly that many) for layout, summary and scene operators. */
-    private static boolean step(long d, List<String> corpus, int scroll, String name, long[] before, long t0, List<Object> steps,
-                                List<Object> failures, long layouts, long sums, long scenes) {
+    /** Checks the scene against the flat reference; expected run deltas (-1 = any) for layout,
+     * summary, scene and estimate operators. */
+    private static boolean step(long d, List<String> corpus, int anchor, int offset, String name, long[] before, long t0, List<Object> steps,
+                                List<Object> failures, long layouts, long sums, long scenes, long estimates) {
         double ms = (System.nanoTime() - t0) / 1e6;
         long[] after = NativeCore.deriveStats(d);
-        long dl = after[11] - before[11], ds = after[12] - before[12], dc = after[13] - before[13];
-        byte[] got = NativeCore.deriveBytes(d, -1), want = reference(corpus, scroll);
+        long dl = after[11] - before[11], ds = after[12] - before[12], dc = after[13] - before[13], de = after[19] - before[19];
+        byte[] got = NativeCore.deriveBytes(d, -1), want = reference(corpus, anchor, offset);
         boolean equal = Arrays.equals(got, want);
-        boolean counts = (layouts < 0 || dl == layouts) && (sums < 0 || ds == sums) && (scenes < 0 || dc == scenes);
+        boolean counts = (layouts < 0 || dl == layouts) && (sums < 0 || ds == sums) && (scenes < 0 || dc == scenes) && (estimates < 0 || de == estimates);
         int glyphs = got == null || got.length < 4 ? -1 : ByteBuffer.wrap(got).getInt();
         steps.add(Json.map("step", name, "ms", ms, "equal", equal, "glyphs", glyphs,
-            "layout_runs", dl, "summary_runs", ds, "scene_runs", dc, "counts_ok", counts));
+            "layout_runs", dl, "summary_runs", ds, "scene_runs", dc, "estimate_runs", de, "counts_ok", counts));
         if (!equal) failures.add(Json.map("step", name, "got", got == null ? -1 : got.length, "want", want.length));
-        if (!counts) failures.add(Json.map("step", name, "layout_runs", dl, "summary_runs", ds, "scene_runs", dc,
-            "expected", Arrays.asList(layouts, sums, scenes)));
+        if (!counts) failures.add(Json.map("step", name, "layout_runs", dl, "summary_runs", ds, "scene_runs", dc, "estimate_runs", de,
+            "expected", Arrays.asList(layouts, sums, scenes, estimates)));
         return equal && counts;
     }
 
@@ -142,49 +130,47 @@ final class ViewOracle {
         if (lines == 0) return 0;
         return (int) (b.getFloat(4 + (lines - 1) * 25 + 16) + 0.5f);
     }
-    static int documentHeight(List<String> corpus) {
-        int y = 0;
-        for (String t : corpus) y += height(DeriveLayout.layout(t, WIDTH));
-        return y;
-    }
-    /** Paragraphs the scene must lay out at scroll: those it walks before the viewport ends. */
-    static int visibleCount(List<String> corpus, int scroll) {
-        int y = 0, count = 0;
-        for (String t : corpus) { if (y >= scroll + VIEW_H) break; int h = height(DeriveLayout.layout(t, WIDTH)); if (y + h > scroll) count++; y += h; }
-        return count;
-    }
-    static int firstVisible(List<String> corpus, int scroll) {
-        int y = 0;
-        for (int i = 0; i < corpus.size(); i++) { int h = height(DeriveLayout.layout(corpus.get(i), WIDTH)); if (y + h > scroll) return i; y += h; }
+    /** Paragraphs in the 16-paragraph block holding i: what a level-0 summary re-estimates. */
+    static long block(int n, int i) { return Math.min(16, n - (i / 16) * 16); }
+    /** The native estimate: ceil(units * 17 / width) lines (at least 1) of 48 px. */
+    static long estimate(String t) { long lines = ((long) t.length() * 17 + WIDTH - 1) / WIDTH; return Math.max(1, lines) * 48; }
+    static int estimateAnchor(List<String> corpus, int permille) {
+        long total = 0;
+        for (String t : corpus) total += estimate(t);
+        long target = total * permille / 1000, y = 0;
+        for (int i = 0; i < corpus.size(); i++) { long h = estimate(corpus.get(i)); if (y + h > target) return i; y += h; }
         return corpus.size() - 1;
     }
+    /** Paragraphs the scene lays out from the anchor until the viewport is full. */
+    static int visibleCount(List<String> corpus, int anchor, int offset) {
+        int y = -offset, count = 0;
+        for (int i = anchor; i < corpus.size() && y < VIEW_H; i++) { y += height(DeriveLayout.layout(corpus.get(i), WIDTH)); count++; }
+        return count;
+    }
 
-    /** The scene a flat walk over directly computed layouts gives. */
-    static byte[] reference(List<String> corpus, int scroll) {
+    /** The scene a flat walk from the anchor over directly computed layouts gives. */
+    static byte[] reference(List<String> corpus, int anchor, int offset) {
         ByteBuffer out = ByteBuffer.allocate(1 << 22);
         out.putInt(0);
         int count = 0;
-        long y = 0;
-        for (String t : corpus) {
-            if (y >= scroll + VIEW_H) break;
-            ByteBuffer b = ByteBuffer.wrap(DeriveLayout.layout(t, WIDTH));
+        long y = -offset;
+        for (int i = anchor; i < corpus.size() && y < VIEW_H; i++) {
+            ByteBuffer b = ByteBuffer.wrap(DeriveLayout.layout(corpus.get(i), WIDTH));
             int lines = b.getInt(0);
             long h = lines == 0 ? 0 : (long) (b.getFloat(4 + (lines - 1) * 25 + 16) + 0.5f);
-            if (y + h > scroll) {
-                int g = 4 + lines * 25, glyphs = b.getInt(g);
-                for (int k = 0; k < glyphs; k++) {
-                    int q = g + 4 + k * 16;
-                    float x = b.getFloat(q + 8), gy = b.getFloat(q + 12);
-                    boolean visible = false;
-                    for (int l = 0; l < lines; l++) {
-                        float lt = b.getFloat(4 + l * 25 + 12), lb = b.getFloat(4 + l * 25 + 16);
-                        if (gy >= lt && gy < lb) { visible = y + lb > scroll && y + lt < scroll + VIEW_H; break; }
-                    }
-                    if (!visible) continue;
-                    out.putInt(b.getInt(q)); out.putInt(b.getInt(q + 4));
-                    out.putFloat(x); out.putFloat((float) ((double) y - (double) scroll + gy));
-                    count++;
+            int g = 4 + lines * 25, glyphs = b.getInt(g);
+            for (int k = 0; k < glyphs; k++) {
+                int q = g + 4 + k * 16;
+                float x = b.getFloat(q + 8), gy = b.getFloat(q + 12);
+                boolean visible = false;
+                for (int l = 0; l < lines; l++) {
+                    float lt = b.getFloat(4 + l * 25 + 12), lb = b.getFloat(4 + l * 25 + 16);
+                    if (gy >= lt && gy < lb) { visible = (double) y + lb > 0 && (double) y + lt < VIEW_H; break; }
                 }
+                if (!visible) continue;
+                out.putInt(b.getInt(q)); out.putInt(b.getInt(q + 4));
+                out.putFloat(x); out.putFloat((float) ((double) y + gy));
+                count++;
             }
             y += h;
         }

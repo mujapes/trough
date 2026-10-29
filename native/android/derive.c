@@ -25,7 +25,7 @@ typedef struct {
     uint32_t fw, fh; uint64_t frame_uploads, frame_hits;
     tr_world world; tr_cell *cells; tr_id driver, width, op, viewport, op_sum, op_scene; tr_id *text; int paragraphs;
     int levels; uint32_t scene;                       /* summary levels above paragraphs; the scene node */
-    atomic_ullong runs[4];                            /* operator invocations: layout, summary, scene, mask */
+    atomic_ullong runs[5];                            /* invocations: layout, summary, scene, mask; [4] paragraphs estimated */
     dv_graph graph; dv_node *nodes; dv_block *blocks; uint32_t *table; dv_frame *path; uint32_t *node;
     bl_store blobs; bl_entry *entries; uint32_t *index;
     ex_exec ex;
@@ -101,7 +101,7 @@ static uint64_t count_at(const deriver *d, int level) {           /* nodes at a 
     return c;
 }
 static dv_ref child_ref(const deriver *d, int level, uint64_t j) {
-    if (level < 0) return (dv_ref){DV_NODE, d->op, j};
+    if (level < 0) return (dv_ref){DV_CELL, d->text[j], 0};          /* level 0 estimates its texts */
     return (dv_ref){DV_NODE, d->op_sum, (uint64_t)level << 32 | j};
 }
 /* The height a ref stands for: a layout blob's height or a summary's scalar. 0 = missing. */
@@ -116,26 +116,41 @@ static int height_of(deriver *d, const dv_job *job, ex_out *out, dv_ref r, int i
     *h = p ? layout_height(p, n) : 0;
     return 1;
 }
-/* Summary (level, j): total height of its children (paragraphs at level 0). All missing children
- * are asked for at once: a summary needs every child. */
+/* Estimated paragraph height: pure and cheap, for the scrollbar and jumps only (nothing is
+ * drawn at estimated positions). Lines = ceil(units * EST_ADVANCE / width), at least 1. */
+#define EST_ADVANCE 17                                /* px per UTF-16 unit at TEXT_SIZE 36 */
+#define EST_LINE 48
+static uint64_t estimate(uint64_t units, uint64_t width) {
+    uint64_t lines = width ? (units * EST_ADVANCE + width - 1) / width : 1;
+    return (lines ? lines : 1) * EST_LINE;
+}
+/* Summary (level, j): total estimated height of its children. Level 0 reads its paragraphs' text
+ * cells and the width and estimates inline (fused: no node per estimate); higher levels sum
+ * child summaries. A summary needs every child, so all missing ones are asked for at once. */
 static int sum_op(void *ctx, const dv_job *job, ex_out *out) {
     deriver *d = ctx;
     atomic_fetch_add(&d->runs[1], 1);
     int level = (int)(job->key >> 32); uint64_t j = job->key & 0xffffffffu;
-    uint64_t below = level == 0 ? (uint64_t)d->paragraphs : count_at(d, level - 1), total = 0;
-    int missing = 0;
+    uint64_t below = level == 0 ? (uint64_t)d->paragraphs : count_at(d, level - 1), total = 0, width = 0;
+    dv_ref rw = {DV_CELL, d->width, 0};
+    int missing = level == 0 && !ex_read(job, out, rw, &width, NULL), estimated = 0;
     for (uint64_t c = j * FAN; c < below && c < j * FAN + FAN; c++) {
-        dv_ref r = child_ref(d, level - 1, c); uint64_t h;
-        if (!height_of(d, job, out, r, level == 0, &h, NULL, NULL)) { missing = 1; continue; }
-        total += h;
+        dv_ref r = child_ref(d, level - 1, c); uint64_t v;
+        if (!ex_read(job, out, r, &v, NULL)) { missing = 1; continue; }
+        if (level > 0) { total += v; continue; }
+        const void *p = NULL; size_t n = 0;
+        if (bl_is(v)) bl_get(&d->blobs, v, &p, &n);
+        total += estimate(n / 2, width); estimated++;
     }
     if (missing) {
+        if (level == 0 && !ex_read(job, out, rw, NULL, NULL)) ex_need(out, rw);
         for (uint64_t c = j * FAN; c < below && c < j * FAN + FAN; c++) {
             dv_ref r = child_ref(d, level - 1, c);
             if (!ex_read(job, out, r, NULL, NULL)) ex_need(out, r);
         }
         return 0;
     }
+    atomic_fetch_add(&d->runs[4], (unsigned long long)estimated);
     out->value = total;
     return 0;
 }
@@ -155,8 +170,9 @@ static void put(sink *s, const void *p, size_t n) {
 static void put32(sink *s, uint32_t v) { unsigned char b[4] = {v >> 24, v >> 16, v >> 8, v}; put(s, b, 4); }
 static void putf(sink *s, float f) { uint32_t u; memcpy(&u, &f, 4); put32(s, u); }
 
-/* Emits the glyphs of the lines of one layout that intersect [scroll, scroll + height). */
-static void emit_paragraph(sink *s, const unsigned char *b, size_t n, uint64_t top, uint64_t scroll, uint64_t height) {
+/* Emits the glyphs of one layout whose line intersects the viewport, the paragraph's top at
+ * screen y = top (negative above the viewport). */
+static void emit_paragraph(sink *s, const unsigned char *b, size_t n, int64_t top, uint64_t height) {
     if (n < 4) return;
     uint32_t lines = be32(b);
     size_t g = 4 + (size_t)lines * LINE_BYTES;
@@ -171,55 +187,80 @@ static void emit_paragraph(sink *s, const unsigned char *b, size_t n, uint64_t t
         for (uint32_t l = 0; l < lines; l++) {
             const unsigned char *L = b + 4 + (size_t)l * LINE_BYTES;
             float lt = bef(L + 12), lb = bef(L + 16);
-            if (y >= lt && y < lb) { visible = top + lb > scroll && top + lt < scroll + height; break; }
+            if (y >= lt && y < lb) { visible = (double)top + lb > 0 && (double)top + lt < (double)height; break; }
         }
         if (!visible) continue;
         put32(s, be32(q)); put32(s, be32(q + 4));
-        putf(s, x); putf(s, (float)((double)top - (double)scroll + y));
+        putf(s, x); putf(s, (float)((double)top + y));
         s->glyphs++;
     }
 }
-/* Depth-first over the summary tree, children in order, pruning what lies outside the viewport.
- * A subtree's total is read only when it starts above the viewport (to skip or enter it); one
- * that starts inside is entered directly, so nothing below the viewport is laid out except in
- * the subtree holding the scroll position. Returns 0 when a value is missing (asked for). */
-static int visit(deriver *d, const dv_job *job, ex_out *out, int level, uint64_t j, uint64_t *y,
-                 uint64_t scroll, uint64_t height, sink *s) {
-    uint64_t below = level == 0 ? (uint64_t)d->paragraphs : count_at(d, level - 1);
-    for (uint64_t c = j * FAN; c < below && c < j * FAN + FAN; c++) {
-        if (*y >= scroll + height) return 1;          /* everything further is below the viewport */
-        if (level > 0 && *y >= scroll) {              /* starts inside the viewport: descend, no total needed */
-            if (!visit(d, job, out, level - 1, c, y, scroll, height, s)) return 0;
-            continue;
-        }
-        dv_ref r = child_ref(d, level - 1, c); uint64_t h; const unsigned char *bytes = NULL; size_t n = 0;
-        if (!height_of(d, job, out, r, level == 0, &h, &bytes, &n)) { ex_need(out, r); return 0; }
-        if (*y + h > scroll) {
-            if (level == 0) emit_paragraph(s, bytes, n, *y, scroll, height);
-            else { uint64_t inner = *y; if (!visit(d, job, out, level - 1, c, &inner, scroll, height, s)) return 0; }
-        }
-        *y += h;
-    }
-    return 1;
-}
-/* Scene: the glyphs visible in the viewport cell's window, as (face, glyph, x, y) in viewport
- * coordinates, preceded by their count. It reads summaries in order only until the viewport
- * ends, so nothing below it is laid out or read (no document height: that is its own node). */
+/* Scene: the viewport cell is (anchor paragraph, offset into it, height). Paragraphs are
+ * stacked with exact heights from the anchor, whose top is at -offset, until the viewport is
+ * full: nothing above the anchor is read, so edits there cannot move what is shown. Output:
+ * count, then (face, glyph, x, y) in viewport coordinates. */
 static int scene_op(void *ctx, const dv_job *job, ex_out *out) {
     deriver *d = ctx;
     atomic_fetch_add(&d->runs[2], 1);
     dv_ref rv = {DV_CELL, d->viewport, 0};
     uint64_t v;
     if (!ex_read(job, out, rv, &v, NULL)) { ex_need(out, rv); return 0; }
-    uint64_t scroll = v & 0xffffffffu, height = v >> 32, y = 0;
+    uint64_t anchor = v & 0xffffffffu, offset = (v >> 32) & 0xffff, height = v >> 48;
+    int64_t y = -(int64_t)offset;
     sink s = {0};
     put32(&s, 0);
-    if (!visit(d, job, out, d->levels - 1, 0, &y, scroll, height, &s)) { free(s.b); return 0; }
+    for (uint64_t i = anchor; i < (uint64_t)d->paragraphs && y < (int64_t)height; i++) {
+        dv_ref r = {DV_NODE, d->op, i}; uint64_t h; const unsigned char *bytes = NULL; size_t n = 0;
+        if (!height_of(d, job, out, r, 1, &h, &bytes, &n)) { ex_need(out, r); free(s.b); return 0; }
+        emit_paragraph(&s, bytes, n, y, height);
+        y += (int64_t)h;
+    }
     if (s.failed) { free(s.b); out->value = 0; return 0; }
     unsigned char c[4] = {s.glyphs >> 24, s.glyphs >> 16, s.glyphs >> 8, s.glyphs};
     memcpy(s.b, c, 4);
     out->blob = s.b; out->blob_length = s.n;
     return 0;
+}
+
+/* Jump: the paragraph at a fraction of the estimated document height, through the estimate
+ * summaries (all clean: the root is demanded). */
+typedef struct { deriver *d; int64_t permille, anchor, total; } jump_call;
+static void demand_root(void *arg, tr_world *w, dv_graph *g) {
+    (void)w; jump_call *j = arg; uint32_t root;
+    dv_ref r = child_ref(j->d, j->d->levels - 1, 0);
+    if (dv_intern(g, r.id, r.key, &root) == TR_OK && !g->nodes[root].demand) dv_demand(g, root);
+}
+static int64_t node_value(deriver *d, dv_graph *g, dv_ref r) {
+    uint32_t n; uint64_t v;
+    if (dv_intern(g, r.id, r.key, &n) || dv_get(g, n, &v)) return -1;
+    (void)d; return (int64_t)v;
+}
+static void find_anchor(void *arg, tr_world *w, dv_graph *g) {
+    jump_call *j = arg; deriver *d = j->d;
+    int64_t total = node_value(d, g, child_ref(d, d->levels - 1, 0));
+    j->total = total; j->anchor = -1;
+    if (total < 0) return;
+    int64_t target = total * j->permille / 1000, y = 0;
+    uint64_t node = 0;
+    for (int level = d->levels - 1; level >= 0; level--) {   /* descend: child (level-1) of node */
+        uint64_t below = level == 0 ? (uint64_t)d->paragraphs : count_at(d, level - 1), c = node * FAN;
+        for (; c < below && c < node * FAN + FAN; c++) {
+            int64_t h;
+            if (level > 0) h = node_value(d, g, child_ref(d, level - 1, c));
+            else {                                       /* paragraphs: the same estimate, from the cells */
+                tr_read t, wd; const void *p = NULL; size_t n = 0;
+                if (tr_current(w, d->text[c], &t) || tr_current(w, d->width, &wd)) return;
+                if (bl_is(t.value)) bl_get(&d->blobs, t.value, &p, &n);
+                h = (int64_t)estimate(n / 2, wd.value);
+            }
+            if (h < 0) return;
+            if (y + h > target) break;
+            y += h;
+        }
+        if (c >= below || c >= node * FAN + FAN) c--;    /* past the end: the last child */
+        node = c;
+    }
+    j->anchor = (int64_t)node;
 }
 
 /* ---- owner calls ---- */
@@ -238,8 +279,10 @@ static void set_text(void *arg, tr_world *w, dv_graph *g) {
     if (!c->result) write_cell(c->d, c->d->text[c->i], h);
 }
 static void set_width(void *arg, tr_world *w, dv_graph *g) { (void)w; (void)g; call *c = arg; write_cell(c->d, c->d->width, (uint64_t)c->i); }
-static void set_viewport(void *arg, tr_world *w, dv_graph *g) {
-    (void)w; (void)g; call *c = arg; write_cell(c->d, c->d->viewport, (uint64_t)(uint32_t)c->i | (uint64_t)(uint32_t)c->length << 32);
+static void set_viewport(void *arg, tr_world *w, dv_graph *g) {     /* i = anchor, length = offset | height << 16 */
+    (void)w; (void)g; call *c = arg;
+    write_cell(c->d, c->d->viewport, (uint64_t)(uint32_t)c->i | ((uint64_t)(uint32_t)c->length & 0xffff) << 32
+                                     | ((uint64_t)(uint32_t)c->length >> 16) << 48);
 }
 static void demand_scene(void *arg, tr_world *w, dv_graph *g) {
     (void)w; call *c = arg; c->result = c->length ? dv_demand(g, c->d->scene) : dv_release(g, c->d->scene);
@@ -270,7 +313,7 @@ static void stats(void *arg, tr_world *w, dv_graph *g) {
     s[8] = (int64_t)busy; s[9] = (int64_t)wait; s[10] = (int64_t)n;
     for (int k = 0; k < 3; k++) s[11 + k] = (int64_t)atomic_load(&d->runs[k]);
     s[14] = (int64_t)atomic_load(&d->runs[3]); s[15] = (int64_t)d->frame_uploads; s[16] = (int64_t)d->frame_hits;
-    s[17] = (int64_t)d->atlas.evictions; s[18] = (int64_t)d->atlas.refusals;
+    s[17] = (int64_t)d->atlas.evictions; s[18] = (int64_t)d->atlas.refusals; s[19] = (int64_t)atomic_load(&d->runs[4]);
 }
 
 /* The newest trace records: (operator 0 layout / 1 summary / 2 scene, key, outcome, worker). */
@@ -335,6 +378,7 @@ JNIEXPORT jlong JNICALL CLASS(deriveOpen)(JNIEnv *env, jclass c, jint workers, j
     ex_register(&d->ex, d->op_sum, sum_op, d);
     ex_register(&d->ex, d->op_scene, scene_op, d);
     ex_register(&d->ex, d->op_mask, mask_op, d);
+
     if (ex_start(&d->ex)) { (*env)->DeleteGlobalRef(env, d->cls); destroy(d); return -4; }
     return (jlong)(intptr_t)d;
 }
@@ -350,8 +394,18 @@ JNIEXPORT jint JNICALL CLASS(deriveText)(JNIEnv *env, jclass c, jlong h, jint i,
 JNIEXPORT void JNICALL CLASS(deriveWidth)(JNIEnv *env, jclass c, jlong h, jint w) {
     (void)env; (void)c; deriver *d = (deriver *)(intptr_t)h; call k = {d, w, NULL, 0, 0}; ex_call(&d->ex, set_width, &k);
 }
-JNIEXPORT void JNICALL CLASS(deriveViewport)(JNIEnv *env, jclass c, jlong h, jint scroll, jint height) {
-    (void)env; (void)c; deriver *d = (deriver *)(intptr_t)h; call k = {d, scroll, NULL, height, 0}; ex_call(&d->ex, set_viewport, &k);
+JNIEXPORT void JNICALL CLASS(deriveViewport)(JNIEnv *env, jclass c, jlong h, jint anchor, jint offset, jint height) {
+    (void)env; (void)c; deriver *d = (deriver *)(intptr_t)h;
+    call k = {d, anchor, NULL, (jsize)((offset & 0xffff) | (height & 0xffff) << 16), 0}; ex_call(&d->ex, set_viewport, &k);
+}
+/* Anchor at a fraction (per mille) of the estimated height; returns the paragraph, or -1. */
+JNIEXPORT jint JNICALL CLASS(deriveJump)(JNIEnv *env, jclass c, jlong h, jint permille) {
+    (void)env; (void)c; deriver *d = (deriver *)(intptr_t)h;
+    jump_call j = {d, permille, -1, -1};
+    ex_call(&d->ex, demand_root, &j);
+    if (!ex_settle(&d->ex)) return -1;
+    ex_call(&d->ex, find_anchor, &j);
+    return (jint)j.anchor;
 }
 JNIEXPORT jint JNICALL CLASS(deriveDemandScene)(JNIEnv *env, jclass c, jlong h, jboolean on) {
     (void)env; (void)c; deriver *d = (deriver *)(intptr_t)h; call k = {d, 0, NULL, on ? 1 : 0, 0}; ex_call(&d->ex, demand_scene, &k); return (jint)k.result;
@@ -381,11 +435,11 @@ JNIEXPORT jbyteArray JNICALL CLASS(deriveBytes)(JNIEnv *env, jclass c, jlong h, 
 }
 JNIEXPORT jlongArray JNICALL CLASS(deriveStats)(JNIEnv *env, jclass c, jlong h) {
     (void)c; deriver *d = (deriver *)(intptr_t)h;
-    int64_t s[19] = {0};
+    int64_t s[20] = {0};
     call k = {d, 0, (const jchar *)(void *)s, 0, 0};
     ex_call(&d->ex, stats, &k);
-    jlongArray r = (*env)->NewLongArray(env, 19);
-    if (r) (*env)->SetLongArrayRegion(env, r, 0, 19, (const jlong *)s);
+    jlongArray r = (*env)->NewLongArray(env, 20);
+    if (r) (*env)->SetLongArrayRegion(env, r, 0, 20, (const jlong *)s);
     return r;
 }
 JNIEXPORT jlongArray JNICALL CLASS(deriveTrace)(JNIEnv *env, jclass c, jlong h) {
