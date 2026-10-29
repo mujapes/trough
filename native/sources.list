@@ -36,6 +36,8 @@ core/blobs.c
 core/blobs.h
 core/atlas.c
 core/atlas.h
+core/order.c
+core/order.h
 store/store.c
 store/store.h
 store/document.c
@@ -72,5 +74,6 @@ scenarios/derive.c
 scenarios/exec.c
 scenarios/blobs.c
 scenarios/atlas.c
+scenarios/order.c
 scenarios/fixtures/api.h
 scenarios/fixtures/implementation.c

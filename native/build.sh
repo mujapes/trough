@@ -22,12 +22,12 @@ $CC -O2 -Wall -Wextra -shared -fPIC -o "$O/lib/libexecmap.so" "$S/execmap/execma
 
 # The same native substrate and scenario executors are built on the VM and on the phone.
 CORE="-std=c11 -O2 -Wall -Wextra -Werror -fPIC -ffile-prefix-map=$S=native"
-for part in world resources modules derive blobs exec atlas; do
+for part in world resources modules derive blobs exec atlas order; do
     $CC $CORE -c "$S/core/$part.c" -o "$O/lib/core-$part.o"
 done
-${AR:-ar} rcsD "$O/lib/libtroughcore.a" "$O/lib/core-world.o" "$O/lib/core-resources.o" "$O/lib/core-modules.o" "$O/lib/core-derive.o" "$O/lib/core-blobs.o" "$O/lib/core-exec.o" "$O/lib/core-atlas.o"
-rm -f "$O/lib/core-world.o" "$O/lib/core-resources.o" "$O/lib/core-modules.o" "$O/lib/core-derive.o" "$O/lib/core-blobs.o" "$O/lib/core-exec.o" "$O/lib/core-atlas.o"
-for scenario in publication resources replacement derive atlas; do
+${AR:-ar} rcsD "$O/lib/libtroughcore.a" "$O/lib/core-world.o" "$O/lib/core-resources.o" "$O/lib/core-modules.o" "$O/lib/core-derive.o" "$O/lib/core-blobs.o" "$O/lib/core-exec.o" "$O/lib/core-atlas.o" "$O/lib/core-order.o"
+rm -f "$O/lib/core-world.o" "$O/lib/core-resources.o" "$O/lib/core-modules.o" "$O/lib/core-derive.o" "$O/lib/core-blobs.o" "$O/lib/core-exec.o" "$O/lib/core-atlas.o" "$O/lib/core-order.o"
+for scenario in publication resources replacement derive atlas order; do
     $CC $CORE $DYN -I"$S/core" "$S/scenarios/$scenario.c" "$O/lib/libtroughcore.a" -ldl -o "$O/bin/core-$scenario"
 done
 for scenario in exec blobs; do

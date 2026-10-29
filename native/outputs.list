@@ -14,6 +14,7 @@ bin/core-derive
 bin/core-exec
 bin/core-blobs
 bin/core-atlas
+bin/core-order
 bin/core-store
 bin/core-documents
 bin/core-streams
