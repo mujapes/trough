@@ -302,6 +302,9 @@ final class ViewOracle {
             int face = b.getInt(), id = b.getInt();
             float fx = b.getFloat(), fy = b.getFloat();
             Font font = DeriveLayout.face(face);
+            /* This check composes through sceneRender's R8 atlas only; colour glyphs (emoji) are
+             * checked end to end by the derived frames below, so they are left out on both sides. */
+            if (DeriveLayout.colorFace(face)) continue;
             long key = (long) face << 32 | (id & 0xffffffffL);
             int[] m = cache.get(key);
             if (m == null && !cache.containsKey(key)) { m = TextOracle.rasterise(font, id, paint, 0xff000000, atlas, shelf); cache.put(key, m); }
