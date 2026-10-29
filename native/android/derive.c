@@ -1393,7 +1393,7 @@ JNIEXPORT jbyteArray JNICALL CLASS(deriveFrame)(JNIEnv *env, jclass c, jlong h, 
                 staging = grown;
             }
             memcpy(staging + staged, m + 16, (size_t)w * hh);
-            ups[nup++] = (ps_upload){r.x, r.y, (uint16_t)w, (uint16_t)hh, (uint32_t)staged};
+            ups[nup++] = (ps_upload){r.x, r.y, (uint16_t)w, (uint16_t)hh, (uint32_t)staged, 0};
             staged += (size_t)w * hh; d->frame_uploads++;
         } else d->frame_hits++;
         float x = floorf(bef(q + 8) + 0.5f) + (float)left, y = floorf(bef(q + 12) + 0.5f) + (float)top;

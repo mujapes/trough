@@ -26,6 +26,7 @@ struct ps_gpu {
     VkDescriptorSet set;
     VkSampler sampler;
     VkImage atlas; VkDeviceMemory atlas_mem; VkImageView atlas_view; uint32_t atlas_w, atlas_h;
+    VkImage color; VkDeviceMemory color_mem; VkImageView color_view; uint32_t color_w, color_h;   /* RGBA8 colour glyphs */
     VkBuffer glyphs; VkDeviceMemory glyphs_mem; void *glyphs_map; size_t glyph_capacity;
     /* Presentation (ps_open_surface). */
     int presenting;
@@ -114,14 +115,16 @@ static VkResult pipeline(ps_gpu *g) {
     VkPipelineLayoutCreateInfo li = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, NULL, 0, 0, NULL, 1, &push};
     if ((r = vkCreatePipelineLayout(g->device, &li, NULL, &g->layout))) return r;
     if ((r = build(g, rect_vert, sizeof rect_vert, rect_frag, sizeof rect_frag, sizeof(ps_rect), 3, g->layout, &g->pipeline))) return r;
-    /* Glyphs: one combined image sampler (texelFetch ignores its filtering). */
-    VkDescriptorSetLayoutBinding binding = {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL};
-    VkDescriptorSetLayoutCreateInfo sl = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, NULL, 0, 1, &binding};
+    /* Glyphs: combined image samplers for the coverage and colour atlases (texelFetch ignores
+     * their filtering). */
+    VkDescriptorSetLayoutBinding binding[2] = {{0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL},
+                                               {1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL}};
+    VkDescriptorSetLayoutCreateInfo sl = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, NULL, 0, 2, binding};
     if ((r = vkCreateDescriptorSetLayout(g->device, &sl, NULL, &g->set_layout))) return r;
     VkPipelineLayoutCreateInfo gl = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, NULL, 0, 1, &g->set_layout, 1, &push};
     if ((r = vkCreatePipelineLayout(g->device, &gl, NULL, &g->glyph_layout))) return r;
     if ((r = build(g, glyph_vert, sizeof glyph_vert, glyph_frag, sizeof glyph_frag, sizeof(ps_glyph), 4, g->glyph_layout, &g->glyph_pipeline))) return r;
-    VkDescriptorPoolSize size = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1};
+    VkDescriptorPoolSize size = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2};
     VkDescriptorPoolCreateInfo dp = {VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, NULL, 0, 1, 1, &size};
     if ((r = vkCreateDescriptorPool(g->device, &dp, NULL, &g->descriptors))) return r;
     VkDescriptorSetAllocateInfo da = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, NULL, g->descriptors, 1, &g->set_layout};
@@ -289,49 +292,64 @@ static VkResult ensure_glyphs(ps_gpu *g, size_t count) {
     if (!r) g->glyph_capacity = cap;
     return r;
 }
-static void drop_atlas(ps_gpu *g) {
-    if (g->atlas_view) vkDestroyImageView(g->device, g->atlas_view, NULL);
-    if (g->atlas) vkDestroyImage(g->device, g->atlas, NULL);
-    if (g->atlas_mem) vkFreeMemory(g->device, g->atlas_mem, NULL);
-    g->atlas_view = VK_NULL_HANDLE; g->atlas = VK_NULL_HANDLE; g->atlas_mem = VK_NULL_HANDLE;
-    g->atlas_w = g->atlas_h = 0;
+static void drop_image(ps_gpu *g, VkImage *image, VkDeviceMemory *mem, VkImageView *view, uint32_t *w, uint32_t *h) {
+    if (*view) vkDestroyImageView(g->device, *view, NULL);
+    if (*image) vkDestroyImage(g->device, *image, NULL);
+    if (*mem) vkFreeMemory(g->device, *mem, NULL);
+    *view = VK_NULL_HANDLE; *image = VK_NULL_HANDLE; *mem = VK_NULL_HANDLE;
+    *w = *h = 0;
 }
+static void drop_atlas(ps_gpu *g) { drop_image(g, &g->atlas, &g->atlas_mem, &g->atlas_view, &g->atlas_w, &g->atlas_h); }
+static void drop_color(ps_gpu *g) { drop_image(g, &g->color, &g->color_mem, &g->color_view, &g->color_w, &g->color_h); }
 /* Fences are waited without a timeout: completion is guaranteed (a hung device reports
  * VK_ERROR_DEVICE_LOST), so no call returns while the GPU still uses its resources. */
 static int fail(VkResult r) { return r < 0 ? (int)r : -(int)r; }
 
-int ps_atlas(ps_gpu *g, const uint8_t *coverage, uint32_t w, uint32_t h) {
-    if (!g || !coverage || !w || !h) return fail(VK_ERROR_INITIALIZATION_FAILED);
-    vkDeviceWaitIdle(g->device);
-    drop_atlas(g);
-    VkImageCreateInfo ii = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, NULL, 0, VK_IMAGE_TYPE_2D, VK_FORMAT_R8_UNORM, {w, h, 1}, 1, 1,
+static void bind_image(ps_gpu *g, uint32_t binding, VkImageView view, VkImageLayout layout) {
+    VkDescriptorImageInfo image = {g->sampler, view, layout};
+    VkWriteDescriptorSet write = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, NULL, g->set, binding, 0, 1,
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, &image, NULL, NULL};
+    vkUpdateDescriptorSets(g->device, 1, &write, 0, NULL);
+}
+/* A sampled image of format with bpp bytes per texel, uploaded from data (or cleared when data is
+ * NULL) and left in `final` layout. */
+static VkResult make_image(ps_gpu *g, VkFormat format, uint32_t bpp, const uint8_t *data, uint32_t w, uint32_t h, VkImageLayout final,
+                           VkImage *image, VkDeviceMemory *mem, VkImageView *view) {
+    VkImageCreateInfo ii = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, NULL, 0, VK_IMAGE_TYPE_2D, format, {w, h, 1}, 1, 1,
         VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
         VK_SHARING_MODE_EXCLUSIVE, 0, NULL, VK_IMAGE_LAYOUT_UNDEFINED};
-    VkResult r = vkCreateImage(g->device, &ii, NULL, &g->atlas);
+    VkResult r = vkCreateImage(g->device, &ii, NULL, image);
     VkMemoryRequirements req;
-    if (!r) { vkGetImageMemoryRequirements(g->device, g->atlas, &req); r = allocate(g, req, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 0, &g->atlas_mem); }
-    if (!r) r = vkBindImageMemory(g->device, g->atlas, g->atlas_mem, 0);
-    VkImageViewCreateInfo vi = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, NULL, 0, g->atlas, VK_IMAGE_VIEW_TYPE_2D,
-        VK_FORMAT_R8_UNORM, {0, 0, 0, 0}, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
-    if (!r) r = vkCreateImageView(g->device, &vi, NULL, &g->atlas_view);
-    /* Upload through a staging buffer, then leave the atlas shader-readable. */
+    if (!r) { vkGetImageMemoryRequirements(g->device, *image, &req); r = allocate(g, req, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 0, mem); }
+    if (!r) r = vkBindImageMemory(g->device, *image, *mem, 0);
+    VkImageViewCreateInfo vi = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, NULL, 0, *image, VK_IMAGE_VIEW_TYPE_2D,
+        format, {0, 0, 0, 0}, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
+    if (!r) r = vkCreateImageView(g->device, &vi, NULL, view);
     VkBuffer staging = VK_NULL_HANDLE; VkDeviceMemory staging_mem = VK_NULL_HANDLE; void *map = NULL;
-    if (!r) r = host_buffer(g, (VkDeviceSize)w * h, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, 0, &staging, &staging_mem, &map);
+    if (!r && data) r = host_buffer(g, (VkDeviceSize)w * h * bpp, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, 0, &staging, &staging_mem, &map);
     if (!r) {
-        memcpy(map, coverage, (size_t)w * h);
+        if (data) memcpy(map, data, (size_t)w * h * bpp);
         vkResetCommandBuffer(g->cmd, 0);
         VkCommandBufferBeginInfo bi = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, NULL, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT, NULL};
         vkBeginCommandBuffer(g->cmd, &bi);
         VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        VkImageLayout dst = data ? VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL : VK_IMAGE_LAYOUT_GENERAL;
         VkImageMemoryBarrier to_dst = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, NULL, 0, VK_ACCESS_TRANSFER_WRITE_BIT,
-            VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, g->atlas, range};
+            VK_IMAGE_LAYOUT_UNDEFINED, dst, VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, *image, range};
         vkCmdPipelineBarrier(g->cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 0, NULL, 1, &to_dst);
-        VkBufferImageCopy copy = {0, 0, 0, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, {0, 0, 0}, {w, h, 1}};
-        vkCmdCopyBufferToImage(g->cmd, staging, g->atlas, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+        if (data) {
+            VkBufferImageCopy copy = {0, 0, 0, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, {0, 0, 0}, {w, h, 1}};
+            vkCmdCopyBufferToImage(g->cmd, staging, *image, dst, 1, &copy);
+        } else {
+            VkClearColorValue zero = {{0, 0, 0, 0}};
+            vkCmdClearColorImage(g->cmd, *image, dst, &zero, 1, &range);
+        }
         VkImageMemoryBarrier to_read = to_dst;
-        to_read.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT; to_read.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        to_read.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL; to_read.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        vkCmdPipelineBarrier(g->cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, NULL, 0, NULL, 1, &to_read);
+        to_read.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        to_read.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | (final == VK_IMAGE_LAYOUT_GENERAL ? VK_ACCESS_TRANSFER_WRITE_BIT : 0);
+        to_read.oldLayout = dst; to_read.newLayout = final;
+        vkCmdPipelineBarrier(g->cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                             0, 0, NULL, 0, NULL, 1, &to_read);
         vkEndCommandBuffer(g->cmd);
         VkSubmitInfo si = {VK_STRUCTURE_TYPE_SUBMIT_INFO, NULL, 0, NULL, NULL, 1, &g->cmd, 0, NULL};
         vkResetFences(g->device, 1, &g->fence);
@@ -340,13 +358,35 @@ int ps_atlas(ps_gpu *g, const uint8_t *coverage, uint32_t w, uint32_t h) {
     }
     if (staging) vkDestroyBuffer(g->device, staging, NULL);
     if (staging_mem) vkFreeMemory(g->device, staging_mem, NULL);
-    if (!r) {
-        VkDescriptorImageInfo image = {g->sampler, g->atlas_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-        VkWriteDescriptorSet write = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, NULL, g->set, 0, 0, 1,
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, &image, NULL, NULL};
-        vkUpdateDescriptorSets(g->device, 1, &write, 0, NULL);
-        g->atlas_w = w; g->atlas_h = h;
-    } else drop_atlas(g);
+    return r;
+}
+/* Colour glyphs need a bound image even when a scene has none: a transparent 1 x 1. */
+static VkResult ensure_color(ps_gpu *g) {
+    if (g->color_view) return VK_SUCCESS;
+    VkResult r = make_image(g, VK_FORMAT_R8G8B8A8_UNORM, 4, NULL, 1, 1, VK_IMAGE_LAYOUT_GENERAL, &g->color, &g->color_mem, &g->color_view);
+    if (r) { drop_color(g); return r; }
+    g->color_w = g->color_h = 1;
+    bind_image(g, 1, g->color_view, VK_IMAGE_LAYOUT_GENERAL);
+    return VK_SUCCESS;
+}
+
+int ps_atlas(ps_gpu *g, const uint8_t *coverage, uint32_t w, uint32_t h) {
+    if (!g || !coverage || !w || !h) return fail(VK_ERROR_INITIALIZATION_FAILED);
+    vkDeviceWaitIdle(g->device);
+    drop_atlas(g);
+    VkResult r = make_image(g, VK_FORMAT_R8_UNORM, 1, coverage, w, h, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, &g->atlas, &g->atlas_mem, &g->atlas_view);
+    if (!r) r = ensure_color(g);
+    if (!r) { bind_image(g, 0, g->atlas_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL); g->atlas_w = w; g->atlas_h = h; }
+    else drop_atlas(g);
+    return r ? fail(r) : 0;
+}
+int ps_atlas_color(ps_gpu *g, const uint8_t *rgba, uint32_t w, uint32_t h) {
+    if (!g || !rgba || !w || !h) return fail(VK_ERROR_INITIALIZATION_FAILED);
+    vkDeviceWaitIdle(g->device);
+    drop_color(g);
+    VkResult r = make_image(g, VK_FORMAT_R8G8B8A8_UNORM, 4, rgba, w, h, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, &g->color, &g->color_mem, &g->color_view);
+    if (!r) { bind_image(g, 1, g->color_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL); g->color_w = w; g->color_h = h; }
+    else { drop_color(g); ensure_color(g); }   /* colour glyphs keep a bound (transparent) image */
     return r ? fail(r) : 0;
 }
 
@@ -577,43 +617,15 @@ static void drop_frames(ps_gpu *g) {
 int ps_frames_init(ps_gpu *g, uint32_t w, uint32_t h, uint32_t aw, uint32_t ah) {
     if (!g || !w || !h || !aw || !ah) return fail(VK_ERROR_INITIALIZATION_FAILED);
     vkDeviceWaitIdle(g->device);
-    drop_frames(g); drop_atlas(g);
+    drop_frames(g); drop_atlas(g); drop_color(g);
     VkResult r;
-    VkImageCreateInfo ai = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, NULL, 0, VK_IMAGE_TYPE_2D, VK_FORMAT_R8_UNORM, {aw, ah, 1}, 1, 1,
-        VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-        VK_SHARING_MODE_EXCLUSIVE, 0, NULL, VK_IMAGE_LAYOUT_UNDEFINED};
     VkMemoryRequirements req;
-    if ((r = vkCreateImage(g->device, &ai, NULL, &g->atlas))) return fail(r);
-    vkGetImageMemoryRequirements(g->device, g->atlas, &req);
-    if ((r = allocate(g, req, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 0, &g->atlas_mem)) ||
-        (r = vkBindImageMemory(g->device, g->atlas, g->atlas_mem, 0))) return fail(r);
-    VkImageViewCreateInfo avi = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, NULL, 0, g->atlas, VK_IMAGE_VIEW_TYPE_2D,
-        VK_FORMAT_R8_UNORM, {0, 0, 0, 0}, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
-    if ((r = vkCreateImageView(g->device, &avi, NULL, &g->atlas_view))) return fail(r);
-    /* Clear once and leave the atlas in GENERAL for its whole life. */
-    vkResetCommandBuffer(g->cmd, 0);
-    VkCommandBufferBeginInfo bi = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, NULL, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT, NULL};
-    vkBeginCommandBuffer(g->cmd, &bi);
-    VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    VkImageMemoryBarrier to_general = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, NULL, 0, VK_ACCESS_TRANSFER_WRITE_BIT,
-        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL, VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, g->atlas, range};
-    vkCmdPipelineBarrier(g->cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 0, NULL, 1, &to_general);
-    VkClearColorValue zero = {{0, 0, 0, 0}};
-    vkCmdClearColorImage(g->cmd, g->atlas, VK_IMAGE_LAYOUT_GENERAL, &zero, 1, &range);
-    VkImageMemoryBarrier readable = to_general;
-    readable.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT; readable.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
-    readable.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-    vkCmdPipelineBarrier(g->cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                         0, 0, NULL, 0, NULL, 1, &readable);
-    vkEndCommandBuffer(g->cmd);
-    VkSubmitInfo si = {VK_STRUCTURE_TYPE_SUBMIT_INFO, NULL, 0, NULL, NULL, 1, &g->cmd, 0, NULL};
-    vkResetFences(g->device, 1, &g->fence);
-    if ((r = vkQueueSubmit(g->queue, 1, &si, g->fence)) || (r = vkWaitForFences(g->device, 1, &g->fence, VK_TRUE, UINT64_MAX))) return fail(r);
-    VkDescriptorImageInfo image = {g->sampler, g->atlas_view, VK_IMAGE_LAYOUT_GENERAL};
-    VkWriteDescriptorSet write = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, NULL, g->set, 0, 0, 1,
-        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, &image, NULL, NULL};
-    vkUpdateDescriptorSets(g->device, 1, &write, 0, NULL);
-    g->atlas_w = aw; g->atlas_h = ah;
+    /* Both atlases are cleared once and stay in GENERAL for their whole life. */
+    if ((r = make_image(g, VK_FORMAT_R8_UNORM, 1, NULL, aw, ah, VK_IMAGE_LAYOUT_GENERAL, &g->atlas, &g->atlas_mem, &g->atlas_view)) ||
+        (r = make_image(g, VK_FORMAT_R8G8B8A8_UNORM, 4, NULL, aw, ah, VK_IMAGE_LAYOUT_GENERAL, &g->color, &g->color_mem, &g->color_view))) return fail(r);
+    bind_image(g, 0, g->atlas_view, VK_IMAGE_LAYOUT_GENERAL);
+    bind_image(g, 1, g->color_view, VK_IMAGE_LAYOUT_GENERAL);
+    g->atlas_w = aw; g->atlas_h = ah; g->color_w = aw; g->color_h = ah;
     for (int i = 0; i < PS_FRAMES; i++) {
         struct ps_frame *f = &g->frame[i];
         VkCommandBufferAllocateInfo ca = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, NULL, g->pool, VK_COMMAND_BUFFER_LEVEL_PRIMARY, 1};
@@ -686,22 +698,24 @@ static VkResult frame_begin(ps_gpu *g, struct ps_frame *f, const ps_upload *up, 
     vkBeginCommandBuffer(f->cmd, &bi);
     if (nup) {
         VkBufferImageCopy copies[64];
-        for (size_t done = 0; done < nup;) {
-            size_t n = nup - done < 64 ? nup - done : 64;
-            for (size_t k = 0; k < n; k++) {
-                const ps_upload *u = &up[done + k];
-                copies[k] = (VkBufferImageCopy){u->offset, u->w, u->h, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
-                                                {u->x, u->y, 0}, {u->w, u->h, 1}};
+        for (uint32_t color = 0; color < 2; color++) {     /* coverage uploads, then colour ones */
+            size_t n = 0;
+            for (size_t k = 0; k < nup; k++) {
+                const ps_upload *u = &up[k];
+                if ((u->color != 0) != (color != 0)) continue;
+                copies[n++] = (VkBufferImageCopy){u->offset, u->w, u->h, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                                                  {u->x, u->y, 0}, {u->w, u->h, 1}};
+                if (n == 64) { vkCmdCopyBufferToImage(f->cmd, f->staging, color ? g->color : g->atlas, VK_IMAGE_LAYOUT_GENERAL, 64, copies); n = 0; }
             }
-            vkCmdCopyBufferToImage(f->cmd, f->staging, g->atlas, VK_IMAGE_LAYOUT_GENERAL, (uint32_t)n, copies);
-            done += n;
+            if (n) vkCmdCopyBufferToImage(f->cmd, f->staging, color ? g->color : g->atlas, VK_IMAGE_LAYOUT_GENERAL, (uint32_t)n, copies);
         }
         /* This frame's uploads before its own sampling. Earlier frames sample other regions. */
         VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        VkImageMemoryBarrier visible = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, NULL, VK_ACCESS_TRANSFER_WRITE_BIT,
+        VkImageMemoryBarrier visible[2] = {{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, NULL, VK_ACCESS_TRANSFER_WRITE_BIT,
             VK_ACCESS_SHADER_READ_BIT, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL, VK_QUEUE_FAMILY_IGNORED,
-            VK_QUEUE_FAMILY_IGNORED, g->atlas, range};
-        vkCmdPipelineBarrier(f->cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, NULL, 0, NULL, 1, &visible);
+            VK_QUEUE_FAMILY_IGNORED, g->atlas, range}};
+        visible[1] = visible[0]; visible[1].image = g->color;
+        vkCmdPipelineBarrier(f->cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, NULL, 0, NULL, 2, visible);
     }
     return VK_SUCCESS;
 }
@@ -813,7 +827,7 @@ void ps_close(ps_gpu *g) {
         if (g->vertices_mem) vkFreeMemory(g->device, g->vertices_mem, NULL);
         if (g->glyphs) vkDestroyBuffer(g->device, g->glyphs, NULL);
         if (g->glyphs_mem) vkFreeMemory(g->device, g->glyphs_mem, NULL);
-        drop_atlas(g);
+        drop_atlas(g); drop_color(g);
         if (g->sampler) vkDestroySampler(g->device, g->sampler, NULL);
         if (g->descriptors) vkDestroyDescriptorPool(g->device, g->descriptors, NULL);
         if (g->glyph_pipeline) vkDestroyPipeline(g->device, g->glyph_pipeline, NULL);

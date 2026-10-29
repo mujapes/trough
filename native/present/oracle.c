@@ -112,14 +112,17 @@ int ps_oracle(char *out, size_t capacity) {
 
 /* Glyph composition oracle: random coverage masks packed in an atlas, drawn at random integer
  * positions with clips and premultiplied colours over a few rectangles. Reference: src-over of
- * colour * coverage/255, the same rule the glyph shader applies to the R8 texel. */
+ * colour * coverage/255, the same rule the glyph shader applies to the R8 texel. A third of the
+ * glyphs are colour glyphs: random premultiplied RGBA images in the colour atlas at the same
+ * places, drawn as texel * colour.a. */
 int ps_glyph_oracle(char *out, size_t capacity) {
     ps_gpu *g;
     char info[300] = "";
     int st = ps_open(&g, info, sizeof info);
     if (st) { snprintf(out, capacity, "{\"ok\":false,\"error\":\"open %d\"}", st); return 0; }
     enum { AW = 512, AH = 512, MASKS = 64, SCENES = 40 };
-    uint8_t *atlas = malloc(AW * AH), *gpu = malloc(256 * 256 * 4), *ref = malloc(256 * 256 * 4);
+    uint8_t *atlas = malloc(AW * AH), *colors = malloc(AW * AH * 4), *gpu = malloc(256 * 256 * 4), *ref = malloc(256 * 256 * 4);
+    uint64_t color_glyphs = 0;
     ps_glyph *glyphs = malloc(300 * sizeof *glyphs);
     ps_rect rects[4];
     uint32_t mx[MASKS], my[MASKS], mw[MASKS], mh[MASKS];
@@ -136,7 +139,13 @@ int ps_glyph_oracle(char *out, size_t capacity) {
         for (uint32_t v = 0; v < mh[i]; v++) for (uint32_t u = 0; u < mw[i]; u++)
             atlas[(my[i] + v) * AW + mx[i] + u] = (uint8_t)(next(3) ? next(256) : next(2) * 255);
     }
+    for (size_t p = 0; p < (size_t)AW * AH; p++) {          /* premultiplied: each channel <= alpha */
+        uint8_t a = (uint8_t)(next(3) ? next(256) : next(2) * 255);
+        colors[p * 4 + 3] = a;
+        for (int ch = 0; ch < 3; ch++) colors[p * 4 + ch] = (uint8_t)(a ? next(a + 1u) : 0);
+    }
     if (!st) st = ps_atlas(g, atlas, AW, AH);
+    if (!st) st = ps_atlas_color(g, colors, AW, AH);
     for (int s = 1; s <= SCENES && !st && gpu && ref && glyphs && depth; s++) {
         rng = 0x51ed27ull * (uint64_t)s;
         uint32_t w = 16 + next(240), h = 16 + next(240), n = 1 + next(300), nr = next(4);
@@ -146,7 +155,9 @@ int ps_glyph_oracle(char *out, size_t capacity) {
             float x0 = (float)next(w + 40) - 20, y0 = (float)next(h + 40) - 20;
             ps_glyph *q = &glyphs[i];
             q->x0 = x0; q->y0 = y0; q->x1 = x0 + (float)mw[m]; q->y1 = y0 + (float)mh[m];
-            q->u = (float)mx[m]; q->v = (float)my[m]; q->unused0 = q->unused1 = 0;
+            q->u = (float)mx[m]; q->v = (float)my[m]; q->unused1 = 0;
+            q->kind = next(3) == 0 ? PS_GLYPH_COLOR : PS_GLYPH_COVERAGE;
+            color_glyphs += q->kind == PS_GLYPH_COLOR;
             ps_rect c; random_rect(&c, w, h);
             q->cx0 = c.cx0; q->cy0 = c.cy0; q->cx1 = c.cx1; q->cy1 = c.cy1;
             q->r = c.r; q->g = c.g; q->b = c.b; q->a = c.a;
@@ -160,8 +171,10 @@ int ps_glyph_oracle(char *out, size_t capacity) {
                 if (x < 0 || y < 0 || x >= (int)w || y >= (int)h) continue;
                 float cx = (float)x + 0.5f, cy = (float)y + 0.5f;
                 if (cx < q->cx0 || cx >= q->cx1 || cy < q->cy0 || cy >= q->cy1) continue;
-                float cov = (float)atlas[((int)q->v + y - (int)q->y0) * AW + (int)q->u + x - (int)q->x0] / 255.0f;
-                float src[4] = {q->r * cov, q->g * cov, q->b * cov, q->a * cov};
+                size_t t = (size_t)((int)q->v + y - (int)q->y0) * AW + (size_t)((int)q->u + x - (int)q->x0);
+                float cov = (float)atlas[t] / 255.0f, src[4];
+                if (q->kind == PS_GLYPH_COLOR) for (int ch = 0; ch < 4; ch++) src[ch] = (float)colors[t * 4 + ch] / 255.0f * q->a;
+                else { src[0] = q->r * cov; src[1] = q->g * cov; src[2] = q->b * cov; src[3] = q->a * cov; }
                 uint8_t *p = ref + ((size_t)y * w + x) * 4;
                 for (int ch = 0; ch < 4; ch++) p[ch] = unorm(src[ch] + (float)p[ch] / 255.0f * (1.0f - src[3]));
                 if (depth[(size_t)y * w + x] < 255) depth[(size_t)y * w + x]++;
@@ -181,13 +194,13 @@ int ps_glyph_oracle(char *out, size_t capacity) {
         }
         pixels += (size_t)w * h;
     }
-    free(atlas); free(gpu); free(ref); free(glyphs); free(depth);
+    free(atlas); free(colors); free(gpu); free(ref); free(glyphs); free(depth);
     ps_close(g);
     for (char *c = info; *c; c++) if (*c == '"' || *c == '\\') *c = '\'';
     snprintf(out, capacity, "{\"ok\":%s,\"device\":\"%s\",\"status\":%d,\"scenes\":%d,\"pixels\":%llu,\"bad_pixels\":%llu,"
-        "\"large_diffs\":%llu,\"max_channel_diff\":%d,\"first_bad\":\"%s\"}", !st && !bad && !large && pixels ? "true" : "false",
-        info, st, SCENES, (unsigned long long)pixels, (unsigned long long)bad, (unsigned long long)large, max_diff, first);
-    return !st && !bad && !large && pixels;
+        "\"large_diffs\":%llu,\"max_channel_diff\":%d,\"color_glyphs\":%llu,\"first_bad\":\"%s\"}", !st && !bad && !large && pixels && color_glyphs ? "true" : "false",
+        info, st, SCENES, (unsigned long long)pixels, (unsigned long long)bad, (unsigned long long)large, max_diff, (unsigned long long)color_glyphs, first);
+    return !st && !bad && !large && pixels && color_glyphs;
 }
 
 /* Frames in flight over a residency-managed atlas (docs/ATLAS.md). Glyph keys drift so the
@@ -244,12 +257,12 @@ int ps_frames_oracle(char *out, size_t capacity) {
                         for (int j = 0; live && j < x->n; j++) if (x->x[j] == r.x && x->y[j] == r.y && x->key[j] != key) violations++;
                     }
                     memcpy(px + bytes[burst], mask, (size_t)w * h);
-                    up[burst][nup[burst]++] = (ps_upload){r.x, r.y, w, h, (uint32_t)bytes[burst]};
+                    up[burst][nup[burst]++] = (ps_upload){r.x, r.y, w, h, (uint32_t)bytes[burst], 0};
                     bytes[burst] += (size_t)w * h; uploads++;
                 }
                 ps_glyph *q = &fr->q[fr->n];
                 float x0 = (float)next(FW + 20) - 10, y0 = (float)next(FH + 20) - 10;
-                q->x0 = x0; q->y0 = y0; q->x1 = x0 + w; q->y1 = y0 + h; q->u = r.x; q->v = r.y; q->unused0 = q->unused1 = 0;
+                q->x0 = x0; q->y0 = y0; q->x1 = x0 + w; q->y1 = y0 + h; q->u = r.x; q->v = r.y; q->kind = PS_GLYPH_COVERAGE; q->unused1 = 0;
                 q->cx0 = -1e6f; q->cy0 = -1e6f; q->cx1 = 1e6f; q->cy1 = 1e6f;
                 float a = (float)(1 + next(255)) / 255.0f;
                 q->r = a * (float)next(256) / 255.0f; q->g = a * (float)next(256) / 255.0f; q->b = a * (float)next(256) / 255.0f; q->a = a;

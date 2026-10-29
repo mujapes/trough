@@ -17,11 +17,15 @@ typedef struct {
 } ps_rect;
 typedef struct ps_gpu ps_gpu;
 
-/* A glyph: an integer-aligned destination box, its coverage mask at an integer atlas origin
- * (the box's size), a clip and a premultiplied colour multiplied by the mask's coverage. */
+/* A glyph: an integer-aligned destination box, its image at an integer atlas origin (the box's
+ * size), a clip and a premultiplied colour. kind 0: a coverage mask in the R8 atlas, drawn as
+ * colour * coverage. kind 1: a colour glyph (emoji) in the RGBA8 atlas, premultiplied, drawn as
+ * texel * colour.a (only the colour's opacity applies). */
+#define PS_GLYPH_COVERAGE 0.0f
+#define PS_GLYPH_COLOR 1.0f
 typedef struct {
     float x0, y0, x1, y1;
-    float u, v, unused0, unused1;
+    float u, v, kind, unused1;
     float cx0, cy0, cx1, cy1;
     float r, g, b, a;
 } ps_glyph;
@@ -33,6 +37,9 @@ int ps_open(ps_gpu **, char *info, size_t capacity);
 int ps_render(ps_gpu *, const ps_rect *, size_t count, uint32_t w, uint32_t h, uint8_t *rgba, double *gpu_ms);
 /* Replaces the R8 coverage atlas (w*h bytes, rows top to bottom). */
 int ps_atlas(ps_gpu *, const uint8_t *coverage, uint32_t w, uint32_t h);
+/* Replaces the RGBA8 colour-glyph atlas (w*h*4 bytes, premultiplied, rows top to bottom). Until
+ * set, colour glyphs sample a transparent 1 x 1 atlas. */
+int ps_atlas_color(ps_gpu *, const uint8_t *rgba, uint32_t w, uint32_t h);
 /* Rectangles first, then glyphs over them, in one pass; otherwise as ps_render. */
 int ps_render_text(ps_gpu *, const ps_rect *, size_t rects, const ps_glyph *, size_t glyphs,
                    uint32_t w, uint32_t h, uint8_t *rgba, double *gpu_ms);
@@ -54,9 +61,11 @@ int ps_present(ps_gpu *, const ps_rect *, size_t rects, const ps_glyph *, size_t
  * frames still sample others) and a ring of PS_FRAMES targets. A frame uploads its rectangles
  * into the atlas, then draws, then copies its target for readback, and is submitted without
  * waiting; the caller's residency (core/atlas) guarantees no frame in flight samples a region
- * a later frame overwrites, which is why no barrier orders uploads after earlier frames. */
+ * a later frame overwrites, which is why no barrier orders uploads after earlier frames. The
+ * colour-glyph atlas is created alongside at the same size, RGBA8, with the same rules. */
 #define PS_FRAMES 3
-typedef struct { uint16_t x, y, w, h; uint32_t offset; } ps_upload;   /* offset into pixels; rows of w bytes */
+/* offset into pixels; rows of w texels (bytes in the coverage atlas, 4 bytes in the colour one). */
+typedef struct { uint16_t x, y, w, h; uint32_t offset; uint32_t color; } ps_upload;
 int ps_frames_init(ps_gpu *, uint32_t w, uint32_t h, uint32_t atlas_w, uint32_t atlas_h);
 /* Waits only when the ring slot's previous frame is still pending. *number = this frame (1, 2, ...). */
 int ps_frame_submit(ps_gpu *, const ps_upload *, size_t uploads, const uint8_t *pixels, size_t pixel_bytes,
