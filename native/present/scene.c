@@ -30,6 +30,8 @@ struct ps_gpu {
     /* Presentation (ps_open_surface). */
     int presenting;
     uint32_t family;
+    /* VK_GOOGLE_display_timing, when the device has it: each present carries its frame number. */
+    PFN_vkGetPastPresentationTimingGOOGLE past_timing; PFN_vkGetRefreshCycleDurationGOOGLE refresh_cycle;
     VkSurfaceKHR surface; VkSwapchainKHR swapchain; VkExtent2D extent;
     uint32_t images; VkImage image[8]; VkImageView image_view[8]; VkFramebuffer image_fb[8];
     VkSemaphore acquired, rendered[8];
@@ -193,11 +195,23 @@ static int open_gpu(ps_gpu **out, const char *platform, char *info, size_t capac
     if (family == UINT32_MAX) { ps_close(g); return -(int)-VK_ERROR_FEATURE_NOT_PRESENT; }
     float priority = 1;
     VkDeviceQueueCreateInfo dq = {VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO, NULL, 0, family, 1, &priority};
-    const char *swap = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
+    const char *dev_ext[2] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_GOOGLE_DISPLAY_TIMING_EXTENSION_NAME};
+    uint32_t next = 0, timing = 0;
+    if (g->presenting) {
+        VkExtensionProperties have[256]; uint32_t n = 256;
+        if (vkEnumerateDeviceExtensionProperties(g->gpu, NULL, &n, have) >= 0)
+            for (uint32_t i = 0; i < n; i++) if (!strcmp(have[i].extensionName, VK_GOOGLE_DISPLAY_TIMING_EXTENSION_NAME)) timing = 1;
+        next = 1 + timing;
+    }
     g->family = family;
-    VkDeviceCreateInfo dci = {VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, NULL, 0, 1, &dq, 0, NULL, g->presenting ? 1 : 0, g->presenting ? &swap : NULL, NULL};
+    VkDeviceCreateInfo dci = {VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, NULL, 0, 1, &dq, 0, NULL, next, next ? dev_ext : NULL, NULL};
     if (!(r = vkCreateDevice(g->gpu, &dci, NULL, &g->device))) {
         vkGetDeviceQueue(g->device, family, 0, &g->queue);
+        if (timing) {
+            g->past_timing = (PFN_vkGetPastPresentationTimingGOOGLE)vkGetDeviceProcAddr(g->device, "vkGetPastPresentationTimingGOOGLE");
+            g->refresh_cycle = (PFN_vkGetRefreshCycleDurationGOOGLE)vkGetDeviceProcAddr(g->device, "vkGetRefreshCycleDurationGOOGLE");
+            if (!g->past_timing || !g->refresh_cycle) g->past_timing = NULL, g->refresh_cycle = NULL;
+        }
         VkCommandPoolCreateInfo cp = {VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, NULL, VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT, family};
         r = vkCreateCommandPool(g->device, &cp, NULL, &g->pool);
     }
@@ -753,10 +767,28 @@ int ps_frame_present(ps_gpu *g, const ps_upload *up, size_t nup, const uint8_t *
     if ((r = vkQueueSubmit(g->queue, 1, &si, f->fence))) return fail(r);
     f->pending = 1; f->number = ++g->submitted;
     if (number) *number = f->number;
-    VkPresentInfoKHR pi = {VK_STRUCTURE_TYPE_PRESENT_INFO_KHR, NULL, 1, &g->rendered[index], 1, &g->swapchain, &index, NULL};
+    VkPresentTimeGOOGLE when = {(uint32_t)f->number, 0};             /* as soon as possible */
+    VkPresentTimesInfoGOOGLE times = {VK_STRUCTURE_TYPE_PRESENT_TIMES_INFO_GOOGLE, NULL, 1, &when};
+    VkPresentInfoKHR pi = {VK_STRUCTURE_TYPE_PRESENT_INFO_KHR, g->past_timing ? &times : NULL, 1, &g->rendered[index], 1, &g->swapchain, &index, NULL};
     VkResult pr = vkQueuePresentKHR(g->queue, &pi);
     if (pr == VK_ERROR_OUT_OF_DATE_KHR || pr == VK_SUBOPTIMAL_KHR) return 1;
     return pr < 0 ? fail(pr) : 0;
+}
+
+int ps_present_timing(ps_gpu *g, ps_present_time *out, size_t capacity, uint64_t *refresh_ns) {
+    if (!g || !g->swapchain || !g->past_timing) return -1;
+    VkRefreshCycleDurationGOOGLE rc = {0};
+    if (refresh_ns) { *refresh_ns = 0; if (g->refresh_cycle(g->device, g->swapchain, &rc) == VK_SUCCESS) *refresh_ns = rc.refreshDuration; }
+    VkPastPresentationTimingGOOGLE t[64];
+    uint32_t n = capacity < 64 ? (uint32_t)capacity : 64;
+    if (!n) return 0;
+    VkResult r = g->past_timing(g->device, g->swapchain, &n, t);
+    if (r < 0) return fail(r);
+    for (uint32_t i = 0; i < n; i++) {
+        out[i].frame = t[i].presentID; out[i].desired_ns = t[i].desiredPresentTime; out[i].actual_ns = t[i].actualPresentTime;
+        out[i].earliest_ns = t[i].earliestPresentTime; out[i].margin_ns = t[i].presentMargin;
+    }
+    return (int)n;
 }
 
 int ps_frame_pixels(ps_gpu *g, uint64_t number, uint8_t *rgba) {

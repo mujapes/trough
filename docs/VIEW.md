@@ -144,3 +144,22 @@ Pixel bundle `79bdc5b7eedb`, first run (Trough visible): 5 derived frames presen
 Surface, 0 bad pixels, max channel diff 1. Build takes 11.0 ms for the first frame (71 uploads)
 and 1.3-1.8 ms after it. Pacing: 120 frames at 16.20 ms per frame, with a worst frame call of
 20.5 ms and 0 failed presents.
+
+## Flings and display timing
+
+The presenter enables `VK_GOOGLE_display_timing` when the device has it. Each present carries
+its frame number, and `ps_present_timing` / `derivePresentTimes` return when each frame
+actually reached the display. `android.viewsurface` flings 80 px per frame for 120 frames,
+first without prefetch, then with a window of 8 above and 32 below. Each frame scrolls, settles
+what is visible (`deriveSettleVisible`) and presents. Pixel, 2 runs (bundle `672ee13db0b7`):
+
+| | scroll + settle avg / worst | skipped vsyncs (display) | present margin |
+|---|---|---|---|
+| no prefetch | 3.0-3.7 / 17.6 ms | 1, 0 | 43 ms |
+| prefetch | 1.3-1.4 / 4.2-5.1 ms | 0, 0 | 43 ms |
+
+The refresh period is 16.65 ms. Timing frame-call intervals on the CPU reported 1-16 "missed"
+frames: those were queueing jitter, not dropped vsyncs. Display timing is the measure. The
+3-frame ring hides most layout stalls, at a cost of latency. Each frame is ready about 43 ms
+(2.6 refreshes) before its vsync, so a scroll reaches the glass about 3 frames late. Next:
+pace frame starts from the display timing so the margin shrinks to the build time.

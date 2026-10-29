@@ -83,12 +83,70 @@ final class ViewSurfaceOracle {
             out.put("pacing", Json.map("frames", n, "total_ms", total, "per_frame_ms", total / n, "frame_call_avg_ms", build / n,
                 "frame_call_worst_ms", worst, "failed_presents", failed));
             ok &= failed == 0;
+            /* Flings: 80 px per frame for 120 frames, without and then with background prefetch.
+             * Each frame scrolls, settles what is visible and presents; a frame interval over
+             * 20 ms is a missed vsync at 60 Hz. */
+            for (int pf = 0; pf < 2; pf++) {
+                NativeCore.deriveViewport(d, anchor + 40 + 120 * pf, 0, h);   /* fresh paragraphs each run */
+                NativeCore.derivePrefetch(d, pf == 1 ? 8 : 0, pf == 1 ? 32 : 0);
+                NativeCore.deriveSettle(d);
+                long[] s0 = NativeCore.deriveStats(d);
+                NativeCore.derivePresentTimes(d);                 /* drop earlier frames' timing */
+                double scrollSum = 0, scrollWorst = 0; int missed = 0, fails = 0;
+                List<Object> misses = new ArrayList<>();
+                long last = System.nanoTime(), f0 = last;
+                for (int k = 0; k < n; k++) {
+                    long a0 = System.nanoTime();
+                    NativeCore.deriveScroll(d, 80);
+                    NativeCore.deriveSettleVisible(d);
+                    double sm = (System.nanoTime() - a0) / 1e6;
+                    scrollSum += sm; scrollWorst = Math.max(scrollWorst, sm);
+                    double[] timing = new double[5];
+                    NativeCore.deriveFrame(d, false, timing);
+                    if (timing[4] < 0) fails++;
+                    long now = System.nanoTime();
+                    if (k > 0 && (now - last) / 1e6 > 20) {
+                        missed++;
+                        if (misses.size() < 8) misses.add(Json.map("frame", k, "interval_ms", (now - last) / 1e6, "scroll_settle_ms", sm,
+                            "build_ms", timing[1], "present_wait_ms", timing[2], "uploads", (long) timing[4]));
+                    }
+                    last = now;
+                }
+                long[] s1 = NativeCore.deriveStats(d);
+                Thread.sleep(100);                                /* the last frames reach the display */
+                Map<String, Object> display = displayTiming(NativeCore.derivePresentTimes(d));
+                out.put(pf == 1 ? "fling_prefetch_display" : "fling_display", display);
+                out.put(pf == 1 ? "fling_prefetch" : "fling", Json.map("frames", n, "per_frame_ms", (System.nanoTime() - f0) / 1e6 / n,
+                    "scroll_settle_avg_ms", scrollSum / n, "scroll_settle_worst_ms", scrollWorst, "missed_frames", missed,
+                    "pauses", s1[20] - s0[20], "layout_runs", s1[11] - s0[11], "failed_presents", fails, "misses", misses));
+                ok &= fails == 0;
+            }
+            NativeCore.derivePrefetch(d, 0, 0);
             out.put("ok", ok);
             return out;
         } finally {
             if (d > 0) NativeCore.deriveClose(d);
             ui(activity, new Callable<Void>() { public Void call() { if (view[0] != null) root.removeView(view[0]); return null; }});
         }
+    }
+
+    /** Display timing (VK_GOOGLE_display_timing): the intervals between frames actually shown, in
+     * refresh periods. An interval of 2 or more periods is a vsync where no new frame was shown. */
+    static Map<String, Object> displayTiming(long[] t) {
+        if (t == null || t.length < 1 + 5 * 2) return Json.map("available", false, "entries", t == null ? 0 : (t.length - 1) / 5);
+        long refresh = t[0]; int n = (t.length - 1) / 5;
+        int[] hist = new int[5]; int skipped = 0; long worst = 0; double marginSum = 0;
+        for (int i = 1; i < n; i++) {
+            long gap = t[1 + 5 * i + 2] - t[1 + 5 * (i - 1) + 2];
+            worst = Math.max(worst, gap);
+            int periods = refresh > 0 ? (int) Math.round((double) gap / refresh) : 0;
+            hist[Math.min(Math.max(periods, 0), 4)]++;
+            if (periods >= 2) skipped += periods - 1;
+        }
+        for (int i = 0; i < n; i++) marginSum += t[1 + 5 * i + 4];
+        return Json.map("available", true, "refresh_ms", refresh / 1e6, "frames", n, "periods_hist", Arrays.toString(hist),
+            "skipped_vsyncs", skipped, "worst_interval_ms", worst / 1e6, "avg_margin_ms", marginSum / n / 1e6,
+            "first_frame", t[1], "last_frame", t[1 + 5 * (n - 1)]);
     }
 
     static byte[] reference(byte[] scene, int w, int h) {

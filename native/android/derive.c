@@ -24,6 +24,7 @@ typedef struct {
      * thread that calls deriveFrame. */
     ps_gpu *gpu; ANativeWindow *window; at_atlas atlas; at_cell *atlas_cells; uint32_t *atlas_index; int32_t atlas_pages[64];
     uint32_t fw, fh; uint64_t frame_uploads, frame_hits;
+    ps_present_time present_times[1024]; size_t npresent; uint64_t refresh_ns;   /* derivePresentTimes */
     tr_world world; tr_cell *cells; tr_id driver, width, op, viewport, op_sum, op_scene; tr_id *text; int paragraphs;
     int levels; uint32_t scene;                       /* summary levels above paragraphs; the scene node */
     atomic_ullong runs[5];                            /* invocations: layout, summary, scene, mask; [4] paragraphs estimated */
@@ -496,6 +497,24 @@ JNIEXPORT jint JNICALL CLASS(deriveDemand)(JNIEnv *env, jclass c, jlong h, jint 
 JNIEXPORT jlong JNICALL CLASS(deriveSettle)(JNIEnv *env, jclass c, jlong h) {
     (void)env; (void)c; return (jlong)ex_settle(&((deriver *)(intptr_t)h)->ex);
 }
+/* Display timing collected since the last call: refresh period, then (frame, desired, actual,
+ * earliest, margin) per presented frame, in ns. Empty without VK_GOOGLE_display_timing. */
+JNIEXPORT jlongArray JNICALL CLASS(derivePresentTimes)(JNIEnv *env, jclass c, jlong h) {
+    (void)c; deriver *d = (deriver *)(intptr_t)h;
+    if (d->window && d->npresent < 1024) {
+        int got = ps_present_timing(d->gpu, d->present_times + d->npresent, 1024 - d->npresent, &d->refresh_ns);
+        if (got > 0) d->npresent += (size_t)got;
+    }
+    jsize n = (jsize)(1 + 5 * d->npresent);
+    jlongArray r = (*env)->NewLongArray(env, n);
+    if (r) {
+        jlong first = (jlong)d->refresh_ns;
+        (*env)->SetLongArrayRegion(env, r, 0, 1, &first);
+        if (d->npresent) (*env)->SetLongArrayRegion(env, r, 1, n - 1, (const jlong *)(void *)d->present_times);
+    }
+    d->npresent = 0;
+    return r;
+}
 /* Settles what is on screen (DV_VISIBLE and urgent), not the prefetch. */
 JNIEXPORT jlong JNICALL CLASS(deriveSettleVisible)(JNIEnv *env, jclass c, jlong h) {
     (void)env; (void)c; return (jlong)ex_settle_at(&((deriver *)(intptr_t)h)->ex, DV_VISIBLE);
@@ -657,6 +676,10 @@ JNIEXPORT jbyteArray JNICALL CLASS(deriveFrame)(JNIEnv *env, jclass c, jlong h, 
     uint64_t number;
     int presented = d->window ? ps_frame_present(d->gpu, ups, nup, staging, staged, glyphs, nglyph, pixels, &number)
                               : ps_frame_submit(d->gpu, ups, nup, staging, staged, NULL, 0, glyphs, nglyph, &number);
+    if (d->window && d->npresent < 1024) {             /* collect display timing as it arrives */
+        int got = ps_present_timing(d->gpu, d->present_times + d->npresent, 1024 - d->npresent, &d->refresh_ns);
+        if (got > 0) d->npresent += (size_t)got;
+    }
     if (presented) { at_submit(&d->atlas); ms[4] = -presented; goto done; }   /* 1: swapchain out of date */
     at_submit(&d->atlas);
     clock_gettime(CLOCK_MONOTONIC, &t2);

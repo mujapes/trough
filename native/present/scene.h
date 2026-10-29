@@ -66,6 +66,11 @@ int ps_frame_submit(ps_gpu *, const ps_upload *, size_t uploads, const uint8_t *
  * ring's w x h). Returns 0, 1 if the swapchain must be rebuilt, or a negative VkResult. */
 int ps_frame_present(ps_gpu *, const ps_upload *, size_t uploads, const uint8_t *pixels, size_t pixel_bytes,
                      const ps_glyph *, size_t glyphs, int shot, uint64_t *number);
+/* Presentation timing (VK_GOOGLE_display_timing): frames presented since the last call, with
+ * the time each reached the display (CLOCK_MONOTONIC ns) and the refresh period. -1 when the
+ * device or swapchain has no display timing. */
+typedef struct { uint64_t frame, desired_ns, actual_ns, earliest_ns, margin_ns; } ps_present_time;
+int ps_present_timing(ps_gpu *, ps_present_time *, size_t capacity, uint64_t *refresh_ns);
 /* Non-blocking: the newest frame number whose fence (and all earlier ones) has signalled. */
 uint64_t ps_frames_retired(ps_gpu *);
 /* A retired frame's pixels (w*h*4), while its ring slot has not been reused. */
