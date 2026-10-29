@@ -2,11 +2,9 @@ package com.trough.hot;
 
 import android.app.Activity;
 import android.graphics.Rect;
-import android.graphics.text.LineBreaker;
 import android.os.Bundle;
 import android.text.Layout;
 import android.text.StaticLayout;
-import android.util.TypedValue;
 import android.view.View;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.widget.EditText;
@@ -119,15 +117,9 @@ final class AccessOracle {
     }
     /** An EditText laid out like the derived view's paragraphs: same width, size and breaking. */
     private static EditText reference(Activity activity, String text, int width) {
-        EditText e = new EditText(activity);
-        e.setTextSize(TypedValue.COMPLEX_UNIT_PX, DeriveLayout.TEXT_SIZE);
-        e.setPadding(0, 0, 0, 0);
-        e.setIncludeFontPadding(false);
-        e.setBreakStrategy(LineBreaker.BREAK_STRATEGY_HIGH_QUALITY);
-        e.setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE);
+        EditText e = DocumentKeys.laidOut(activity);
         e.setText(text);
-        e.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
-        e.layout(0, 0, width, e.getMeasuredHeight());
+        DocumentKeys.layout(e, width);
         return e;
     }
     private static boolean sameLines(Layout l, String text, int width) {

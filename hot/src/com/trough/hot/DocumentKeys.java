@@ -44,6 +44,8 @@ final class DocumentKeys {
         e.setIncludeFontPadding(false);
         e.setBreakStrategy(LineBreaker.BREAK_STRATEGY_HIGH_QUALITY);
         e.setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE);
+        /* Detached views have no LayoutParams; TextView.checkForResize reads them on every edit. */
+        e.setLayoutParams(new android.view.ViewGroup.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT));
         return e;
     }
     static void layout(EditText e, int width) {
