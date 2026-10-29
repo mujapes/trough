@@ -79,6 +79,13 @@ or_position (id -> position via parent links, 9/9 mutants; 7b02695). loop3 never
 responding (activity/process gone after 07:09; the control poller lives with the Activity, so a
 service-only restart is silent). loop4 (bundle with order tree + accessibility) is running after the
 user foregrounded Trough at 07:29.
+Later: keys (docs/INPUT.md "Keys": platform TextKeyListener + ArrowKeyMovementMethod on an Editable
+window, android.keys), accessibility text-change events, colour glyphs (docs/TEXT_RENDERING.md
+"Colour glyphs": RGBA atlas + per-glyph kind, colour-face detection from font tables; lavapipe 0 bad).
+Bundle 039653916966 (Trough visible): android.touch passed incl. typing through the view's
+InputConnection; viewsurface/surface pass; access (bounds clipping) and keys (Selection vertical-move
+memory) fixed in 86947da; vulkan surface-lost now needs_visible_app. User 2026-10-29: don't work on
+keeping the VM->phone loop alive; it goes away when Trough is its own app.
 
 DECIDED (2026-10-28): the Java/native boundary is a bionic build of the same sources, loaded
 in-process (docs/BIONIC.md). All store oracles pass as bionic programs on the Pixel; android.jni
