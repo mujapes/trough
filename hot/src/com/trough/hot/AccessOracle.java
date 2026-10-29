@@ -125,6 +125,7 @@ final class AccessOracle {
                     failures.add(Json.map("text_changed", Arrays.asList(a, b, t), "got", ev == null ? null : Arrays.asList(ev.getFromIndex(), ev.getRemovedCount(), ev.getAddedCount())));
                 before = after;
             }
+            NativeCore.deriveSettle(d);                  /* shown() lists laid-out paragraphs only */
             if (idOf(provider, p) != id) failures.add(Json.map("id_moved", p));
             input.setSelection((int) base + 2, (int) base + 2);
             input.commitText("\n", 1);
