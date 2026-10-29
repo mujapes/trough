@@ -272,3 +272,35 @@ thread applies it after any pending scroll, then makes a frame.
 `android.touch` now ends with a tap after the fling (bundle `0772e5703eae`). It selects
 (194, 271), as StaticLayout does at the scrolled position, draws one caret, runs no layout or
 scene job, and does not scroll.
+
+## Selection
+
+A range adds a second cell, `sel_anchor` (same encoding as the selection). 0, or equal to the
+selection, means a caret; `deriveSelect` clears it, and `deriveSelectRange(pa, oa, pb, ob)` sets
+both ends. Then, for each visible paragraph in the range, the overlay reads a
+**highlight(paragraph << 42 | flags << 40 | start << 20 | end)** node. That node is static, reads
+text and width, and comes from Java `TextLayout.selection`. The flags record whether the range
+began in an earlier paragraph or continues into a later one, because paragraphs are separate
+layouts. The overlay emits rectangles of kind 1, which the frame draws translucent (the caret
+colour at alpha 89) under the glyphs. The overlay format is now count, then (x0, y0, x1, y1,
+kind).
+
+`TextLayout.selection` follows Layout.getSelection. On a line, each directional run is clipped
+to the range, from the leading edge of its first character to the trailing edge of its last. A
+range over several lines fills its first line from the text to the far edge, its middle lines
+completely and its last line from the near edge. android.selection found two whitespace rules
+that are not in the documentation:
+- on a left-to-right line, trailing whitespace (not drawn) is selected, past the drawn text, by its advance;
+- on a right-to-left line, trailing whitespace is not selected. It hangs at the left, and the
+  first line's fill toward the left edge stops short by its advance.
+
+`android.selection` (offscreen). The reference is one StaticLayout over the joined paragraphs
+and its `getSelectionPath`. Both sides are filled as paths without antialiasing and compared
+pixel for pixel. Pixel bundle `50ac6bd7990f`:
+- 160 random ranges over 1-3 paragraphs, all scripts of the corpus: 0 differing pixels. Before
+  the two whitespace rules, 29 ranges differed, all by one space's advance on one line;
+- six derived overlays in the viewport (viewport offset 37; ranges reversed, empty, beginning
+  above the anchor, crossing 5 paragraphs): 0 differing pixels, and no layout or scene job;
+- extending the focus: 2 highlight runs, 4 overlay runs, 0 layout, 0 scene;
+- frame with the highlight under the glyphs against the platform: 0 bad pixels, max channel diff 2;
+- setting a caret afterwards clears the range: no highlight, one caret.

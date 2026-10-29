@@ -21,12 +21,15 @@
 #define CLASS(name) Java_com_trough_hot_NativeCore_##name
 
 typedef struct {
-    JavaVM *vm; jclass cls; jmethodID layout, mask, caret, offset_at;
+    JavaVM *vm; jclass cls; jmethodID layout, mask, caret, offset_at, select_rects;
     tr_id op_mask;
     /* Selection (docs/VIEW.md "Caret"): a cell holding (paragraph << 32 | offset) + 1, 0 = none;
      * caret nodes (paragraph << 32 | offset) give its x and line box, and the overlay node turns
      * selection + viewport into rectangles drawn under the glyphs. */
     tr_id selection, op_caret, op_overlay; uint32_t overlay;
+    /* Range selection: sel_anchor is the other end, same encoding (0 or equal: a caret).
+     * highlight(paragraph << 42 | flags << 40 | start << 20 | end) gives a paragraph's rects. */
+    tr_id sel_anchor, op_highlight;
     /* The view's frames (deriveFrameOpen): GPU frame ring and atlas residency, used only by the
      * thread that calls deriveFrame. */
     ps_gpu *gpu; ANativeWindow *window; at_atlas atlas; at_cell *atlas_cells; uint32_t *atlas_index; int32_t atlas_pages[64];
@@ -43,7 +46,7 @@ typedef struct {
     struct vsync_src *vsync;                          /* derivePace mode 2: platform frame timelines */
     tr_world world; tr_cell *cells; tr_id driver, width, op, viewport, op_sum, op_scene; tr_id *text; int paragraphs;
     int levels; uint32_t scene;                       /* summary levels above paragraphs; the scene node */
-    atomic_ullong runs[7];                            /* invocations: layout, summary, scene, mask; [4] paragraphs estimated; caret, overlay */
+    atomic_ullong runs[8];                            /* invocations: layout, summary, scene, mask; [4] paragraphs estimated; caret, overlay */
     /* Prefetch (derivePrefetch): layouts of paragraphs [anchor - before, anchor + after] are
      * demanded at DV_BACKGROUND, owned as [pf_lo, pf_hi); kept on the owner thread. */
     int pf_before, pf_after, pf_lo, pf_hi; uint64_t scroll_pauses;
@@ -348,6 +351,38 @@ static int caret_op(void *ctx, const dv_job *job, ex_out *out) {
     if (s) (*env)->DeleteLocalRef(env, s);
     return 0;
 }
+/* Highlight: one paragraph's selection rectangles (Layout.getSelection's rules, through Java),
+ * in its own coordinates: count, then left, top, right, bottom floats. */
+static int highlight_op(void *ctx, const dv_job *job, ex_out *out) {
+    deriver *d = ctx;
+    atomic_fetch_add(&d->runs[7], 1);
+    uint64_t para = job->key >> 42, flags = (job->key >> 40) & 3, start = (job->key >> 20) & 0xfffff, end = job->key & 0xfffff;
+    if (para >= (uint64_t)d->paragraphs) { out->value = 0; return 0; }
+    dv_ref rt = {DV_CELL, d->text[para], 0}, rw = {DV_CELL, d->width, 0};
+    uint64_t th, w;
+    int have_t = ex_read(job, out, rt, &th, NULL), have_w = ex_read(job, out, rw, &w, NULL);
+    if (!have_t || !have_w) { if (!have_t) ex_need(out, rt); if (!have_w) ex_need(out, rw); return 0; }
+    const void *units = NULL; size_t length = 0;
+    if (bl_is(th) && bl_get(&d->blobs, th, &units, &length) != TR_OK) { units = NULL; length = 0; }
+    JNIEnv *env;
+    if ((*d->vm)->GetEnv(d->vm, (void **)&env, JNI_VERSION_1_6) != JNI_OK) { out->value = 0; return 0; }
+    jstring s = (*env)->NewString(env, units, (jsize)(length / 2));
+    jbyteArray r = s ? (*env)->CallStaticObjectMethod(env, d->cls, d->select_rects, s, (jint)w, (jint)start, (jint)end, (jint)flags) : NULL;
+    if ((*env)->ExceptionCheck(env)) { (*env)->ExceptionClear(env); r = NULL; }
+    if (r) {
+        jsize n = (*env)->GetArrayLength(env, r);
+        out->blob = malloc(n ? (size_t)n : 1);
+        if (out->blob) { (*env)->GetByteArrayRegion(env, r, 0, n, out->blob); out->blob_length = (size_t)n; }
+        (*env)->DeleteLocalRef(env, r);
+    } else out->value = 0;
+    if (s) (*env)->DeleteLocalRef(env, s);
+    return 0;
+}
+static void put_rect(sink *o, float x0, float y0, float x1, float y1, uint32_t kind, uint32_t *count) {
+    float r[4] = {x0, y0, x1, y1};
+    for (int k = 0; k < 4; k++) { uint32_t u; memcpy(&u, &r[k], 4); put32(o, u); }
+    put32(o, kind); (*count)++;
+}
 /* Overlay: the selection's rectangles in viewport coordinates. Walks exact heights from the
  * anchor like the scene, but only to the selected paragraph, and reads its caret node. Output:
  * count, then (x0, y0, x1, y1) floats. A caret is 2 px wide, centred on its x. */
@@ -355,32 +390,54 @@ static int caret_op(void *ctx, const dv_job *job, ex_out *out) {
 #define CARET_R (26 / 255.0f)                          /* opaque, so premultiplied is the colour */
 #define CARET_G (115 / 255.0f)
 #define CARET_B (230 / 255.0f)
+#define HIGHLIGHT_A (89 / 255.0f)                      /* selection highlight: the caret colour at ~35% */
 static int overlay_op(void *ctx, const dv_job *job, ex_out *out) {
     deriver *d = ctx;
     atomic_fetch_add(&d->runs[6], 1);
-    dv_ref rv = {DV_CELL, d->viewport, 0}, rs = {DV_CELL, d->selection, 0};
-    uint64_t v, sel;
-    int have_v = ex_read(job, out, rv, &v, NULL), have_s = ex_read(job, out, rs, &sel, NULL);
-    if (!have_v || !have_s) { if (!have_v) ex_need(out, rv); if (!have_s) ex_need(out, rs); return 0; }
+    dv_ref rv = {DV_CELL, d->viewport, 0}, rs = {DV_CELL, d->selection, 0}, ra = {DV_CELL, d->sel_anchor, 0};
+    uint64_t v, sel, anc;
+    int have_v = ex_read(job, out, rv, &v, NULL), have_s = ex_read(job, out, rs, &sel, NULL), have_a = ex_read(job, out, ra, &anc, NULL);
+    if (!have_v || !have_s || !have_a) {
+        if (!have_v) ex_need(out, rv);
+        if (!have_s) ex_need(out, rs);
+        if (!have_a) ex_need(out, ra);
+        return 0;
+    }
     sink o = {0};
+    uint32_t count = 0;
     put32(&o, 0);
     uint64_t anchor = v & 0xffffffffu, offset = (v >> 32) & 0xffff, height = v >> 48;
+    int range = sel && anc && anc != sel;
+    uint64_t lo = sel - 1, hi = sel - 1;
+    if (range) { lo = anc - 1 < sel - 1 ? anc - 1 : sel - 1; hi = anc - 1 < sel - 1 ? sel - 1 : anc - 1; }
+    uint64_t lop = lo >> 32, hip = hi >> 32;
     if (sel) {
-        uint64_t para = (sel - 1) >> 32;
         int64_t y = -(int64_t)offset;
-        for (uint64_t i = anchor; para >= anchor && i < (uint64_t)d->paragraphs && y < (int64_t)height; i++) {
-            if (i == para) {
-                dv_ref rc = {DV_NODE, d->op_caret, sel - 1}; uint64_t cv; const void *p = NULL; size_t n = 0;
+        for (uint64_t i = anchor; i <= hip && i < (uint64_t)d->paragraphs && y < (int64_t)height; i++) {
+            if (!range && i == lop) {
+                dv_ref rc = {DV_NODE, d->op_caret, lo}; uint64_t cv; const void *p = NULL; size_t n = 0;
                 if (!ex_read(job, out, rc, &cv, NULL)) { ex_need(out, rc); free(o.b); return 0; }
                 if (bl_is(cv)) bl_get(&d->blobs, cv, &p, &n);
                 if (p && n >= 12) {
                     const unsigned char *c = p;
-                    float x = bef(c), top = bef(c + 4), bottom = bef(c + 8), yy = (float)y;
-                    float r[4] = {x - CARET_HALF, yy + top, x + CARET_HALF, yy + bottom};
-                    for (int k = 0; k < 4; k++) { uint32_t u; memcpy(&u, &r[k], 4); put32(&o, u); }
-                    unsigned char one[4] = {0, 0, 0, 1}; memcpy(o.b, one, 4);
+                    float x = bef(c), yy = (float)y;
+                    put_rect(&o, x - CARET_HALF, yy + bef(c + 4), x + CARET_HALF, yy + bef(c + 8), 0, &count);
                 }
                 break;
+            }
+            if (range && i >= lop) {
+                uint64_t flags = (i > lop ? 1u : 0u) | (i < hip ? 2u : 0u);
+                uint64_t st = i == lop ? lo & 0xfffff : 0, en = i == hip ? hi & 0xfffff : 0;
+                dv_ref rh = {DV_NODE, d->op_highlight, i << 42 | flags << 40 | st << 20 | en}; uint64_t hv; const void *p = NULL; size_t n = 0;
+                if (!ex_read(job, out, rh, &hv, NULL)) { ex_need(out, rh); free(o.b); return 0; }
+                if (bl_is(hv)) bl_get(&d->blobs, hv, &p, &n);
+                if (p && n >= 4) {
+                    const unsigned char *b = p; uint32_t k = be32(b);
+                    for (uint32_t j = 0; j < k && 4 + (size_t)(j + 1) * 16 <= n; j++) {
+                        const unsigned char *q = b + 4 + (size_t)j * 16; float yy = (float)y;
+                        put_rect(&o, bef(q), yy + bef(q + 4), bef(q + 8), yy + bef(q + 12), 1, &count);
+                    }
+                }
             }
             dv_ref r = {DV_NODE, d->op, i}; uint64_t h;
             if (!height_of(d, job, out, r, 1, &h, NULL, NULL)) { ex_need(out, r); free(o.b); return 0; }
@@ -388,6 +445,8 @@ static int overlay_op(void *ctx, const dv_job *job, ex_out *out) {
         }
     }
     if (o.failed) { free(o.b); out->value = 0; return 0; }
+    unsigned char c[4] = {count >> 24, count >> 16, count >> 8, count};
+    memcpy(o.b, c, 4);
     out->blob = o.b; out->blob_length = o.n;
     return 0;
 }
@@ -506,7 +565,7 @@ static void stats(void *arg, tr_world *w, dv_graph *g) {
     s[17] = (int64_t)d->atlas.evictions; s[18] = (int64_t)d->atlas.refusals; s[19] = (int64_t)atomic_load(&d->runs[4]);
     s[20] = (int64_t)d->scroll_pauses; s[21] = d->pf_hi - d->pf_lo;
     s[22] = (int64_t)d->extra_ns; s[23] = (int64_t)d->misses;
-    s[24] = (int64_t)atomic_load(&d->runs[5]); s[25] = (int64_t)atomic_load(&d->runs[6]);
+    s[24] = (int64_t)atomic_load(&d->runs[5]); s[25] = (int64_t)atomic_load(&d->runs[6]); s[26] = (int64_t)atomic_load(&d->runs[7]);
 }
 
 /* The newest trace records: (operator 0 layout / 1 summary / 2 scene, key, outcome, worker). */
@@ -536,7 +595,7 @@ JNIEXPORT jlong JNICALL CLASS(deriveOpen)(JNIEnv *env, jclass c, jint workers, j
     if (paragraphs <= 0 || paragraphs > 100000 || workers <= 0 || workers > EX_WORKERS) return -1;
     deriver *d = calloc(1, sizeof *d);
     if (!d) return -1;
-    size_t n = (size_t)paragraphs, cellc = n + 12, nodec = n + n / (FAN - 1) + 16 + 4096, blobc = 3 * n + 64 + 4096;   /* + masks */
+    size_t n = (size_t)paragraphs, cellc = n + 16, nodec = n + n / (FAN - 1) + 16 + 4096, blobc = 3 * n + 64 + 4096;   /* + masks */
     d->paragraphs = paragraphs;
     d->cells = calloc(cellc, sizeof *d->cells); d->text = calloc(n, sizeof *d->text);
     d->nodes = calloc(nodec, sizeof *d->nodes); d->blocks = calloc(nodec, sizeof *d->blocks);
@@ -554,12 +613,14 @@ JNIEXPORT jlong JNICALL CLASS(deriveOpen)(JNIEnv *env, jclass c, jint workers, j
     d->mask = d->layout ? (*env)->GetStaticMethodID(env, cls, "mask", "(II)[B") : NULL;
     d->caret = d->mask ? (*env)->GetStaticMethodID(env, cls, "caret", "(Ljava/lang/String;II)[B") : NULL;
     d->offset_at = d->caret ? (*env)->GetStaticMethodID(env, cls, "offsetAt", "(Ljava/lang/String;IIF)I") : NULL;
-    if (!d->layout || !d->mask || !d->caret || !d->offset_at) { (*env)->ExceptionClear(env); (*env)->DeleteGlobalRef(env, d->cls); destroy(d); return -3; }
+    d->select_rects = d->offset_at ? (*env)->GetStaticMethodID(env, cls, "selection", "(Ljava/lang/String;IIII)[B") : NULL;
+    if (!d->layout || !d->mask || !d->caret || !d->offset_at || !d->select_rects) { (*env)->ExceptionClear(env); (*env)->DeleteGlobalRef(env, d->cls); destroy(d); return -3; }
     tr_world_init(&d->world, d->cells, cellc);
     tr_create(&d->world, 1, &d->driver); tr_create(&d->world, 1, &d->op); tr_create(&d->world, 0, &d->width);
     tr_create(&d->world, 1, &d->op_sum); tr_create(&d->world, 1, &d->op_scene); tr_create(&d->world, 0, &d->viewport);
     tr_create(&d->world, 1, &d->op_mask);
     tr_create(&d->world, 0, &d->selection); tr_create(&d->world, 1, &d->op_caret); tr_create(&d->world, 1, &d->op_overlay);
+    tr_create(&d->world, 0, &d->sel_anchor); tr_create(&d->world, 1, &d->op_highlight);
     d->levels = 1;
     while (count_at(d, d->levels - 1) > 1) d->levels++;  /* the top level has one node: the root */
     for (size_t i = 0; i < n; i++) tr_create(&d->world, 0, &d->text[i]);
@@ -580,6 +641,8 @@ JNIEXPORT jlong JNICALL CLASS(deriveOpen)(JNIEnv *env, jclass c, jint workers, j
     dv_set_static(&d->graph, d->op_caret);            /* text and width */
     ex_register(&d->ex, d->op_caret, caret_op, d);
     ex_register(&d->ex, d->op_overlay, overlay_op, d);
+    dv_set_static(&d->graph, d->op_highlight);
+    ex_register(&d->ex, d->op_highlight, highlight_op, d);
 
     if (ex_start(&d->ex)) { (*env)->DeleteGlobalRef(env, d->cls); destroy(d); return -4; }
     return (jlong)(intptr_t)d;
@@ -789,7 +852,22 @@ static void tap_find(void *arg, tr_world *w, dv_graph *g) {
 }
 static void set_selection(void *arg, tr_world *w, dv_graph *g) {    /* i = paragraph, length = offset (< 0: none) */
     (void)w; (void)g; call *c = arg;
+    tr_read a;
+    if (tr_current(&c->d->world, c->d->sel_anchor, &a) == TR_OK && a.value) write_cell(c->d, c->d->sel_anchor, 0);   /* a caret */
     write_cell(c->d, c->d->selection, c->length < 0 ? 0 : ((uint64_t)(uint32_t)c->i << 32 | (uint32_t)c->length) + 1);
+}
+typedef struct { deriver *d; uint64_t anchor, focus; } range_call;
+static void set_range(void *arg, tr_world *w, dv_graph *g) {
+    (void)w; (void)g; range_call *r = arg;
+    write_cell(r->d, r->d->sel_anchor, r->anchor);
+    write_cell(r->d, r->d->selection, r->focus);
+}
+/* A range from (pa, oa) to (pb, ob), either order; the focus (pb, ob) is where a caret would be. */
+JNIEXPORT void JNICALL CLASS(deriveSelectRange)(JNIEnv *env, jclass c, jlong h, jint pa, jint oa, jint pb, jint ob) {
+    (void)env; (void)c; deriver *d = (deriver *)(intptr_t)h;
+    if (pa < 0 || pb < 0 || pa >= d->paragraphs || pb >= d->paragraphs || oa < 0 || ob < 0 || oa > 0xfffff || ob > 0xfffff) return;
+    range_call r = {d, ((uint64_t)(uint32_t)pa << 32 | (uint32_t)oa) + 1, ((uint64_t)(uint32_t)pb << 32 | (uint32_t)ob) + 1};
+    ex_call(&d->ex, set_range, &r);
 }
 JNIEXPORT jlong JNICALL CLASS(deriveTap)(JNIEnv *env, jclass c, jlong h, jfloat x, jfloat y) {
     (void)c; deriver *d = (deriver *)(intptr_t)h;
@@ -835,11 +913,11 @@ JNIEXPORT jbyteArray JNICALL CLASS(deriveBytes)(JNIEnv *env, jclass c, jlong h, 
 }
 JNIEXPORT jlongArray JNICALL CLASS(deriveStats)(JNIEnv *env, jclass c, jlong h) {
     (void)c; deriver *d = (deriver *)(intptr_t)h;
-    int64_t s[26] = {0};
+    int64_t s[28] = {0};
     call k = {d, 0, (const jchar *)(void *)s, 0, 0};
     ex_call(&d->ex, stats, &k);
-    jlongArray r = (*env)->NewLongArray(env, 26);
-    if (r) (*env)->SetLongArrayRegion(env, r, 0, 26, (const jlong *)s);
+    jlongArray r = (*env)->NewLongArray(env, 28);
+    if (r) (*env)->SetLongArrayRegion(env, r, 0, 28, (const jlong *)s);
     return r;
 }
 JNIEXPORT jlongArray JNICALL CLASS(deriveTrace)(JNIEnv *env, jclass c, jlong h) {
@@ -927,17 +1005,19 @@ JNIEXPORT jbyteArray JNICALL CLASS(deriveFrame)(JNIEnv *env, jclass c, jlong h, 
     if (!sc.ok || sc.length < 4) { free(sc.bytes); return NULL; }
     uint32_t count = be32(sc.bytes);
     /* The overlay's rectangles (the caret), drawn under the glyphs. */
-    ps_rect rects[16]; size_t nrect = 0;
+    ps_rect *rects = NULL; size_t nrect = 0;
     copy oc = {d, -2, NULL, 0, 0};
     ex_call(&d->ex, bytes, &oc);
     if (oc.ok && oc.length >= 4) {
         uint32_t nr = be32(oc.bytes);
-        for (uint32_t k = 0; k < nr && nrect < 16 && 4 + (size_t)(k + 1) * 16 <= oc.length; k++) {
-            const unsigned char *q = oc.bytes + 4 + (size_t)k * 16;
+        rects = malloc(sizeof *rects * (nr ? nr : 1));
+        for (uint32_t k = 0; rects && k < nr && 4 + (size_t)(k + 1) * 20 <= oc.length; k++) {
+            const unsigned char *q = oc.bytes + 4 + (size_t)k * 20;
             ps_rect *r = &rects[nrect++];
+            float a = be32(q + 16) ? HIGHLIGHT_A : 1;    /* kind 1: highlight, translucent */
             r->x0 = bef(q); r->y0 = bef(q + 4); r->x1 = bef(q + 8); r->y1 = bef(q + 12);
             r->cx0 = 0; r->cy0 = 0; r->cx1 = (float)d->fw; r->cy1 = (float)d->fh;
-            r->r = CARET_R; r->g = CARET_G; r->b = CARET_B; r->a = 1;
+            r->r = CARET_R * a; r->g = CARET_G * a; r->b = CARET_B * a; r->a = a;   /* premultiplied */
         }
     }
     free(oc.bytes);
@@ -1012,6 +1092,7 @@ JNIEXPORT jbyteArray JNICALL CLASS(deriveFrame)(JNIEnv *env, jclass c, jlong h, 
     ms[2] = (t3.tv_sec - t2.tv_sec) * 1e3 + (t3.tv_nsec - t2.tv_nsec) / 1e6;
     ms[3] = (double)nglyph; ms[4] = (double)nup;
 done:
+    free(rects);
     if (timing) (*env)->SetDoubleArrayRegion(env, timing, 0, 5, ms);
     for (uint32_t k = 0; bytes && k < count; k++) free(bytes[k]);
     free(sc.bytes); free(nodes); free(handles); free(bytes); free(lengths); free(glyphs); free(ups); free(staging);

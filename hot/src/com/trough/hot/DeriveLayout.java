@@ -105,6 +105,19 @@ final class DeriveLayout {
         return l.offsetAt(Math.max(0, Math.min(line, l.lines.size() - 1)), x);
     }
 
+    /** Selection rectangles for [start, end) of a paragraph (flags: 1 the range began in an
+     * earlier paragraph, 2 it continues into a later one): count, then left, top, right, bottom
+     * floats per rectangle, in the paragraph's coordinates. */
+    static byte[] selection(String text, int width, int start, int end, int flags) {
+        TextLayout l = TextLayout.layout(text, PAINT.get(), width, 0, 0);
+        int n = text.length();
+        java.util.List<float[]> rects = l.selection(Math.max(0, Math.min(start, n)), Math.max(0, Math.min(end, n)), (flags & 1) != 0, (flags & 2) != 0);
+        java.nio.ByteBuffer b = java.nio.ByteBuffer.allocate(4 + 16 * rects.size());
+        b.putInt(rects.size());
+        for (float[] r : rects) b.putFloat(r[0]).putFloat(r[1]).putFloat(r[2]).putFloat(r[3]);
+        return b.array();
+    }
+
     /** Lines (start, end, baseline, top, bottom, width, rtl), then glyphs (font, id, x, y). */
     static byte[] layout(String text, int width) {
         TextLayout l = TextLayout.layout(text, PAINT.get(), width, 0, 0);

@@ -47,6 +47,7 @@ final class NativeCore {
     static native void deriveFrameInput(long deriver, long eventNanos);
     static native long deriveTap(long deriver, float x, float y);
     static native void deriveSelect(long deriver, int paragraph, int offset);
+    static native void deriveSelectRange(long deriver, int pa, int oa, int pb, int ob);
     static native long deriveValue(long deriver, int paragraph);
     static native byte[] deriveBytes(long deriver, int paragraph);
     static native long[] deriveStats(long deriver);

@@ -51,8 +51,9 @@ the scroll walk once: deriveViewport clamps now.
 Mode 2 slack now starts at 1.5 refreshes. DerivedView + android.touch: real MotionEvents drag and
 fling the paced view; touch-to-display is 46.6 ms p50, and the position equals the reference
 (VIEW.md "Touch"). Caret + taps done (VIEW.md "Caret", android.caret: 24/24 taps = StaticLayout, caret exact, 0 bad
-pixels; DerivedView taps). Next: range selection (drag-select highlight rects per line, bidi), then
-IME editing in the derived view (EditorView's InputConnection adapter driving text cells + caret).
+pixels; DerivedView taps). Range selection done (VIEW.md "Selection", android.selection: 160 random ranges = getSelectionPath
+pixel-exact, incl. bidi whitespace rules). Next: IME editing in the derived view (the InputConnection
+adapter from docs/INPUT.md driving paragraph text cells + selection cells), then drag-select handles.
 
 DECIDED (2026-10-28): the Java/native boundary is a bionic build of the same sources, loaded
 in-process (docs/BIONIC.md). All store oracles pass as bionic programs on the Pixel; android.jni

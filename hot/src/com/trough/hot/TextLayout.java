@@ -176,6 +176,56 @@ final class TextLayout {
     }
 
     /** The x of the run's edge at offset (the run's own direction). */
+    /** Selection rectangles (left, top, right, bottom) for [start, end), by Layout.getSelection's
+     * rules: on a line, each directional run clipped to the range, from the leading edge of its
+     * first character to the trailing edge of its last; a range over several lines fills its
+     * first line from the text to the paragraph's far edge, middle lines entirely and its last
+     * line from the near edge. startsBefore / continues: the range began in an earlier paragraph
+     * or goes on into a later one (paragraphs are separate layouts), so this paragraph's first
+     * or last line is a middle line of the whole range. */
+    List<float[]> selection(int start, int end, boolean startsBefore, boolean continues) {
+        List<float[]> out = new ArrayList<>();
+        if (startsBefore) start = 0;
+        if (continues) end = text.length();
+        if (end < start || (start == end && !startsBefore && !continues)) return out;
+        int first = lineOf(start), last = continues ? lines.size() : lineOf(end);
+        for (int i = first; i <= last && i < lines.size(); i++) {
+            Line l = lines.get(i);
+            boolean isFirst = i == first && !startsBefore, isLast = i == last && !continues;
+            if (isFirst && isLast) { runs(out, l, start, end); continue; }
+            if (!isFirst && !isLast) { out.add(new float[]{left, l.top, left + width, l.bottom}); continue; }
+            float lineLeft = l.rtl ? left + width - l.width : left, lineRight = l.rtl ? left + width : left + l.width;
+            if (isFirst) {
+                runs(out, l, start, l.end);
+                /* On a right-to-left line the fill to the left edge stops short by the trailing
+                 * whitespace's advance, which hangs there unselected (Layout's getLineLeft counts
+                 * it; measured: android.selection). */
+                float hang = l.rtl ? paint.measureText(text, lineVisibleEnd(l), l.end) : 0;
+                out.add(l.rtl ? new float[]{left, l.top, lineLeft - hang, l.bottom} : new float[]{lineRight, l.top, left + width, l.bottom});
+            } else {
+                runs(out, l, l.start, end);
+                out.add(l.rtl ? new float[]{lineRight, l.top, left + width, l.bottom} : new float[]{left, l.top, lineLeft, l.bottom});
+            }
+        }
+        return out;
+    }
+    private void runs(List<float[]> out, Line l, int start, int end) {
+        for (Run r : l.runs) {
+            int st = Math.max(start, r.start), en = Math.min(end, r.end);
+            if (st >= en) continue;
+            float h1 = edge(l, r, st), h2 = edge(l, r, en);
+            out.add(new float[]{Math.min(h1, h2), l.top, Math.max(h1, h2), l.bottom});
+        }
+        /* Trailing whitespace is not drawn, but on a left-to-right line Layout selects it, past
+         * the drawn text by its advance. On a right-to-left line it selects nothing there
+         * (measured: android.selection). */
+        int visible = lineVisibleEnd(l), st = Math.max(start, visible), en = Math.min(end, l.end);
+        if (st < en && !l.rtl) {
+            float edgeX = left + l.width;
+            out.add(new float[]{edgeX + paint.measureText(text, visible, st), l.top, edgeX + paint.measureText(text, visible, en), l.bottom});
+        }
+    }
+
     private float edge(Line l, Run r, int offset) {
         int o = Math.max(r.start, Math.min(offset, r.end));
         float into = paint.getRunAdvance(text, r.start, r.end, l.start, Math.max(r.end, lineVisibleEnd(l)), r.rtl, o);
