@@ -329,9 +329,78 @@ static void deterministic(void) {
     printf("ok capacity: interning past the node bound is TR_CAPACITY\n");
 }
 
+/* Demand levels: urgent roots are issued first, a background limit refuses without starving
+ * the walk, running work stays wanted when capacity runs out, and a job's level follows its
+ * most urgent demand. */
+static void levels(void) {
+    setup();
+    uint32_t a = node(0, 1), b = node(0, 2), c = node(0, 3);   /* independent op0 nodes */
+    OK(dv_demand_at(&g, a, DV_BACKGROUND)); OK(dv_demand_at(&g, b, DV_VISIBLE)); OK(dv_demand_at(&g, c, DV_URGENT));
+    settle();                                        /* first runs restart for their cells */
+    set(cell[1], 99); set(cell[2], 99); set(cell[3], 99);
+    dv_job jobs[JOBS]; size_t n; dv_progress pr;
+    prepare(jobs, JOBS, 0);
+    OK(dv_poll(&g, jobs, 1, &n, &pr));
+    CHECK(n == 1 && jobs[0].node == c && jobs[0].level == DV_URGENT);
+    CHECK(dv_job_level(&g, &jobs[0]) == DV_URGENT);
+    prepare(&jobs[1], 2, 1);
+    OK(dv_poll(&g, &jobs[1], 2, &n, &pr));          /* c is running: b, then a */
+    CHECK(n == 2 && jobs[1].node == b && jobs[1].level == DV_VISIBLE && jobs[2].node == a && jobs[2].level == DV_BACKGROUND);
+    for (int i = 0; i < 3; i++) OK(run(&jobs[i]));
+    CHECK(value(a) == reference(0, 1) && value(b) == reference(0, 2) && value(c) == reference(0, 3));
+
+    /* A background limit of 0: a is refused, the poll waits, the others are issued. */
+    set(cell[1], 100); set(cell[2], 100); set(cell[3], 100);
+    size_t none[DV_LEVELS] = {JOBS, JOBS, 0}, all[DV_LEVELS] = {JOBS, JOBS, JOBS};
+    prepare(jobs, JOBS, 0);
+    OK(dv_poll_levels(&g, jobs, JOBS, none, &n, &pr));
+    CHECK(n == 2 && jobs[0].node == c && jobs[1].node == b && pr == DV_READY);
+    OK(run(&jobs[0])); OK(run(&jobs[1]));
+    prepare(jobs, JOBS, 0);
+    OK(dv_poll_levels(&g, jobs, JOBS, none, &n, &pr));
+    CHECK(n == 0 && pr == DV_WAITING);
+    OK(dv_poll_levels(&g, jobs, JOBS, all, &n, &pr));
+    CHECK(n == 1 && jobs[0].node == a);
+    OK(run(&jobs[0]));
+    prepare(jobs, JOBS, 0);
+    OK(dv_poll(&g, jobs, JOBS, &n, &pr)); CHECK(pr == DV_IDLE);
+
+    /* Capacity runs out at an earlier root: a later root's running job is still wanted. */
+    set(cell[1], 101); set(cell[2], 101);
+    prepare(jobs, JOBS, 0);
+    OK(dv_poll(&g, jobs, 2, &n, &pr));
+    CHECK(n == 2 && jobs[0].node == b && jobs[1].node == a);
+    OK(run(&jobs[0]));
+    set(cell[2], 102);                               /* b has new work; a still runs */
+    prepare(&jobs[2], 1, 2);
+    OK(dv_poll(&g, &jobs[2], 1, &n, &pr));
+    CHECK(n == 1 && jobs[2].node == b);
+    CHECK(dv_wanted(&g, &jobs[1]) && dv_job_level(&g, &jobs[1]) == DV_BACKGROUND);
+    OK(run(&jobs[1])); OK(run(&jobs[2]));
+
+    /* A running background job follows its demand: urgent while urgently demanded too, back to
+     * background, unwanted when released. */
+    set(cell[1], 103);
+    size_t one[DV_LEVELS] = {JOBS, JOBS, 1};
+    prepare(jobs, JOBS, 0);
+    OK(dv_poll_levels(&g, jobs, JOBS, one, &n, &pr));
+    CHECK(n == 1 && jobs[0].node == a && jobs[0].level == DV_BACKGROUND);
+    OK(dv_demand_at(&g, a, DV_URGENT));
+    prepare(&jobs[1], 1, 1);
+    OK(dv_poll(&g, &jobs[1], 1, &n, &pr)); CHECK(n == 0 && dv_job_level(&g, &jobs[0]) == DV_URGENT);
+    CHECK(dv_release_at(&g, a, DV_VISIBLE) == TR_INVALID);       /* never demanded at that level */
+    OK(dv_release_at(&g, a, DV_URGENT));
+    OK(dv_poll(&g, &jobs[1], 1, &n, &pr)); CHECK(dv_job_level(&g, &jobs[0]) == DV_BACKGROUND);
+    OK(dv_release_at(&g, a, DV_BACKGROUND));
+    CHECK(dv_evict(&g, b) == TR_INVALID);                         /* demanded at one level */
+    OK(dv_poll(&g, &jobs[1], 1, &n, &pr)); CHECK(!dv_wanted(&g, &jobs[0]) && dv_job_level(&g, &jobs[0]) == DV_LEVELS);
+    OK(dv_cancel(&g, &jobs[0]));
+    printf("ok levels: issued urgent first, background limit refuses without dropping running work, levels follow demand\n");
+}
+
 static void randomized(int rounds) {
     setup();
-    uint32_t roots[8]; int nroots = 0;
+    uint32_t roots[8], level[8]; int nroots = 0;
     uint64_t checks = 0, stale = 0, cancelled = 0, evicted = 0, removed = 0, edits = 0, late = 0;
     uint64_t jobs_total = 0, scratch_total = 0;
     for (int round = 0; round < rounds; round++) {
@@ -342,8 +411,13 @@ static void randomized(int rounds) {
             if (x < 70) { int c = (int)(next() % K); tr_read r; if (tr_current(&world, cell[c], &r) == TR_OK) { set(cell[c], next() % 9); edits++; } }
             else if (x < 82) { int o = (int)(next() % OPS); tr_read r; OK(tr_current(&world, op[o], &r)); set(op[o], r.value + 1); edits++; }
             else if (x < 84 && removed < 3) { int c = (int)(next() % K); if (tr_remove(&world, cell[c]) == TR_OK) removed++; }
-            else if (x < 92 && nroots < 8) { roots[nroots] = node((int)(next() % OPS), next()); OK(dv_demand(&g, roots[nroots])); nroots++; }
-            else if (nroots > 1) { int k = (int)(next() % (uint64_t)nroots); OK(dv_release(&g, roots[k])); roots[k] = roots[--nroots]; }
+            else if (x < 92 && nroots < 8) {
+                roots[nroots] = node((int)(next() % OPS), next()); level[nroots] = (uint32_t)(next() % DV_LEVELS);
+                OK(dv_demand_at(&g, roots[nroots], level[nroots])); nroots++;
+            } else if (nroots > 1) {
+                int k = (int)(next() % (uint64_t)nroots); OK(dv_release_at(&g, roots[k], level[k]));
+                nroots--; roots[k] = roots[nroots]; level[k] = level[nroots];
+            }
             else {                                         /* evict a random live node */
                 uint32_t start = (uint32_t)(next() % 256);
                 for (uint32_t j = 0; j < 256; j++) {
@@ -361,8 +435,16 @@ static void randomized(int rounds) {
                 prepare(&pool[inflight], JOBS - inflight, inflight);
                 dv_job fresh[JOBS];
                 for (size_t i = 0; i < JOBS - inflight; i++) fresh[i] = pool[inflight + i];
-                OK(dv_poll(&g, fresh, JOBS - inflight, &n, &pr));
-                for (size_t i = 0; i < n; i++) pool[inflight + i] = fresh[i];
+                size_t limits[DV_LEVELS] = {JOBS, JOBS, JOBS};   /* random admission while work runs */
+                if (inflight) for (int l = 0; l < DV_LEVELS; l++) if (!(next() % 4)) limits[l] = next() % 2;
+                OK(dv_poll_levels(&g, fresh, JOBS - inflight, limits, &n, &pr));
+                size_t used[DV_LEVELS] = {0};
+                for (size_t i = 0; i < n; i++) {
+                    CHECK(!i || fresh[i].level >= fresh[i - 1].level);   /* most urgent first */
+                    CHECK(++used[fresh[i].level] <= limits[fresh[i].level]);
+                    pool[inflight + i] = fresh[i];
+                }
+                for (size_t i = 0; i < inflight; i++) CHECK(dv_wanted(&g, &pool[i]) || dv_job_level(&g, &pool[i]) == DV_LEVELS);
                 inflight += n;
             }
             if (!inflight) { CHECK(pr == DV_IDLE); break; }
@@ -410,6 +492,7 @@ static void randomized(int rounds) {
 int main(int argc, char **argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
     deterministic();
+    levels();
     restarts = 0;
     int rounds = argc > 1 ? atoi(argv[1]) : 3000;
     uint64_t seed = rng;

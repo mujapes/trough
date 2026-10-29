@@ -123,18 +123,20 @@ tr_status dv_intern(dv_graph *g, tr_id op, uint64_t key, uint32_t *out) {
 static dv_node *live(const dv_graph *g, uint32_t i) {
     return g && i < g->node_capacity && g->nodes[i].live ? &g->nodes[i] : NULL;
 }
-tr_status dv_demand(dv_graph *g, uint32_t i) {
+tr_status dv_demand_at(dv_graph *g, uint32_t i, uint32_t level) {
     dv_node *n = live(g, i);
-    if (!n || n->demand == UINT32_MAX) return TR_INVALID;
-    n->demand++;
+    if (!n || level >= DV_LEVELS || n->demand == UINT32_MAX) return TR_INVALID;
+    n->demand++; n->demand_at[level]++;
     return TR_OK;
 }
-tr_status dv_release(dv_graph *g, uint32_t i) {
+tr_status dv_release_at(dv_graph *g, uint32_t i, uint32_t level) {
     dv_node *n = live(g, i);
-    if (!n || !n->demand) return TR_INVALID;
-    n->demand--;
+    if (!n || level >= DV_LEVELS || !n->demand_at[level]) return TR_INVALID;
+    n->demand--; n->demand_at[level]--;
     return TR_OK;
 }
+tr_status dv_demand(dv_graph *g, uint32_t i) { return dv_demand_at(g, i, DV_VISIBLE); }
+tr_status dv_release(dv_graph *g, uint32_t i) { return dv_release_at(g, i, DV_VISIBLE); }
 
 /* ---- verification ---- */
 
@@ -202,16 +204,18 @@ static tr_status emit(dv_graph *g, uint32_t i, dv_job *job, uint64_t r) {
     return TR_OK;
 }
 
-enum { WALK_DONE, WALK_FULL, WALK_ERROR };
+enum { WALK_DONE, WALK_ERROR };
+typedef struct { uint32_t level; size_t capacity, *count, used[DV_LEVELS]; const size_t *limits; } admit;
 
 /* Iterative walk from root. Each frame re-examines its dependency at cursor after a child
  * returns: a child is then either clean at r or marked blocked for this sweep. */
-static int walk(dv_graph *g, uint32_t root, dv_job *jobs, size_t capacity, size_t *count, int *blocked, tr_status *error) {
+static int walk(dv_graph *g, uint32_t root, dv_job *jobs, admit *a, int *blocked, tr_status *error) {
     uint64_t r = g->world->publication, sweep = g->sweep;
     size_t depth = 0;
     int result = WALK_DONE;
 #define ENTER(idx) do { \
-        dv_node *e_ = &g->nodes[idx]; e_->sweep = sweep; \
+        dv_node *e_ = &g->nodes[idx]; \
+        if (e_->sweep != sweep) { e_->sweep = sweep; e_->level = (uint8_t)a->level; } \
         if (clean(e_, r)) break; \
         if (e_->running || e_->blocked_sweep == sweep) { *blocked = 1; e_->blocked_sweep = sweep; break; } \
         if (!e_->recompute && (!e_->memo || e_->volatile_ || op_changed(g, e_))) begin_recompute(g, e_, r); \
@@ -225,10 +229,12 @@ static int walk(dv_graph *g, uint32_t root, dv_job *jobs, size_t capacity, size_
         dv_node *n = &g->nodes[f->node];
         if (f->cursor == n->count) {
             if (n->recompute) {
-                if (*count == capacity) { result = WALK_FULL; break; }
-                tr_status s = emit(g, f->node, &jobs[*count], r);
-                if (s) { *error = s; result = WALK_ERROR; break; }
-                (*count)++;
+                if (*a->count < a->capacity && (!a->limits || a->used[a->level] < a->limits[a->level])) {
+                    tr_status s = emit(g, f->node, &jobs[*a->count], r);
+                    if (s) { *error = s; result = WALK_ERROR; break; }
+                    jobs[*a->count].level = a->level;
+                    (*a->count)++; a->used[a->level]++;
+                }                                         /* refused: stays to recompute */
                 POP_BLOCKED();
             } else {
                 n->verified_at = r; n->on_path = 0; depth--;
@@ -265,20 +271,26 @@ static int walk(dv_graph *g, uint32_t root, dv_job *jobs, size_t capacity, size_
     return result;
 }
 
-tr_status dv_poll(dv_graph *g, dv_job *jobs, size_t capacity, size_t *count, dv_progress *progress) {
+/* Roots are walked level by level, and all of them even once no job can be issued: a root
+ * left unwalked would make its running jobs look unwanted, and they would be cancelled. */
+tr_status dv_poll_levels(dv_graph *g, dv_job *jobs, size_t capacity, const size_t limits[DV_LEVELS],
+                         size_t *count, dv_progress *progress) {
     if (!g || !count || !progress || (capacity && !jobs)) return TR_INVALID;
     *count = 0; *progress = DV_IDLE;
     g->sweep++;
     int blocked = 0;
     tr_status error = TR_OK;
-    for (uint32_t i = 0; i < g->node_capacity; i++) {
-        if (!g->nodes[i].live || !g->nodes[i].demand) continue;
-        int w = walk(g, i, jobs, capacity, count, &blocked, &error);
-        if (w == WALK_ERROR) return error;
-        if (w == WALK_FULL) { blocked = 1; break; }
-    }
+    admit a = {0, capacity, count, {0}, limits};
+    for (a.level = 0; a.level < DV_LEVELS; a.level++)
+        for (uint32_t i = 0; i < g->node_capacity; i++) {
+            if (!g->nodes[i].live || !g->nodes[i].demand_at[a.level]) continue;
+            if (walk(g, i, jobs, &a, &blocked, &error) == WALK_ERROR) return error;
+        }
     *progress = *count ? DV_READY : blocked ? DV_WAITING : DV_IDLE;
     return TR_OK;
+}
+tr_status dv_poll(dv_graph *g, dv_job *jobs, size_t capacity, size_t *count, dv_progress *progress) {
+    return dv_poll_levels(g, jobs, capacity, NULL, count, progress);
 }
 
 /* ---- completion ---- */
@@ -366,6 +378,9 @@ tr_status dv_cancel(dv_graph *g, const dv_job *job) {
 int dv_wanted(const dv_graph *g, const dv_job *job) {
     const dv_node *n = live(g, job->node);
     return n && n->generation == job->generation && n->sweep == g->sweep;
+}
+uint32_t dv_job_level(const dv_graph *g, const dv_job *job) {
+    return dv_wanted(g, job) ? g->nodes[job->node].level : DV_LEVELS;
 }
 
 tr_status dv_get(const dv_graph *g, uint32_t i, uint64_t *value) {

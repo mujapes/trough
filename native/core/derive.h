@@ -25,6 +25,11 @@ typedef struct { uint32_t kind; tr_id id; uint64_t key; } dv_ref;
 typedef enum { DV_PRESENT = 0, DV_ABSENT, DV_CYCLE } dv_presence;
 typedef struct { dv_ref ref; uint64_t value; uint32_t presence; } dv_value;
 
+/* Demand levels, most urgent first: input-blocking work, what is on screen, and speculative or
+ * background work. Roots are walked in level order, so a node shared by several levels gets
+ * its job at the most urgent one. dv_demand/dv_release are DV_VISIBLE. */
+typedef enum { DV_URGENT = 0, DV_VISIBLE, DV_BACKGROUND, DV_LEVELS } dv_level;
+
 typedef struct {
     uint32_t kind, node;            /* DV_CELL: cell; DV_NODE: node index + generation */
     uint32_t absent;                /* DV_CELL: the cell was removed when read (ids never revive) */
@@ -37,8 +42,10 @@ typedef struct { uint32_t next, count; dv_dep deps[DV_BLOCK]; } dv_block;
 typedef struct {
     tr_id op;
     uint64_t key, generation, value, changed_at, verified_at, ticket, sweep, blocked_sweep;
-    uint32_t head, count, demand;   /* dependency blocks; demand = owner roots */
+    uint32_t head, count, demand;   /* dependency blocks; demand = owner roots, all levels */
+    uint32_t demand_at[DV_LEVELS];
     uint8_t live, memo, recompute, running, volatile_, on_path, op_absent;
+    uint8_t level;                  /* best level whose roots reached it in sweep `sweep` */
 } dv_node;
 typedef struct { uint32_t node, cursor; } dv_frame;
 
@@ -56,7 +63,7 @@ typedef struct {
 
 /* A unit of work: run node's operator (op_value is the module identity) on key with values. */
 typedef struct {
-    uint32_t node; uint64_t generation, ticket, revision;
+    uint32_t node, level; uint64_t generation, ticket, revision;   /* level: when issued */
     tr_id op; uint64_t op_value, key; int op_present;   /* a removed module: op_value 0 */
     dv_value *values; size_t count, capacity;     /* caller storage */
 } dv_job;
@@ -82,10 +89,17 @@ tr_status dv_intern(dv_graph *, tr_id op, uint64_t key, uint32_t *node);
 /* Owner roots: demanded nodes are kept verified by dv_poll. Counted. */
 tr_status dv_demand(dv_graph *, uint32_t node);
 tr_status dv_release(dv_graph *, uint32_t node);
+tr_status dv_demand_at(dv_graph *, uint32_t node, uint32_t level);
+tr_status dv_release_at(dv_graph *, uint32_t node, uint32_t level);
 /* Verifies demanded nodes at the world's current publication and fills up to `capacity` jobs
  * (each with its own values storage). progress: DV_IDLE when every demanded node is verified,
  * DV_WAITING when only running jobs block progress. */
 tr_status dv_poll(dv_graph *, dv_job *jobs, size_t capacity, size_t *count, dv_progress *progress);
+/* dv_poll with admission: at most limits[l] new jobs at level l (NULL: no limits). Every
+ * demanded root is still walked when jobs are refused, so running work stays wanted; a refused
+ * node is reported blocked and is issued by a later poll. */
+tr_status dv_poll_levels(dv_graph *, dv_job *jobs, size_t capacity, const size_t limits[DV_LEVELS],
+                         size_t *count, dv_progress *progress);
 /* TR_STALE: the job was cancelled or its node evicted (nothing changes). TR_INVALID: the result
  * reads a ref it was not given, or needs one it was given; the node is left to recompute. */
 tr_status dv_complete(dv_graph *, const dv_job *, const dv_result *);
@@ -93,6 +107,9 @@ tr_status dv_complete(dv_graph *, const dv_job *, const dv_result *);
 tr_status dv_cancel(dv_graph *, const dv_job *);
 /* Whether the job's node was reached by the last dv_poll (a cancellation hint). */
 int dv_wanted(const dv_graph *, const dv_job *);
+/* The most urgent level that reached the job's node in the last poll (DV_LEVELS: none). A
+ * running background job becomes urgent when an urgent root comes to need it. */
+uint32_t dv_job_level(const dv_graph *, const dv_job *);
 /* The node's value, only when verified at the current publication (TR_STALE otherwise). */
 tr_status dv_get(const dv_graph *, uint32_t node, uint64_t *value);
 /* Drops a node and its memo. Refused (TR_INVALID) while demanded or running. Dependants see

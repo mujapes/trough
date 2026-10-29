@@ -18,7 +18,7 @@ static int same_id(tr_id a, tr_id b) { return a.slot == b.slot && a.generation =
 tr_status ex_init(ex_exec *e, tr_world *w, dv_graph *g, size_t workers) {
     if (!e || !w || !g || !workers || workers > EX_WORKERS) return TR_INVALID;
     memset(e, 0, sizeof *e);
-    e->world = w; e->graph = g; e->nworkers = workers;
+    e->world = w; e->graph = g; e->nworkers = workers; e->reserve = 1;
     pthread_mutex_init(&e->lock, NULL);
     pthread_cond_init(&e->owner_wake, NULL); pthread_cond_init(&e->worker_wake, NULL); pthread_cond_init(&e->settled, NULL);
     return TR_OK;
@@ -32,6 +32,7 @@ void ex_use_blobs(ex_exec *e, bl_store *b) { e->blobs = b; dv_set_hooks(e->graph
 void ex_on_worker(ex_exec *e, void (*start)(void *), void (*stop)(void *), void *ctx) {
     e->thread_start = start; e->thread_stop = stop; e->thread_hooks = ctx;
 }
+void ex_set_reserve(ex_exec *e, size_t reserve) { e->reserve = reserve; }
 void ex_on_settled(ex_exec *e, void (*fn)(void *, uint64_t), void *ctx) { e->on_settled = fn; e->settled_ctx = ctx; }
 
 /* ---- operator helpers ---- */
@@ -69,10 +70,14 @@ static void *worker(void *arg) {
     pthread_mutex_lock(&e->lock);
     while (!e->stop) {
         int found = -1;
-        for (int i = 0; i < EX_SLOTS; i++) if (e->slots[i].state == EX_READY) { found = i; break; }
+        for (int i = 0; i < EX_SLOTS; i++) {
+            const ex_slot *c = &e->slots[i];
+            if (c->state != EX_READY) continue;
+            if (found < 0 || c->level < e->slots[found].level || (c->level == e->slots[found].level && c->order < e->slots[found].order)) found = i;
+        }
         if (found < 0) { pthread_cond_wait(&e->worker_wake, &e->lock); continue; }
         ex_slot *s = &e->slots[found];
-        s->state = EX_RUNNING; s->worker = id; s->start_ns = now_ns();
+        s->state = EX_RUNNING; s->worker = id; s->start_ns = now_ns();   /* s->level is now fixed */
         ex_operator fn = e->slot_fn[found]; void *ctx = e->slot_ctx[found];
         pthread_mutex_unlock(&e->lock);
         memset(&s->out, 0, sizeof s->out);
@@ -91,7 +96,7 @@ static void *worker(void *arg) {
 
 static void trace(ex_exec *e, const ex_slot *s, uint32_t outcome) {
     ex_trace *t = &e->trace[e->traced++ % EX_TRACE];
-    t->node = s->job.node; t->worker = s->worker; t->outcome = outcome; t->op = s->job.op;
+    t->node = s->job.node; t->worker = s->worker; t->outcome = outcome; t->level = s->level; t->op = s->job.op;
     t->ticket = s->job.ticket; t->revision = s->job.revision;
     t->queued_ns = s->queued_ns; t->start_ns = s->start_ns; t->end_ns = s->end_ns;
 }
@@ -147,8 +152,13 @@ static dv_progress schedule(ex_exec *e) {
     for (int i = 0; i < EX_SLOTS; i++) if (e->slots[i].state == EX_FREE) {
         index[free] = i; jobs[free].values = e->slots[i].values; jobs[free].capacity = EX_VALUES; free++;
     }
+    size_t background = 0, limits[DV_LEVELS] = {EX_SLOTS, EX_SLOTS, 0};
+    for (int i = 0; i < EX_SLOTS; i++)
+        if ((e->slots[i].state == EX_READY || e->slots[i].state == EX_RUNNING) && e->slots[i].level == DV_BACKGROUND) background++;
+    size_t cap = e->nworkers > e->reserve ? e->nworkers - e->reserve : 1;
+    limits[DV_BACKGROUND] = background < cap ? cap - background : 0;
     dv_progress progress;
-    tr_status st = dv_poll(e->graph, free ? jobs : NULL, free, &n, &progress);
+    tr_status st = dv_poll_levels(e->graph, free ? jobs : NULL, free, limits, &n, &progress);
     if (st) { e->error = st; return DV_IDLE; }
     uint64_t now = now_ns();
     for (size_t k = 0; k < n; k++) {
@@ -159,16 +169,19 @@ static dv_progress schedule(ex_exec *e) {
             if (same_id(e->ops[o].op, s->job.op)) { e->slot_fn[index[k]] = e->ops[o].fn; e->slot_ctx[index[k]] = e->ops[o].ctx; }
         if (!e->slot_fn[index[k]]) { dv_cancel(e->graph, &s->job); e->error = TR_INVALID; continue; }
         atomic_store(&s->cancel, 0); s->stopped = 0; s->queued_ns = now; s->start_ns = s->end_ns = 0;
+        s->level = s->job.level; s->order = ++e->issued;
         hold(e, s, 1);
         s->state = EX_READY;
     }
     if (n) pthread_cond_broadcast(&e->worker_wake);
     for (int i = 0; i < EX_SLOTS; i++) {
         ex_slot *s = &e->slots[i];
-        if ((s->state == EX_READY || s->state == EX_RUNNING) && !atomic_load(&s->cancel) && !dv_wanted(e->graph, &s->job)) {
+        if ((s->state != EX_READY && s->state != EX_RUNNING) || atomic_load(&s->cancel)) continue;
+        uint32_t level = dv_job_level(e->graph, &s->job);
+        if (level == DV_LEVELS) {
             dv_cancel(e->graph, &s->job);
             atomic_store(&s->cancel, 1);
-        }
+        } else if (s->state == EX_READY) s->level = level;
     }
     return progress;
 }

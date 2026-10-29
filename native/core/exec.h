@@ -26,7 +26,7 @@ typedef int (*ex_operator)(void *ctx, const dv_job *, ex_out *);
 
 typedef enum { EX_TRACE_VALUE = 1, EX_TRACE_NEED, EX_TRACE_CANCELLED, EX_TRACE_STALE, EX_TRACE_INVALID } ex_trace_outcome;
 typedef struct {
-    uint32_t node, worker, outcome; tr_id op;
+    uint32_t node, worker, outcome, level; tr_id op;   /* level: when started */
     uint64_t ticket, revision, queued_ns, start_ns, end_ns;
 } ex_trace;
 
@@ -34,7 +34,7 @@ typedef enum { EX_FREE = 0, EX_READY, EX_RUNNING, EX_DONE } ex_slot_state;
 typedef struct {
     dv_job job; dv_value values[EX_VALUES]; ex_out out;
     ex_slot_state state; atomic_int cancel; int stopped;
-    uint32_t worker; uint64_t queued_ns, start_ns, end_ns;
+    uint32_t worker, level; uint64_t order, queued_ns, start_ns, end_ns;   /* level: current */
 } ex_slot;
 
 typedef struct ex_call_s ex_call_t;
@@ -52,7 +52,8 @@ typedef struct {
     uint64_t idle_at;
     tr_status error;                 /* sticky: a graph call failed (e.g. TR_CAPACITY) */
     ex_trace trace[EX_TRACE]; uint64_t traced;
-    uint64_t jobs, cancelled, stale;
+    uint64_t jobs, cancelled, stale, issued;
+    size_t reserve;                  /* workers background jobs may not occupy (ex_set_reserve) */
     void (*on_settled)(void *, uint64_t publication); void *settled_ctx;
     bl_store *blobs;
     void (*thread_start)(void *), (*thread_stop)(void *); void *thread_hooks;
@@ -68,6 +69,11 @@ void ex_use_blobs(ex_exec *, bl_store *);
 void ex_on_worker(ex_exec *, void (*start)(void *), void (*stop)(void *), void *ctx);
 /* on_settled runs on the owner thread each time demand is verified at a new publication. */
 void ex_on_settled(ex_exec *, void (*fn)(void *, uint64_t), void *ctx);
+/* Priorities: workers start the most urgent ready job first (dv_level; issue order within a
+ * level), and a job's level follows its demand while it waits. DV_BACKGROUND jobs in flight
+ * are limited to workers - reserve (at least 1), so `reserve` workers are kept for urgent and
+ * visible work. Default 1. Before ex_start. */
+void ex_set_reserve(ex_exec *, size_t reserve);
 tr_status ex_start(ex_exec *);
 /* Runs fn(arg, world, graph) on the owner thread and waits for it. */
 void ex_call(ex_exec *, void (*fn)(void *, tr_world *, dv_graph *), void *arg);

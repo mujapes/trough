@@ -213,6 +213,87 @@ static double scaling(size_t workers) {
     return ms;
 }
 
+/* ---- 5: priorities: urgent work under a background flood ---- */
+enum { BG = 64, URGENT = 20 };
+static int bg_op(void *ctx, const dv_job *job, ex_out *out) { (void)ctx; if (spin(job, 5000)) return 1; out->value = job->key; return 0; }
+static int urgent_op(void *ctx, const dv_job *job, ex_out *out) { (void)ctx; if (spin(job, 300)) return 1; out->value = job->key + 1; return 0; }
+static uint32_t urgent_node[URGENT]; static uint64_t urgent_at[URGENT];
+static void demand_bg(void *arg, tr_world *w, dv_graph *g) {
+    (void)arg; (void)w;
+    for (uint64_t k = 0; k < BG; k++) { uint32_t n; OK(dv_intern(g, op[7], k, &n)); OK(dv_demand_at(g, n, DV_BACKGROUND)); }
+}
+static void demand_urgent(void *arg, tr_world *w, dv_graph *g) {
+    (void)w; int i = *(int *)arg;
+    OK(dv_intern(g, op[6], (uint64_t)i, &urgent_node[i])); OK(dv_demand_at(g, urgent_node[i], DV_URGENT));
+    urgent_at[i] = now_ns();
+}
+static ex_trace ptrace[EX_TRACE]; static size_t nptrace;
+static void copy_trace(void *arg, tr_world *w, dv_graph *g) { (void)arg; (void)w; (void)g; nptrace = ex_trace_copy(&ex, ptrace, EX_TRACE); }
+typedef struct { double wait_max, wait_p50, wait_p90, total; int bg_overlap; } prio_result;
+static int cmp_u64(const void *a, const void *b) { uint64_t x = *(const uint64_t *)a, y = *(const uint64_t *)b; return x < y ? -1 : x > y; }
+static prio_result priorities(size_t reserve) {
+    setup(4);
+    ex_set_reserve(&ex, reserve);
+    OK(ex_register(&ex, op[6], urgent_op, NULL)); OK(ex_register(&ex, op[7], bg_op, NULL));
+    OK(ex_start(&ex));
+    uint64_t t0 = now_ns();
+    ex_call(&ex, demand_bg, NULL);
+    for (int i = 0; i < URGENT; i++) {
+        struct timespec pause = {0, 3000000}; nanosleep(&pause, NULL);
+        ex_call(&ex, demand_urgent, &i);
+    }
+    CHECK(ex_settle(&ex) && !ex.error);
+    prio_result r = {0, 0, 0, (now_ns() - t0) / 1e6, 0};
+    ex_call(&ex, copy_trace, NULL);
+    ex_stop(&ex);
+    for (int i = 0; i < URGENT; i++) { uint64_t v; OK(dv_get(&graph, urgent_node[i], &v)); CHECK(v == (uint64_t)i + 1); }
+    uint64_t waits[URGENT]; int nw = 0;
+    for (size_t t = 0; t < nptrace; t++) {
+        const ex_trace *x = &ptrace[t];
+        if (x->outcome != EX_TRACE_VALUE) continue;
+        for (int i = 0; i < URGENT; i++) if (x->node == urgent_node[i]) { CHECK(x->level == DV_URGENT); waits[nw++] = x->start_ns - urgent_at[i]; }
+        if (x->level != DV_BACKGROUND) continue;
+        int overlap = 0;                                  /* background jobs running at x's start */
+        for (size_t u = 0; u < nptrace; u++)
+            if (ptrace[u].level == DV_BACKGROUND && ptrace[u].start_ns <= x->start_ns && ptrace[u].end_ns > x->start_ns) overlap++;
+        if (overlap > r.bg_overlap) r.bg_overlap = overlap;
+    }
+    CHECK(nw == URGENT);
+    qsort(waits, URGENT, sizeof waits[0], cmp_u64);
+    r.wait_max = waits[URGENT - 1] / 1e6; r.wait_p50 = waits[URGENT / 2] / 1e6; r.wait_p90 = waits[URGENT * 9 / 10] / 1e6;
+    return r;
+}
+
+/* Visible jobs are not capped, so they fill every slot. An urgent job must start ahead of the
+ * queued ones, and so must a queued visible job promoted by an urgent demand. */
+static uint32_t flood_node[BG]; static uint64_t promote_at;
+static void demand_flood(void *arg, tr_world *w, dv_graph *g) {
+    (void)arg; (void)w;
+    for (uint64_t k = 0; k < BG; k++) { OK(dv_intern(g, op[7], k, &flood_node[k])); OK(dv_demand(g, flood_node[k])); }
+}
+static void promote(void *arg, tr_world *w, dv_graph *g) { (void)w; OK(dv_demand_at(g, flood_node[*(int *)arg], DV_URGENT)); promote_at = now_ns(); }
+static void visible_flood(double *urgent_max, double *promoted) {
+    setup(4);
+    OK(ex_register(&ex, op[6], urgent_op, NULL)); OK(ex_register(&ex, op[7], bg_op, NULL));
+    OK(ex_start(&ex));
+    ex_call(&ex, demand_flood, NULL);
+    struct timespec pause = {0, 1000000}; nanosleep(&pause, NULL);
+    int last = EX_SLOTS - 1;                          /* issued in the first poll, queued behind 11 */
+    ex_call(&ex, promote, &last);
+    for (int i = 0; i < 4; i++) { nanosleep(&pause, NULL); nanosleep(&pause, NULL); ex_call(&ex, demand_urgent, &i); }
+    CHECK(ex_settle(&ex) && !ex.error);
+    ex_call(&ex, copy_trace, NULL);
+    ex_stop(&ex);
+    *urgent_max = 0; *promoted = -1;
+    for (size_t t = 0; t < nptrace; t++) {
+        const ex_trace *x = &ptrace[t];
+        if (x->outcome != EX_TRACE_VALUE) continue;
+        for (int i = 0; i < 4; i++) if (x->node == urgent_node[i] && (x->start_ns - urgent_at[i]) / 1e6 > *urgent_max) *urgent_max = (x->start_ns - urgent_at[i]) / 1e6;
+        if (x->node == flood_node[last]) { CHECK(x->queued_ns < promote_at && x->level == DV_URGENT); *promoted = (x->start_ns - promote_at) / 1e6; }
+    }
+    CHECK(*promoted >= 0);
+}
+
 /* ---- 4: unregistered operator ---- */
 static void demand_unknown(void *arg, tr_world *w, dv_graph *g) { (void)arg; (void)w; uint32_t n; OK(dv_intern(g, op[6], 0, &n)); OK(dv_demand(g, n)); }
 static void unregistered(void) {
@@ -229,9 +310,22 @@ int main(void) {
     concurrent();
     cancellation();
     unregistered();
+    prio_result kept = priorities(1), open = priorities(0);
+    CHECK(kept.bg_overlap <= 3 && open.bg_overlap <= 4);
+    /* A background job is 5 ms; urgent ones do not wait for one. p90, because the VM's vCPUs
+     * are themselves preempted by the host now and then (single 2-4 ms outliers). */
+    CHECK(kept.wait_p90 < 1.5);
+    double flood_max, promoted;
+    visible_flood(&flood_max, &promoted);
+    CHECK(flood_max < 10 && promoted < 10);     /* about one running job, not the 11 queued ahead (~14 ms) */
+    printf("ok priorities: with 16 visible 5 ms jobs queued, urgent jobs start within %.3f ms and a queued job "
+           "promoted by urgent demand within %.3f ms\n", flood_max, promoted);
+    printf("ok priorities: %d urgent 0.3 ms jobs under %d background 5 ms jobs on 4 workers: wait p50 %.3f p90 %.3f max %.3f ms "
+           "with 1 worker reserved (background on <= %d, %.0f ms total); p50 %.3f max %.3f ms without (<= %d, %.0f ms)\n",
+           URGENT, BG, kept.wait_p50, kept.wait_p90, kept.wait_max, kept.bg_overlap, kept.total, open.wait_p50, open.wait_max, open.bg_overlap, open.total);
     double ms[4]; size_t w[4] = {1, 2, 4, 8};
     for (int i = 0; i < 4; i++) ms[i] = scaling(w[i]);
     printf("ok scaling: 96 independent 2 ms jobs: 1 worker %.1f ms, 2 %.1f, 4 %.1f, 8 %.1f\n", ms[0], ms[1], ms[2], ms[3]);
-    printf("{\"ok\":true,\"scaling_ms\":[%.1f,%.1f,%.1f,%.1f]}\n", ms[0], ms[1], ms[2], ms[3]);
+    printf("{\"ok\":true,\"scaling_ms\":[%.1f,%.1f,%.1f,%.1f],\"urgent_wait_max_ms\":[%.3f,%.3f]}\n", ms[0], ms[1], ms[2], ms[3], kept.wait_max, open.wait_max);
     return 0;
 }

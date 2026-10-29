@@ -14,6 +14,12 @@ the "bounded execution / traces" step of stage 3 ([CONSTRUCTION.md](CONSTRUCTION
   one it was not given. An operator never sees the world or the graph.
 - **Scheduling:** after every call and every completion, the owner completes finished jobs,
   polls the graph into free slots and wakes workers.
+- **Priorities:** a worker starts the most urgent ready job (its current `dv_job_level`,
+  then issue order). Waiting jobs follow their demand on every schedule. Background jobs in
+  flight are limited to `workers - reserve` (at least 1; `ex_set_reserve`, default 1). The
+  graph enforces the limit (`dv_poll_levels`), so the reserved worker is always free for
+  urgent and visible work. This is Chromium's thread-pool rule: best-effort tasks get a
+  smaller concurrency limit.
 - **Cancellation:** a running or queued job whose node the latest poll did not reach is
   withdrawn from the graph (`dv_cancel`) and its flag is raised. Operators check
   `ex_cancelled` and stop early. A queued job whose flag is up is not started.
@@ -34,8 +40,23 @@ the "bounded execution / traces" step of stage 3 ([CONSTRUCTION.md](CONSTRUCTION
   Whenever a client checks, every node the graph reports clean equals a memo-free evaluation
   of the world. At the end every demanded node is clean, and settled notifications are
   strictly increasing.
+- **Priorities:** a worker starts the most urgent ready job (its current `dv_job_level`,
+  then issue order). Waiting jobs follow their demand on every schedule. Background jobs in
+  flight are limited to `workers - reserve` (at least 1; `ex_set_reserve`, default 1). The
+  graph enforces the limit (`dv_poll_levels`), so the reserved worker is always free for
+  urgent and visible work. This is Chromium's thread-pool rule: best-effort tasks get a
+  smaller concurrency limit.
 - **Cancellation:** a 2 s job stops within 0.02-0.12 ms (VM) after its demand is released,
   and the node is left unverified.
+- **Priorities (VM, 4 workers):** 20 urgent 0.3 ms jobs arrive every 3 ms during 64
+  background 5 ms jobs. With 1 worker reserved, urgent jobs start after 0.10 ms (p50) and
+  0.2-0.7 ms (p90), and background jobs never run on more than 3 workers (112 ms total).
+  With no reservation it is 1.9 ms (p50) and up to 4.5 ms (85 ms total). With 16 visible
+  5 ms jobs queued, urgent jobs start within 2.7-6.5 ms, and so does a queued job promoted by
+  an urgent demand. FIFO order would put them behind the 11 queued jobs, about 14 ms. The
+  thresholds are p90 < 1.5 ms and < 10 ms, because the host preempts the VM's vCPUs and causes
+  single 2-4 ms outliers. 3 of 3 mutants caught (no background cap, first-ready-slot pick,
+  levels frozen at issue). TSan and ASan/UBSan clean.
 - **Unregistered operator:** a sticky `TR_INVALID`; settle returns 0 instead of hanging.
 - **Scaling:** 96 independent 2 ms jobs. On the VM: 1 worker 193 ms, 2 97, 4 54, 8 31.
   This measures scheduling overhead, not energy.
@@ -55,8 +76,9 @@ the "bounded execution / traces" step of stage 3 ([CONSTRUCTION.md](CONSTRUCTION
 - **Worker placement and energy:** the Pixel's cores are 2 X1, 2 A78 and 4 A55. Worker count and
   affinity must come from measured energy per task under concurrent load, not from this
   throughput test.
-- **Admission:** by bytes and resources (`resources.h` leases for job inputs and outputs), and
-  priorities (interaction before background).
+- **Admission:** by bytes and resources (`resources.h` leases for job inputs and outputs).
+  Priorities and the background reserve are built. Preempting a running background job is
+  not: an urgent job can wait for one only when every worker runs visible work.
 - **Owner cost:** the owner sweeps the whole demanded graph after each completion. A
   dirty-root worklist is the fix once real graphs are large.
 - **Real operators:** text layout and scene compilation as registered operators (JNI for

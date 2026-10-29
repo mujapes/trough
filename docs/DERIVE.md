@@ -45,6 +45,21 @@ node; `dv_cancel` withdraws it, and the late completion is `TR_STALE`, even if t
 reissued. `dv_wanted` tells a worker whether the last poll still reached its node, so
 unwanted work can stop early.
 
+## Levels and admission
+
+Each demand has a level: `DV_URGENT` (input-blocking), `DV_VISIBLE` (on screen; `dv_demand`)
+or `DV_BACKGROUND` (speculative). `dv_poll` walks roots level by level, so jobs come out most
+urgent first and a node shared across levels is issued at its most urgent one. Every node
+records the most urgent level that reached it in the sweep; `dv_job_level` reads it for a job,
+so a queued job follows its demand (promoted by an urgent root, demoted when that root goes,
+`DV_LEVELS` when unwanted).
+
+`dv_poll_levels` takes a per-level limit on new jobs. A refused node stays to recompute and is
+reported blocked, so the poll returns `DV_WAITING` and a later poll issues it. Every root is
+still walked after capacity or a limit runs out. Stopping early, as the first `dv_poll` did,
+leaves later roots unreached, so their running jobs look unwanted and the executor cancels
+them; the levels case reproduces this exact situation.
+
 ## Cycles
 
 When a node's dependency is already on the path being verified, the job gets that ref with
@@ -75,6 +90,12 @@ A memo-free reference evaluates the current world from scratch.
   run at once and complete in random order, with cancellations and edits made while jobs
   run. At every idle point, each demanded node and each node reported clean equals the
   reference. 3000 rounds under ASan/UBSan: 61033 checks. 30000 rounds: 653795 checks in 2.1 s.
+- Levels: issue order across levels, a background limit of 0 (`DV_WAITING`, then issued),
+  a running job still wanted after an earlier root fills capacity, promotion and demotion of a
+  running job, and per-level release. The random run gives each root a random level and
+  random per-level limits while jobs run, and checks issue order, limits and wantedness on
+  every poll. 5 of 5 mutants caught (stopping the walk at capacity, ignoring limits, ignoring
+  level order, the last reach setting the level, releasing at the wrong level).
 - Pixel bundle `0ab61dc6c126...`: `core.derive` passes in 63 ms, and `build.native` rebuilds every
   output, including `core-derive`, byte-identically on the phone.
 - Mutants: 10 of 10 caught. They drop early cutoff, ignore cell changes, ignore module identity,
@@ -88,6 +109,7 @@ A memo-free reference evaluates the current world from scratch.
   every dependency it can name before it stops) and per-operator dependency hints are the
   known fixes; measure them on real operators first.
 - A root list instead of scanning every node per poll, plus incremental sweeps.
-- Byte/resource admission and cancellation leases joined to `resources.h`, IO workers and tracing.
+- Byte/resource admission and cancellation leases joined to `resources.h`, and IO workers.
+  Job-count admission per level is built (above).
 - Real operators: document layout and scene compilation as nodes, which is the next consumer.
 - Value ownership: done through `dv_set_hooks` ([BLOBS.md](BLOBS.md)).

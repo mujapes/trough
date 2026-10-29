@@ -34,6 +34,11 @@ Done: scroll anchoring + estimate summaries (fused into level-0): jump to middle
 of the frame ring (needs Trough visible), owner scroll-by-pixels.
 Done: deriveScroll (exact anchor walk, one viewport write); 5 scrolls equal the reference.
 Written: ps_frame_present + deriveSurfaceOpen + android.viewsurface (needs Trough visible; not run yet).
+Done (2026-10-29, VM): demand levels + admission (DERIVE.md "Levels and admission", EXEC.md
+Priorities): urgent/visible/background roots, per-level poll limits, job levels follow demand,
+background capped at workers-1. Under a background flood, urgent jobs wait 0.1 ms p50 (1.9 ms
+without the reserve). Fixed a latent bug: a full poll stopped walking roots, so later roots'
+running jobs were cancelled. Pixel run of core.derive/core.exec pending (phone rebooted, Trough closed).
 
 DECIDED (2026-10-28): the Java/native boundary is a bionic build of the same sources, loaded
 in-process (docs/BIONIC.md). All store oracles pass as bionic programs on the Pixel; android.jni
