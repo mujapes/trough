@@ -74,6 +74,11 @@ summaries per slot, O(log n) doc offsets. Pixel run of 988279f pending (loop3). 
 Pixel finds; ask the user to foreground Trough for android.touch/viewsurface/surface/vulkan; then
 Android accessibility for the derived view (AccessibilityNodeProvider: paragraphs as virtual text
 nodes, selection/scroll actions, vs TextView's node info), CONSTRUCTION.md stage 4.
+Done (night): accessibility (docs/ACCESSIBILITY.md, android.access vs EditText; commit bb100e0) and
+or_position (id -> position via parent links, 9/9 mutants; 7b02695). loop3 never ran: Trough was not
+responding (activity/process gone after 07:09; the control poller lives with the Activity, so a
+service-only restart is silent). loop4 (bundle with order tree + accessibility) is running after the
+user foregrounded Trough at 07:29.
 
 DECIDED (2026-10-28): the Java/native boundary is a bionic build of the same sources, loaded
 in-process (docs/BIONIC.md). All store oracles pass as bionic programs on the Pixel; android.jni
