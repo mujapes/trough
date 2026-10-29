@@ -1,10 +1,16 @@
 package com.trough.hot;
 
 import android.content.Context;
+import android.graphics.Matrix;
+import android.text.InputType;
 import android.view.MotionEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.VelocityTracker;
+import android.view.inputmethod.CursorAnchorInfo;
+import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputConnection;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.OverScroller;
 
 /** The derived document view on screen (docs/VIEW.md "Touch"): a SurfaceView whose frames come
@@ -13,7 +19,12 @@ import android.widget.OverScroller;
  * is visible and presents. With no input and no fling running, no frames are made.
  *
  * The UI thread only accumulates: a pending pixel delta and the time of the oldest event not yet
- * shown. The render thread owns the scroller and the deriver's frame calls. */
+ * shown. The render thread owns the scroller and the deriver's frame calls.
+ *
+ * It is also the document's text editor (docs/INPUT.md "Editor view"): the IME edits the
+ * paragraphs through TextInput over DocumentText; each edit marks the content dirty and wakes the
+ * render thread. Selection changes reach the IME through updateSelection (after IME edits and
+ * after taps), and CursorAnchorInfo after frames while the IME monitors it. */
 final class DerivedView extends SurfaceView implements SurfaceHolder.Callback {
     interface Frames { void frame(long number, int dy); }
 
@@ -34,6 +45,12 @@ final class DerivedView extends SurfaceView implements SurfaceHolder.Callback {
     private volatile long frames, consumedDy, flingDy;
     volatile Frames observer;
     volatile int openStatus = Integer.MIN_VALUE;
+    final DocumentText doc;
+    private boolean contentDirty;             /* guarded by lock: an edit not yet drawn */
+    private volatile boolean cursorMonitor, cursorImmediate;
+    private final long[] reported = {-2, -2, -2, -2};   /* UI thread: last updateSelection */
+    volatile long selectionReports, anchorReports;
+    private static final int SURROUNDING = 1024;
 
     DerivedView(Context context, long deriver) {
         super(context);
@@ -41,7 +58,60 @@ final class DerivedView extends SurfaceView implements SurfaceHolder.Callback {
         flingVelocity = Float.NaN;
         slop = android.view.ViewConfiguration.get(context).getScaledTouchSlop();
         setZOrderOnTop(true);
+        setFocusable(true);
+        setFocusableInTouchMode(true);
+        doc = new DocumentText(deriver);
         getHolder().addCallback(this);
+    }
+
+    private InputMethodManager imm() { return (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE); }
+
+    @Override public boolean onCheckIsTextEditor() { return true; }
+    @Override public InputConnection onCreateInputConnection(EditorInfo out) {
+        out.inputType = InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES;
+        out.imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN | EditorInfo.IME_ACTION_NONE;
+        long[] v = doc.state();
+        out.initialSelStart = (int) v[1];
+        out.initialSelEnd = (int) v[2];
+        int a = (int) Math.min(v[1], v[2]), b = (int) Math.max(v[1], v[2]);
+        int from = Math.max(0, a - SURROUNDING), to = (int) Math.min(v[0], (long) b + SURROUNDING);
+        String around = doc.slice(from, to);
+        if (around != null) out.setInitialSurroundingSubText(around, from);
+        System.arraycopy(new long[]{v[1], v[2], v[3], v[4]}, 0, reported, 0, 4);
+        TextInput input = new TextInput(this, doc);
+        input.host = new TextInput.Host() {
+            @Override public void changed() { contentChanged(); reportSelection(); }
+            @Override public boolean cursorUpdates(int mode) {
+                cursorMonitor = (mode & InputConnection.CURSOR_UPDATE_MONITOR) != 0;
+                if ((mode & InputConnection.CURSOR_UPDATE_IMMEDIATE) != 0) { cursorImmediate = true; post(new Runnable() { public void run() { reportCursor(); } }); }
+                return true;
+            }
+        };
+        return input;
+    }
+
+    /** The document changed outside the scroll path (an IME edit): draw it. */
+    void contentChanged() { synchronized (lock) { contentDirty = true; lock.notifyAll(); } }
+
+    /** UI thread: tell the IME where the selection and composing region are, if they moved. */
+    void reportSelection() {
+        long[] v = doc.state();
+        if (v[1] == reported[0] && v[2] == reported[1] && v[3] == reported[2] && v[4] == reported[3]) return;
+        reported[0] = v[1]; reported[1] = v[2]; reported[2] = v[3]; reported[3] = v[4];
+        selectionReports++;
+        imm().updateSelection(this, (int) v[1], (int) v[2], (int) v[3], (int) v[4]);
+    }
+    /** UI thread: CursorAnchorInfo for the settled frame, if the IME asked for it. */
+    void reportCursor() {
+        if (!cursorMonitor && !cursorImmediate) return;
+        cursorImmediate = false;
+        int[] at = new int[2];
+        getLocationOnScreen(at);
+        Matrix m = new Matrix();
+        m.setTranslate(at[0], at[1]);
+        CursorAnchorInfo info = doc.cursorAnchorInfo(m, getWidth(), getHeight());
+        anchorReports++;
+        imm().updateCursorAnchorInfo(this, info);
     }
 
     long frames() { return frames; }
@@ -50,7 +120,7 @@ final class DerivedView extends SurfaceView implements SurfaceHolder.Callback {
 
     /** True when no input is pending and no fling runs. */
     boolean idle() {
-        synchronized (lock) { return pendingDy == 0 && Float.isNaN(flingVelocity) && Float.isNaN(tapX) && !flinging && !working; }
+        synchronized (lock) { return pendingDy == 0 && Float.isNaN(flingVelocity) && Float.isNaN(tapX) && !contentDirty && !flinging && !working; }
     }
     private volatile boolean flinging, working;
 
@@ -81,6 +151,8 @@ final class DerivedView extends SurfaceView implements SurfaceHolder.Callback {
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL:
                 if (!dragged && e.getActionMasked() == MotionEvent.ACTION_UP) {   /* a tap: place the caret */
+                    if (!hasFocus()) requestFocus();
+                    imm().showSoftInput(this, 0);
                     synchronized (lock) { tapX = e.getX(); tapY = e.getY(); if (pendingInputNs == 0) pendingInputNs = t; lock.notifyAll(); }
                     return true;
                 }
@@ -131,15 +203,16 @@ final class DerivedView extends SurfaceView implements SurfaceHolder.Callback {
         double[] timing = new double[5];
         while (true) {
             synchronized (lock) {
-                while (running && pendingDy == 0 && Float.isNaN(flingVelocity) && Float.isNaN(tapX) && !flinging) {
+                while (running && pendingDy == 0 && Float.isNaN(flingVelocity) && Float.isNaN(tapX) && !contentDirty && !flinging) {
                     try { lock.wait(); } catch (InterruptedException e) { return; }
                 }
                 if (!running) return;
                 working = true;
             }
             NativeCore.deriveFrameBegin(deriver);            /* paced: input is sampled after this */
-            int dy; long inputNs; float v, tx, ty;
+            int dy; long inputNs; float v, tx, ty; boolean edited;
             synchronized (lock) {
+                edited = contentDirty; contentDirty = false;
                 tx = tapX; ty = tapY; tapX = Float.NaN;
                 dy = pendingDy; pendingDy = 0;
                 inputNs = pendingInputNs; pendingInputNs = 0;
@@ -159,13 +232,15 @@ final class DerivedView extends SurfaceView implements SurfaceHolder.Callback {
                 else flinging = false;
             }
             int total = dy + fling;
-            if (total == 0 && Float.isNaN(tx)) { working = false; continue; }
+            if (total == 0 && Float.isNaN(tx) && !edited) { working = false; continue; }
             if (inputNs != 0) NativeCore.deriveFrameInput(deriver, inputNs);
             if (total != 0) NativeCore.deriveScroll(deriver, total);
             if (!Float.isNaN(tx)) lastTap = NativeCore.deriveTap(deriver, tx, ty);   /* after the scroll: what is shown now */
             NativeCore.deriveSettleVisible(deriver);
             NativeCore.deriveFrame(deriver, false, timing);
             consumedDy += total; flingDy += fling; frames++;
+            final boolean tapped = !Float.isNaN(tx);
+            if (tapped || cursorMonitor) post(new Runnable() { public void run() { if (tapped) reportSelection(); reportCursor(); } });
             working = false;
             Frames o = observer;
             if (o != null) o.frame(frames, total);

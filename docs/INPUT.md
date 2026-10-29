@@ -102,6 +102,28 @@ paragraph. It places 80 carets, including first and last lines clipped by the ed
 characters, and compares the marker, flags and selection against Editor's rules on
 StaticLayout. Every fifth caret it also checks a composing region across paragraphs.
 
+## Editor view
+
+2026-10-29. `DerivedView` (the derived document on a SurfaceView, [VIEW.md](VIEW.md) "Touch")
+is the document's text editor:
+- `onCheckIsTextEditor` and `onCreateInputConnection` work as in `EditorView`, with a
+  `TextInput` over the view's one `DocumentText`, so the composing region outlives
+  connections.
+- `TextInput.Host.changed` runs after an edit outside a batch, or when the outermost batch that
+  edited ends, which is where TextView reports. The view marks the content dirty, which wakes
+  the render thread for an unpaced-input frame. It then calls `updateSelection` if the
+  selection or composing region moved since the last report.
+- A tap focuses the view and shows the soft keyboard. After the render thread applies the
+  tap, the UI thread reports the new selection.
+- `requestCursorUpdates`: IMMEDIATE reports at once; MONITOR reports CursorAnchorInfo after
+  every frame. The matrix is the view's screen location.
+
+Evidence: `android.touch` continues after its tap. Through the view's own InputConnection, in
+one batch, it commits "typed" and a newline at the tapped caret. Checks: the view draws
+without touch input; the paragraph count grows by one; the caret is at the start of the new
+paragraph; exactly one selection report and at least one CursorAnchorInfo report; and the
+scene equals the reference for the edited corpus. Needs Trough visible.
+
 ## Not yet built
 
 - The view becomes the native presenter's surface view. Its touch handling, focus and

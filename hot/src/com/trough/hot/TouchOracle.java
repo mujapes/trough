@@ -13,8 +13,9 @@ import java.util.concurrent.*;
  * velocity, so the view flings. The render thread paces frames (platform deadlines) with
  * prefetch on. Checks: the final position equals an exact-height walk of every pixel the view
  * consumed, the scene equals the reference, the view makes no frames once idle, and
- * touch-to-display latency from each frame's oldest event to its actual presentation.
- * Needs Trough visible. */
+ * touch-to-display latency from each frame's oldest event to its actual presentation. Then a
+ * tap places the caret and the view's own InputConnection types "typed\n" there (docs/INPUT.md
+ * "Editor view"). Needs Trough visible. */
 final class TouchOracle {
     static Map<String, Object> run(final Activity activity, final FrameLayout root, File bundle) throws Exception {
         NativeCore.load(bundle);
@@ -117,6 +118,39 @@ final class TouchOracle {
                 "overlay_rects", rects, "layout_runs", t1[11] - t0[11], "scene_runs", t1[13] - t0[13], "consumed_after", v.consumedDy() - consumed));
             if (!tapOk || rects != 1 || t1[11] != t0[11] || t1[13] != t0[13] || v.consumedDy() != consumed)
                 failures.add(Json.map("tap", out.get("tap")));
+
+            /* Typing at the tapped caret through the view's own InputConnection, as an IME does:
+             * a newline splits the paragraph, the view draws without touch input, the selection
+             * is reported to the IME, and CursorAnchorInfo follows the frame. */
+            if (tapOk) {
+            final DerivedView fv = v;
+            final android.view.inputmethod.InputConnection ic = ui(activity, new Callable<android.view.inputmethod.InputConnection>() {
+                public android.view.inputmethod.InputConnection call() { return fv.onCreateInputConnection(new android.view.inputmethod.EditorInfo()); }});
+            int tp = (int) (tap >> 32), to = (int) (tap & 0xffffffffL);
+            long sel0 = v.selectionReports, anchors0 = v.anchorReports, typedFrames0 = v.frames(), count0 = NativeCore.deriveCount(d);
+            ui(activity, new Callable<Void>() { public Void call() {
+                ic.requestCursorUpdates(android.view.inputmethod.InputConnection.CURSOR_UPDATE_MONITOR);
+                ic.beginBatchEdit(); ic.commitText("typed", 1); ic.commitText("\n", 1); ic.endBatchEdit();
+                return null; }});
+            deadline = SystemClock.uptimeMillis() + 5000;
+            while ((!v.idle() || v.anchorReports == anchors0) && SystemClock.uptimeMillis() < deadline) Thread.sleep(10);
+            Thread.sleep(50);
+            String para = corpus.get(tp);
+            corpus.set(tp, para.substring(0, to) + "typed");
+            corpus.add(tp + 1, para.substring(to));
+            long[] doc = v.doc.state();
+            long caret = 0;
+            for (int i = 0; i <= tp; i++) caret += corpus.get(i).length() + 1;
+            byte[] typedScene = NativeCore.deriveBytes(d, -1);
+            boolean typedEqual = typedScene != null && Arrays.equals(typedScene, ViewOracle.reference(corpus, want[0], want[1]));
+            Map<String, Object> typing = Json.map("frames", v.frames() - typedFrames0, "paragraphs", NativeCore.deriveCount(d) - count0,
+                "caret", Arrays.asList(doc[1], doc[2], caret), "selection_reports", v.selectionReports - sel0,
+                "anchor_reports", v.anchorReports - anchors0, "scene_equal", typedEqual);
+            out.put("typing", typing);
+            if (v.frames() == typedFrames0 || NativeCore.deriveCount(d) != count0 + 1 || doc[1] != caret || doc[2] != caret
+                    || v.selectionReports - sel0 != 1 || v.anchorReports == anchors0 || !typedEqual)
+                failures.add(Json.map("typing", typing));
+            }
         } finally {
             if (view[0] != null) view[0].stop();          /* the render thread ends before the deriver */
             NativeCore.deriveClose(d);

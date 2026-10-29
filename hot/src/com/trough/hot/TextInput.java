@@ -34,8 +34,18 @@ final class TextInput extends BaseInputConnection {
         @Override public String slice(int start, int end) { return NativeCore.slice(queue, start, end); }
     }
 
+    /** The view hosting the connection. changed() runs after an edit outside a batch, or when the
+     * outermost batch that edited ends (TextView reports selection at the same points). */
+    interface Host {
+        void changed();
+        /** InputConnection.requestCursorUpdates: modes and filters OR-ed together. */
+        boolean cursorUpdates(int mode);
+    }
+    volatile Host host;
+
     private final Backend text;
     private int batchDepth;
+    private boolean editedInBatch;
 
     TextInput(View view, long keeper, long queue) { this(view, new Draft(keeper, queue)); }
     TextInput(View view, Backend text) {
@@ -44,7 +54,12 @@ final class TextInput extends BaseInputConnection {
     }
 
     private long[] state() { return text.state(); }
-    private void apply(int[] ranges, String[] texts, int anchor, int caret, int cs, int ce) { text.apply(ranges, texts, anchor, caret, cs, ce); }
+    private void apply(int[] ranges, String[] texts, int anchor, int caret, int cs, int ce) {
+        text.apply(ranges, texts, anchor, caret, cs, ce);
+        if (batchDepth > 0) { editedInBatch = true; return; }
+        Host h = host;
+        if (h != null) h.changed();
+    }
     /** Where a cursor point at p lands when [a, b) is replaced by n units (Editable's point rule:
      * an insertion at the point pushes it forward; inside a replaced range it moves to the end). */
     private static int point(int p, int a, int b, int n) {
@@ -156,5 +171,15 @@ final class TextInput extends BaseInputConnection {
 
     /** Batches are already atomic per operation; nesting is tracked for IME bookkeeping only. */
     @Override public boolean beginBatchEdit() { batchDepth++; return true; }
-    @Override public boolean endBatchEdit() { if (batchDepth > 0) batchDepth--; return batchDepth > 0; }
+    @Override public boolean endBatchEdit() {
+        if (batchDepth > 0) batchDepth--;
+        if (batchDepth == 0 && editedInBatch) {
+            editedInBatch = false;
+            Host h = host;
+            if (h != null) h.changed();
+        }
+        return batchDepth > 0;
+    }
+    @Override public boolean requestCursorUpdates(int mode) { Host h = host; return h != null && h.cursorUpdates(mode); }
+    @Override public boolean requestCursorUpdates(int mode, int filter) { return requestCursorUpdates(mode | filter); }
 }
