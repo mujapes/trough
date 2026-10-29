@@ -13,7 +13,8 @@ import java.util.*;
  * bottom (a flat walk of heights from the scrolled anchor), visible or invisible at the top and
  * bottom by TextView.isPositionVisible, RTL by isRtlCharAt. Selection and composing ranges are
  * global offsets in the joined text. The viewport is scrolled into its anchor paragraph so
- * carets are clipped at both edges. Offscreen: Trough need not be visible. */
+ * carets are clipped at both edges. Composing regions also check character bounds against
+ * StaticLayout.fillCharacterBounds. Offscreen: Trough need not be visible. */
 final class AnchorOracle {
     static Map<String, Object> run(Activity activity) {
         List<String> corpus = LayoutDeriveOracle.corpus(200);
@@ -21,8 +22,8 @@ final class AnchorOracle {
         List<Object> failures = new ArrayList<>();
         long d = NativeCore.deriveOpen(2, n);
         if (d < 0) return Json.map("ok", false, "error", "deriveOpen " + d);
-        int markers = 0, clipped = 0, rtl = 0, hidden = 0, composing = 0;
-        double worst = 0;
+        int markers = 0, clipped = 0, rtl = 0, hidden = 0, composing = 0, bounded = 0;
+        double worst = 0, worstBounds = 0;
         try {
             NativeCore.deriveWidth(d, ViewOracle.WIDTH);
             for (int i = 0; i < n; i++) NativeCore.deriveText(d, i, corpus.get(i));
@@ -86,6 +87,28 @@ final class AnchorOracle {
                     composing++;
                     if (info.getComposingTextStart() != ea || !joined.substring(ea, eb).equals(String.valueOf(info.getComposingText())))
                         failures.add(Json.map("composing", Arrays.asList(a, b), "got", info.getComposingTextStart(), "text", String.valueOf(info.getComposingText())));
+                    /* Character bounds for the composing units in the caret's paragraph, as
+                     * fillCharacterBounds; units in other paragraphs have none yet. */
+                    int pg = (int) (g - o), ca = Math.max(ea, pg), ce = Math.min(eb, pg + len);
+                    float[] ref = new float[4 * Math.max(0, ce - ca)];
+                    if (ca < ce) l.fillCharacterBounds(ca - pg, ce - pg, ref, 0);
+                    for (int u = ea; u < eb; u++) {
+                        android.graphics.RectF got = info.getCharacterBounds(u);
+                        boolean inside = u >= ca && u < ce;
+                        if (!inside) { if (got != null) failures.add(Json.map("bounds_outside", u)); continue; }
+                        bounded++;
+                        int q = 4 * (u - ca);
+                        float bl = ref[q], bt = top + ref[q + 1], br = ref[q + 2], bb = top + ref[q + 3];
+                        boolean v0 = DocumentText.visible(bl, bt, W, H), v1 = DocumentText.visible(br, bb, W, H);
+                        int bf = (v0 || v1 ? CursorAnchorInfo.FLAG_HAS_VISIBLE_REGION : 0) | (!v0 || !v1 ? CursorAnchorInfo.FLAG_HAS_INVISIBLE_REGION : 0)
+                            | (l.isRtlCharAt(u - pg) ? CursorAnchorInfo.FLAG_IS_RTL : 0);
+                        double bd = got == null ? Double.MAX_VALUE : Math.max(Math.max(Math.abs(got.left - bl), Math.abs(got.top - bt)), Math.max(Math.abs(got.right - br), Math.abs(got.bottom - bb)));
+                        worstBounds = Math.max(worstBounds, bd);
+                        if ((bd > 0.01 || info.getCharacterBoundsFlags(u) != bf) && failures.size() < 12)
+                            failures.add(Json.map("bounds", u - pg, "para", p, "diff", bd, "flags", Arrays.asList(info.getCharacterBoundsFlags(u), bf),
+                                "got", got == null ? null : Arrays.asList(got.left, got.top, got.right, got.bottom), "want", Arrays.asList(bl, bt, br, bb),
+                                "unit", corpus.get(p).substring(u - pg, u - pg + 1)));
+                    }
                     input.finishComposingText();
                 }
             }
@@ -106,8 +129,8 @@ final class AnchorOracle {
         } finally {
             NativeCore.deriveClose(d);
         }
-        return Json.map("ok", failures.isEmpty() && clipped > 0 && rtl > 0, "markers", markers, "clipped", clipped, "rtl", rtl,
-            "composing", composing, "offscreen_unmarked", hidden, "worst_marker_diff", worst, "failures", failures);
+        return Json.map("ok", failures.isEmpty() && clipped > 0 && rtl > 0 && bounded > 0, "markers", markers, "clipped", clipped, "rtl", rtl,
+            "composing", composing, "character_bounds", bounded, "worst_bounds_diff", worstBounds, "offscreen_unmarked", hidden, "worst_marker_diff", worst, "failures", failures);
     }
     private static long global(List<String> corpus, int p, int o) {
         long g = 0;

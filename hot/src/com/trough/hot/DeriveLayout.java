@@ -101,6 +101,18 @@ final class DeriveLayout {
         return java.nio.ByteBuffer.allocate(20).putFloat(l.caretX(o)).putFloat(line.top).putFloat(line.bottom)
             .putFloat(line.baseline).putInt(l.rtlAt(o) ? 1 : 0).array();
     }
+    /** Character bounds of [start, end) in the paragraph's coordinates (Layout.fillCharacterBounds)
+     * and whether each unit is RTL (Layout.isRtlCharAt): 5 floats per unit, the last 1 or 0. */
+    static float[] characterBounds(String text, int width, int start, int end) {
+        TextLayout l = TextLayout.layout(text, PAINT.get(), width, 0, 0);
+        int a = Math.max(0, Math.min(start, text.length())), b = Math.max(a, Math.min(end, text.length()));
+        float[] bounds = l.characterBounds(a, b), out = new float[5 * (b - a)];
+        for (int k = 0; k < b - a; k++) {
+            System.arraycopy(bounds, 4 * k, out, 5 * k, 4);
+            out[5 * k + 4] = l.rtlAt(a + k) ? 1 : 0;
+        }
+        return out;
+    }
     /** The offset a tap at x on line `line` selects (Layout.getOffsetForHorizontal). */
     static int offsetAt(String text, int width, int line, float x) {
         TextLayout l = TextLayout.layout(text, PAINT.get(), width, 0, 0);

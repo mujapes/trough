@@ -95,7 +95,14 @@ Not covered yet:
 - a marker for a range selection (Editor puts it at the selection start);
 - a marker for a caret in a paragraph the overlay does not walk (above the anchor or below
   the viewport); the IME gets none;
-- character bounds for the composing text (`addCharacterBounds`).
+- character bounds for composing units outside the caret's paragraph.
+
+Character bounds (2026-10-29): for the composing units in the caret's paragraph,
+`TextLayout.characterBounds` ports TextLine.measureAllBounds. Each line is measured whole,
+trailing whitespace included: bidi runs in visual order from the paragraph's leading edge, and
+per-unit advances by `Paint.getRunCharacterAdvance` with the line as context. Flags test
+(left, top) and (right, bottom) for visibility, and use isRtlCharAt for RTL.
+`android.anchor` compares them with `StaticLayout.fillCharacterBounds`.
 
 Evidence: `android.anchor` (`AnchorOracle.java`) scrolls the viewport into its anchor
 paragraph. It places 80 carets, including first and last lines clipped by the edges and RTL

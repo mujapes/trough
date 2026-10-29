@@ -154,6 +154,54 @@ final class TextLayout {
         return true;
     }
 
+    /** Character bounds for [start, end), as Layout.fillCharacterBounds: left, top, right, bottom
+     * per UTF-16 unit. Each line is measured whole, trailing whitespace included (TextLine
+     * .measureAllBounds): bidi runs over [line start, line end) in visual order from the
+     * paragraph's leading edge, per-unit advances by Paint.getRunCharacterAdvance with the line
+     * as context; within an RTL run units run right to left. */
+    float[] characterBounds(int start, int end) {
+        float[] out = new float[4 * Math.max(0, end - start)];
+        if (end <= start) return out;
+        char[] chars = text.toCharArray();
+        for (int i = lineOf(start); i < lines.size() && lines.get(i).start < end; i++) {
+            Line l = lines.get(i);
+            if (l.end <= l.start) continue;
+            int ps = text.lastIndexOf('\n', l.start - 1) + 1, pe = text.indexOf('\n', l.start);
+            if (pe < 0) pe = text.length();
+            Bidi bidi = new Bidi(chars, ps, null, 0, pe - ps, Bidi.DIRECTION_DEFAULT_LEFT_TO_RIGHT).createLineBidi(l.start - ps, l.end - ps);
+            int runs = bidi.getRunCount();
+            byte[] levels = new byte[runs];
+            Integer[] order = new Integer[runs];
+            for (int r = 0; r < runs; r++) { levels[r] = (byte) bidi.getRunLevel(r); order[r] = r; }
+            Bidi.reorderVisually(levels, 0, order, 0, runs);
+            float[] adv = new float[l.end - l.start];
+            float total = 0;
+            float[] runAdvance = new float[runs];
+            for (int r = 0; r < runs; r++) {
+                int rs = l.start + bidi.getRunStart(r), re = l.start + bidi.getRunLimit(r);
+                paint.getRunCharacterAdvance(chars, rs, re, l.start, l.end, (bidi.getRunLevel(r) & 1) != 0, re, adv, rs - l.start);
+                for (int k = rs; k < re; k++) runAdvance[r] += adv[k - l.start];
+                total += runAdvance[r];
+            }
+            float pen = l.rtl ? left + width - total : left;
+            for (int v = 0; v < runs; v++) {
+                int r = order[v];
+                int rs = l.start + bidi.getRunStart(r), re = l.start + bidi.getRunLimit(r);
+                boolean rtl = (bidi.getRunLevel(r) & 1) != 0;
+                float at = rtl ? pen + runAdvance[r] : pen;
+                for (int k = rs; k < re; k++) {
+                    float a = adv[k - l.start], x0 = rtl ? at - a : at, x1 = rtl ? at : at + a;
+                    at = rtl ? at - a : at + a;
+                    if (k < start || k >= end) continue;
+                    int b = 4 * (k - start);
+                    out[b] = x0; out[b + 1] = l.top; out[b + 2] = x1; out[b + 3] = l.bottom;
+                }
+                pen += runAdvance[r];
+            }
+        }
+        return out;
+    }
+
     /** The offset whose primary caret is nearest x on line i (a tap), as
      * Layout.getOffsetForHorizontal: cursor positions from the line start to the line end, except
      * that a line other than the last stops before its final character (the break). Ties go to

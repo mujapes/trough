@@ -33,7 +33,8 @@ final class DocumentText implements TextInput.Backend {
     /** CursorAnchorInfo by Editor.updateCursorAnchorInfo's rules (docs/INPUT.md "Cursor anchor"):
      * selection, view-to-screen matrix, composing text, and the insertion marker at the caret
      * with visibility judged like TextView.isPositionVisible against a w x h view. Coordinates are
-     * the view's; the derived nodes must be settled. A range selection has no marker yet. */
+     * the view's; the derived nodes must be settled. A range selection has no marker yet. Character
+ * bounds cover the composing units in the caret's paragraph (Layout.fillCharacterBounds). */
     CursorAnchorInfo cursorAnchorInfo(Matrix viewToScreen, int w, int h) {
         long[] s = state();
         CursorAnchorInfo.Builder b = new CursorAnchorInfo.Builder();
@@ -42,6 +43,22 @@ final class DocumentText implements TextInput.Backend {
         int cs = (int) Math.min(s[3], s[4]), ce = (int) Math.max(s[3], s[4]);
         if (0 <= cs && cs < ce) b.setComposingText(cs, slice(cs, ce));
         float[] m = NativeCore.deriveCursorAnchor(deriver);
+        if (m != null && 0 <= cs && cs < ce) {   /* character bounds: the composing units in the caret's paragraph */
+            long at = NativeCore.deriveLocate(deriver, s[2]);
+            int p = (int) (at >> 32), pg = (int) (s[2] - (at & 0xffffffffL));
+            String text = NativeCore.deriveParagraph(deriver, p);
+            int a = Math.max(cs, pg), e = text == null ? a : Math.min(ce, pg + text.length());
+            if (a < e) {
+                float[] cb = DeriveLayout.characterBounds(text, (int) m[6], a - pg, e - pg);
+                for (int k = 0; k < e - a; k++) {
+                    float l = cb[5 * k], t = m[5] + cb[5 * k + 1], r = cb[5 * k + 2], bt = m[5] + cb[5 * k + 3];
+                    boolean v0 = visible(l, t, w, h), v1 = visible(r, bt, w, h);
+                    int flags = (v0 || v1 ? CursorAnchorInfo.FLAG_HAS_VISIBLE_REGION : 0) | (!v0 || !v1 ? CursorAnchorInfo.FLAG_HAS_INVISIBLE_REGION : 0)
+                        | (cb[5 * k + 4] != 0 ? CursorAnchorInfo.FLAG_IS_RTL : 0);
+                    b.addCharacterBounds(a + k, l, t, r, bt, flags);
+                }
+            }
+        }
         if (m != null) {
             boolean top = visible(m[0], m[1], w, h), bottom = visible(m[0], m[3], w, h);
             int flags = (top || bottom ? CursorAnchorInfo.FLAG_HAS_VISIBLE_REGION : 0)
