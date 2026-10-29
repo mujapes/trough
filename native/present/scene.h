@@ -65,7 +65,7 @@ int ps_frame_submit(ps_gpu *, const ps_upload *, size_t uploads, const uint8_t *
  * the presented image is also kept for ps_frame_pixels (the swapchain extent must equal the
  * ring's w x h). Returns 0, 1 if the swapchain must be rebuilt, or a negative VkResult. */
 int ps_frame_present(ps_gpu *, const ps_upload *, size_t uploads, const uint8_t *pixels, size_t pixel_bytes,
-                     const ps_glyph *, size_t glyphs, int shot, uint64_t *number);
+                     const ps_rect *, size_t rects, const ps_glyph *, size_t glyphs, int shot, uint64_t *number);
 /* Presentation timing (VK_GOOGLE_display_timing): frames presented since the last call, with
  * the time each reached the display (CLOCK_MONOTONIC ns) and the refresh period. -1 when the
  * device or swapchain has no display timing. */

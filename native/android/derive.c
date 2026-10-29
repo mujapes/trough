@@ -21,8 +21,12 @@
 #define CLASS(name) Java_com_trough_hot_NativeCore_##name
 
 typedef struct {
-    JavaVM *vm; jclass cls; jmethodID layout, mask;
+    JavaVM *vm; jclass cls; jmethodID layout, mask, caret, offset_at;
     tr_id op_mask;
+    /* Selection (docs/VIEW.md "Caret"): a cell holding (paragraph << 32 | offset) + 1, 0 = none;
+     * caret nodes (paragraph << 32 | offset) give its x and line box, and the overlay node turns
+     * selection + viewport into rectangles drawn under the glyphs. */
+    tr_id selection, op_caret, op_overlay; uint32_t overlay;
     /* The view's frames (deriveFrameOpen): GPU frame ring and atlas residency, used only by the
      * thread that calls deriveFrame. */
     ps_gpu *gpu; ANativeWindow *window; at_atlas atlas; at_cell *atlas_cells; uint32_t *atlas_index; int32_t atlas_pages[64];
@@ -39,7 +43,7 @@ typedef struct {
     struct vsync_src *vsync;                          /* derivePace mode 2: platform frame timelines */
     tr_world world; tr_cell *cells; tr_id driver, width, op, viewport, op_sum, op_scene; tr_id *text; int paragraphs;
     int levels; uint32_t scene;                       /* summary levels above paragraphs; the scene node */
-    atomic_ullong runs[5];                            /* invocations: layout, summary, scene, mask; [4] paragraphs estimated */
+    atomic_ullong runs[7];                            /* invocations: layout, summary, scene, mask; [4] paragraphs estimated; caret, overlay */
     /* Prefetch (derivePrefetch): layouts of paragraphs [anchor - before, anchor + after] are
      * demanded at DV_BACKGROUND, owned as [pf_lo, pf_hi); kept on the owner thread. */
     int pf_before, pf_after, pf_lo, pf_hi; uint64_t scroll_pauses;
@@ -317,6 +321,77 @@ static int scene_op(void *ctx, const dv_job *job, ex_out *out) {
     return 0;
 }
 
+/* Caret (paragraph << 32 | offset): x, line top and line bottom in the paragraph's layout, by
+ * TextLayout's caret rules (Layout.getPrimaryHorizontal), through Java on a worker. */
+static int caret_op(void *ctx, const dv_job *job, ex_out *out) {
+    deriver *d = ctx;
+    atomic_fetch_add(&d->runs[5], 1);
+    uint64_t para = job->key >> 32, offset = job->key & 0xffffffffu;
+    if (para >= (uint64_t)d->paragraphs) { out->value = 0; return 0; }
+    dv_ref rt = {DV_CELL, d->text[para], 0}, rw = {DV_CELL, d->width, 0};
+    uint64_t th, w;
+    int have_t = ex_read(job, out, rt, &th, NULL), have_w = ex_read(job, out, rw, &w, NULL);
+    if (!have_t || !have_w) { if (!have_t) ex_need(out, rt); if (!have_w) ex_need(out, rw); return 0; }
+    const void *units = NULL; size_t length = 0;
+    if (bl_is(th) && bl_get(&d->blobs, th, &units, &length) != TR_OK) { units = NULL; length = 0; }
+    JNIEnv *env;
+    if ((*d->vm)->GetEnv(d->vm, (void **)&env, JNI_VERSION_1_6) != JNI_OK) { out->value = 0; return 0; }
+    jstring s = (*env)->NewString(env, units, (jsize)(length / 2));
+    jbyteArray r = s ? (*env)->CallStaticObjectMethod(env, d->cls, d->caret, s, (jint)w, (jint)offset) : NULL;
+    if ((*env)->ExceptionCheck(env)) { (*env)->ExceptionClear(env); r = NULL; }
+    if (r) {
+        jsize n = (*env)->GetArrayLength(env, r);
+        out->blob = malloc(n ? (size_t)n : 1);
+        if (out->blob) { (*env)->GetByteArrayRegion(env, r, 0, n, out->blob); out->blob_length = (size_t)n; }
+        (*env)->DeleteLocalRef(env, r);
+    } else out->value = 0;
+    if (s) (*env)->DeleteLocalRef(env, s);
+    return 0;
+}
+/* Overlay: the selection's rectangles in viewport coordinates. Walks exact heights from the
+ * anchor like the scene, but only to the selected paragraph, and reads its caret node. Output:
+ * count, then (x0, y0, x1, y1) floats. A caret is 2 px wide, centred on its x. */
+#define CARET_HALF 1.0f
+#define CARET_R (26 / 255.0f)                          /* opaque, so premultiplied is the colour */
+#define CARET_G (115 / 255.0f)
+#define CARET_B (230 / 255.0f)
+static int overlay_op(void *ctx, const dv_job *job, ex_out *out) {
+    deriver *d = ctx;
+    atomic_fetch_add(&d->runs[6], 1);
+    dv_ref rv = {DV_CELL, d->viewport, 0}, rs = {DV_CELL, d->selection, 0};
+    uint64_t v, sel;
+    int have_v = ex_read(job, out, rv, &v, NULL), have_s = ex_read(job, out, rs, &sel, NULL);
+    if (!have_v || !have_s) { if (!have_v) ex_need(out, rv); if (!have_s) ex_need(out, rs); return 0; }
+    sink o = {0};
+    put32(&o, 0);
+    uint64_t anchor = v & 0xffffffffu, offset = (v >> 32) & 0xffff, height = v >> 48;
+    if (sel) {
+        uint64_t para = (sel - 1) >> 32;
+        int64_t y = -(int64_t)offset;
+        for (uint64_t i = anchor; para >= anchor && i < (uint64_t)d->paragraphs && y < (int64_t)height; i++) {
+            if (i == para) {
+                dv_ref rc = {DV_NODE, d->op_caret, sel - 1}; uint64_t cv; const void *p = NULL; size_t n = 0;
+                if (!ex_read(job, out, rc, &cv, NULL)) { ex_need(out, rc); free(o.b); return 0; }
+                if (bl_is(cv)) bl_get(&d->blobs, cv, &p, &n);
+                if (p && n >= 12) {
+                    const unsigned char *c = p;
+                    float x = bef(c), top = bef(c + 4), bottom = bef(c + 8), yy = (float)y;
+                    float r[4] = {x - CARET_HALF, yy + top, x + CARET_HALF, yy + bottom};
+                    for (int k = 0; k < 4; k++) { uint32_t u; memcpy(&u, &r[k], 4); put32(&o, u); }
+                    unsigned char one[4] = {0, 0, 0, 1}; memcpy(o.b, one, 4);
+                }
+                break;
+            }
+            dv_ref r = {DV_NODE, d->op, i}; uint64_t h;
+            if (!height_of(d, job, out, r, 1, &h, NULL, NULL)) { ex_need(out, r); free(o.b); return 0; }
+            y += (int64_t)h;
+        }
+    }
+    if (o.failed) { free(o.b); out->value = 0; return 0; }
+    out->blob = o.b; out->blob_length = o.n;
+    return 0;
+}
+
 /* Jump: the paragraph at a fraction of the estimated document height, through the estimate
  * summaries (all clean: the root is demanded). */
 typedef struct { deriver *d; int64_t permille, anchor, total; } jump_call;
@@ -400,6 +475,7 @@ static void set_prefetch(void *arg, tr_world *w, dv_graph *g) {   /* i = before,
 }
 static void demand_scene(void *arg, tr_world *w, dv_graph *g) {
     (void)w; call *c = arg; c->result = c->length ? dv_demand(g, c->d->scene) : dv_release(g, c->d->scene);
+    if (!c->result) c->length ? dv_demand(g, c->d->overlay) : dv_release(g, c->d->overlay);
 }
 static void demand(void *arg, tr_world *w, dv_graph *g) {
     (void)w; call *c = arg;
@@ -412,7 +488,7 @@ static void value(void *arg, tr_world *w, dv_graph *g) {
 typedef struct { deriver *d; int i; void *bytes; size_t length; int ok; } copy;
 static void bytes(void *arg, tr_world *w, dv_graph *g) {
     (void)w; copy *c = arg; uint64_t v; const void *p; size_t n;
-    uint32_t node = c->i < 0 ? c->d->scene : c->d->node[c->i];      /* -1: the scene */
+    uint32_t node = c->i == -2 ? c->d->overlay : c->i < 0 ? c->d->scene : c->d->node[c->i];   /* -1 scene, -2 overlay */
     if (dv_get(g, node, &v) || !bl_is(v) || bl_get(&c->d->blobs, v, &p, &n)) return;
     c->bytes = malloc(n ? n : 1);
     if (c->bytes) { memcpy(c->bytes, p, n); c->length = n; c->ok = 1; }
@@ -430,6 +506,7 @@ static void stats(void *arg, tr_world *w, dv_graph *g) {
     s[17] = (int64_t)d->atlas.evictions; s[18] = (int64_t)d->atlas.refusals; s[19] = (int64_t)atomic_load(&d->runs[4]);
     s[20] = (int64_t)d->scroll_pauses; s[21] = d->pf_hi - d->pf_lo;
     s[22] = (int64_t)d->extra_ns; s[23] = (int64_t)d->misses;
+    s[24] = (int64_t)atomic_load(&d->runs[5]); s[25] = (int64_t)atomic_load(&d->runs[6]);
 }
 
 /* The newest trace records: (operator 0 layout / 1 summary / 2 scene, key, outcome, worker). */
@@ -459,7 +536,7 @@ JNIEXPORT jlong JNICALL CLASS(deriveOpen)(JNIEnv *env, jclass c, jint workers, j
     if (paragraphs <= 0 || paragraphs > 100000 || workers <= 0 || workers > EX_WORKERS) return -1;
     deriver *d = calloc(1, sizeof *d);
     if (!d) return -1;
-    size_t n = (size_t)paragraphs, cellc = n + 8, nodec = n + n / (FAN - 1) + 16 + 4096, blobc = 3 * n + 64 + 4096;   /* + masks */
+    size_t n = (size_t)paragraphs, cellc = n + 12, nodec = n + n / (FAN - 1) + 16 + 4096, blobc = 3 * n + 64 + 4096;   /* + masks */
     d->paragraphs = paragraphs;
     d->cells = calloc(cellc, sizeof *d->cells); d->text = calloc(n, sizeof *d->text);
     d->nodes = calloc(nodec, sizeof *d->nodes); d->blocks = calloc(nodec, sizeof *d->blocks);
@@ -475,11 +552,14 @@ JNIEXPORT jlong JNICALL CLASS(deriveOpen)(JNIEnv *env, jclass c, jint workers, j
     d->cls = (*env)->NewGlobalRef(env, cls);
     d->layout = (*env)->GetStaticMethodID(env, cls, "layout", "(Ljava/lang/String;I)[B");
     d->mask = d->layout ? (*env)->GetStaticMethodID(env, cls, "mask", "(II)[B") : NULL;
-    if (!d->layout || !d->mask) { (*env)->ExceptionClear(env); (*env)->DeleteGlobalRef(env, d->cls); destroy(d); return -3; }
+    d->caret = d->mask ? (*env)->GetStaticMethodID(env, cls, "caret", "(Ljava/lang/String;II)[B") : NULL;
+    d->offset_at = d->caret ? (*env)->GetStaticMethodID(env, cls, "offsetAt", "(Ljava/lang/String;IIF)I") : NULL;
+    if (!d->layout || !d->mask || !d->caret || !d->offset_at) { (*env)->ExceptionClear(env); (*env)->DeleteGlobalRef(env, d->cls); destroy(d); return -3; }
     tr_world_init(&d->world, d->cells, cellc);
     tr_create(&d->world, 1, &d->driver); tr_create(&d->world, 1, &d->op); tr_create(&d->world, 0, &d->width);
     tr_create(&d->world, 1, &d->op_sum); tr_create(&d->world, 1, &d->op_scene); tr_create(&d->world, 0, &d->viewport);
     tr_create(&d->world, 1, &d->op_mask);
+    tr_create(&d->world, 0, &d->selection); tr_create(&d->world, 1, &d->op_caret); tr_create(&d->world, 1, &d->op_overlay);
     d->levels = 1;
     while (count_at(d, d->levels - 1) > 1) d->levels++;  /* the top level has one node: the root */
     for (size_t i = 0; i < n; i++) tr_create(&d->world, 0, &d->text[i]);
@@ -487,6 +567,7 @@ JNIEXPORT jlong JNICALL CLASS(deriveOpen)(JNIEnv *env, jclass c, jint workers, j
     dv_init(&d->graph, &d->world, d->nodes, nodec, d->blocks, nodec, d->table, pow2(2 * nodec), d->path);
     for (size_t i = 0; i < n; i++) dv_intern(&d->graph, d->op, i, &d->node[i]);
     dv_intern(&d->graph, d->op_scene, 0, &d->scene);
+    dv_intern(&d->graph, d->op_overlay, 0, &d->overlay);
     ex_init(&d->ex, &d->world, &d->graph, (size_t)workers);
     ex_use_blobs(&d->ex, &d->blobs);
     ex_on_worker(&d->ex, attach, detach, d);
@@ -496,6 +577,9 @@ JNIEXPORT jlong JNICALL CLASS(deriveOpen)(JNIEnv *env, jclass c, jint workers, j
     ex_register(&d->ex, d->op_sum, sum_op, d);
     ex_register(&d->ex, d->op_scene, scene_op, d);
     ex_register(&d->ex, d->op_mask, mask_op, d);
+    dv_set_static(&d->graph, d->op_caret);            /* text and width */
+    ex_register(&d->ex, d->op_caret, caret_op, d);
+    ex_register(&d->ex, d->op_overlay, overlay_op, d);
 
     if (ex_start(&d->ex)) { (*env)->DeleteGlobalRef(env, d->cls); destroy(d); return -4; }
     return (jlong)(intptr_t)d;
@@ -674,6 +758,60 @@ JNIEXPORT jlong JNICALL CLASS(deriveFrameBegin)(JNIEnv *env, jclass c, jlong h) 
 JNIEXPORT jlong JNICALL CLASS(deriveSettleVisible)(JNIEnv *env, jclass c, jlong h) {
     (void)env; (void)c; return (jlong)ex_settle_at(&((deriver *)(intptr_t)h)->ex, DV_VISIBLE);
 }
+/* Tap at viewport (x, y): the paragraph and line under it, from the clean layouts the scene
+ * read (exact heights from the anchor), then the offset by TextLayout's tap rules
+ * (Layout.getOffsetForHorizontal) through Java on the calling thread. The selection becomes a
+ * caret there. Returns paragraph << 32 | offset, or -1 (layouts not settled). */
+typedef struct { deriver *d; float x, y; int64_t para; int line; void *text; size_t length; uint64_t width; int ok; } tap_call;
+static void tap_find(void *arg, tr_world *w, dv_graph *g) {
+    tap_call *t = arg; deriver *d = t->d; tr_read vp, wd, tx; uint64_t v; const void *p; size_t n;
+    t->ok = 0;
+    if (tr_current(w, d->viewport, &vp) || tr_current(w, d->width, &wd)) return;
+    uint64_t anchor = vp.value & 0xffffffffu; float y = -(float)((vp.value >> 32) & 0xffff);
+    for (uint64_t i = anchor; i < (uint64_t)d->paragraphs; i++) {
+        if (dv_get(g, d->node[i], &v) || !bl_is(v) || bl_get(&d->blobs, v, &p, &n)) return;
+        float h = (float)layout_height(p, n);
+        if (t->y < y + h || i == (uint64_t)d->paragraphs - 1) {
+            const unsigned char *b = p; uint32_t lines = be32(b); float local = t->y - y;
+            int line = (int)lines - 1;
+            for (uint32_t l = 0; l < lines; l++) if (local < bef(b + 4 + (size_t)l * LINE_BYTES + 16)) { line = (int)l; break; }
+            if (tr_current(w, d->text[i], &tx)) return;
+            const void *u = NULL; size_t un = 0;
+            if (bl_is(tx.value)) bl_get(&d->blobs, tx.value, &u, &un);
+            t->text = malloc(un ? un : 1);
+            if (!t->text) return;
+            if (un) memcpy(t->text, u, un);
+            t->length = un; t->para = (int64_t)i; t->line = line < 0 ? 0 : line; t->width = wd.value; t->ok = 1;
+            return;
+        }
+        y += h;
+    }
+}
+static void set_selection(void *arg, tr_world *w, dv_graph *g) {    /* i = paragraph, length = offset (< 0: none) */
+    (void)w; (void)g; call *c = arg;
+    write_cell(c->d, c->d->selection, c->length < 0 ? 0 : ((uint64_t)(uint32_t)c->i << 32 | (uint32_t)c->length) + 1);
+}
+JNIEXPORT jlong JNICALL CLASS(deriveTap)(JNIEnv *env, jclass c, jlong h, jfloat x, jfloat y) {
+    (void)c; deriver *d = (deriver *)(intptr_t)h;
+    tap_call t = {d, x, y, -1, 0, NULL, 0, 0, 0};
+    ex_call(&d->ex, tap_find, &t);
+    if (!t.ok) return -1;
+    jstring s = (*env)->NewString(env, t.text, (jsize)(t.length / 2));
+    free(t.text);
+    if (!s) return -1;
+    jint offset = (*env)->CallStaticIntMethod(env, d->cls, d->offset_at, s, (jint)t.width, (jint)t.line, x);
+    (*env)->DeleteLocalRef(env, s);
+    if ((*env)->ExceptionCheck(env)) { (*env)->ExceptionClear(env); return -1; }
+    call k = {d, (int)t.para, NULL, offset, 0};
+    ex_call(&d->ex, set_selection, &k);
+    return t.para << 32 | (int64_t)(uint32_t)offset;
+}
+JNIEXPORT void JNICALL CLASS(deriveSelect)(JNIEnv *env, jclass c, jlong h, jint paragraph, jint offset) {
+    (void)env; (void)c; deriver *d = (deriver *)(intptr_t)h;
+    if (paragraph < 0 || paragraph >= d->paragraphs) offset = -1;
+    call k = {d, paragraph, NULL, offset, 0};
+    ex_call(&d->ex, set_selection, &k);
+}
 /* Lays out `before` paragraphs above the anchor and `after` below it in the background, and
  * keeps that window around the anchor as the viewport moves. 0, 0 turns it off. */
 JNIEXPORT void JNICALL CLASS(derivePrefetch)(JNIEnv *env, jclass c, jlong h, jint before, jint after) {
@@ -687,7 +825,7 @@ JNIEXPORT jlong JNICALL CLASS(deriveValue)(JNIEnv *env, jclass c, jlong h, jint 
 }
 JNIEXPORT jbyteArray JNICALL CLASS(deriveBytes)(JNIEnv *env, jclass c, jlong h, jint i) {
     (void)c; deriver *d = (deriver *)(intptr_t)h;
-    if (i < -1 || i >= d->paragraphs) return NULL;
+    if (i < -2 || i >= d->paragraphs) return NULL;
     copy k = {d, i, NULL, 0, 0};
     ex_call(&d->ex, bytes, &k);
     jbyteArray r = NULL;
@@ -697,11 +835,11 @@ JNIEXPORT jbyteArray JNICALL CLASS(deriveBytes)(JNIEnv *env, jclass c, jlong h, 
 }
 JNIEXPORT jlongArray JNICALL CLASS(deriveStats)(JNIEnv *env, jclass c, jlong h) {
     (void)c; deriver *d = (deriver *)(intptr_t)h;
-    int64_t s[24] = {0};
+    int64_t s[26] = {0};
     call k = {d, 0, (const jchar *)(void *)s, 0, 0};
     ex_call(&d->ex, stats, &k);
-    jlongArray r = (*env)->NewLongArray(env, 24);
-    if (r) (*env)->SetLongArrayRegion(env, r, 0, 24, (const jlong *)s);
+    jlongArray r = (*env)->NewLongArray(env, 26);
+    if (r) (*env)->SetLongArrayRegion(env, r, 0, 26, (const jlong *)s);
     return r;
 }
 JNIEXPORT jlongArray JNICALL CLASS(deriveTrace)(JNIEnv *env, jclass c, jlong h) {
@@ -788,6 +926,21 @@ JNIEXPORT jbyteArray JNICALL CLASS(deriveFrame)(JNIEnv *env, jclass c, jlong h, 
     ex_call(&d->ex, scene_copy, &sc);
     if (!sc.ok || sc.length < 4) { free(sc.bytes); return NULL; }
     uint32_t count = be32(sc.bytes);
+    /* The overlay's rectangles (the caret), drawn under the glyphs. */
+    ps_rect rects[16]; size_t nrect = 0;
+    copy oc = {d, -2, NULL, 0, 0};
+    ex_call(&d->ex, bytes, &oc);
+    if (oc.ok && oc.length >= 4) {
+        uint32_t nr = be32(oc.bytes);
+        for (uint32_t k = 0; k < nr && nrect < 16 && 4 + (size_t)(k + 1) * 16 <= oc.length; k++) {
+            const unsigned char *q = oc.bytes + 4 + (size_t)k * 16;
+            ps_rect *r = &rects[nrect++];
+            r->x0 = bef(q); r->y0 = bef(q + 4); r->x1 = bef(q + 8); r->y1 = bef(q + 12);
+            r->cx0 = 0; r->cy0 = 0; r->cx1 = (float)d->fw; r->cy1 = (float)d->fh;
+            r->r = CARET_R; r->g = CARET_G; r->b = CARET_B; r->a = 1;
+        }
+    }
+    free(oc.bytes);
     uint32_t *nodes = malloc(sizeof *nodes * (count ? count : 1));
     uint64_t *handles = calloc(count ? count : 1, sizeof *handles);
     unsigned char **bytes = calloc(count ? count : 1, sizeof *bytes);
@@ -829,8 +982,8 @@ JNIEXPORT jbyteArray JNICALL CLASS(deriveFrame)(JNIEnv *env, jclass c, jlong h, 
         glyphs[nglyph++] = (ps_glyph){x, y, x + (float)w, y + (float)hh, r.x, r.y, 0, 0, -1e6f, -1e6f, 1e6f, 1e6f, 0, 0, 0, 1};
     }
     uint64_t number;
-    int presented = d->window ? ps_frame_present(d->gpu, ups, nup, staging, staged, glyphs, nglyph, pixels, &number)
-                              : ps_frame_submit(d->gpu, ups, nup, staging, staged, NULL, 0, glyphs, nglyph, &number);
+    int presented = d->window ? ps_frame_present(d->gpu, ups, nup, staging, staged, rects, nrect, glyphs, nglyph, pixels, &number)
+                              : ps_frame_submit(d->gpu, ups, nup, staging, staged, rects, nrect, glyphs, nglyph, &number);
     collect_timing(d);
     if (!presented || presented == 1) {
         d->last_number = number;

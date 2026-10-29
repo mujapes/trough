@@ -235,3 +235,40 @@ bundle `662358b66638`, first run:
 - frame start to display: 31.6 ms p50, 33.4 ms max. Touch to display, from the oldest event a
   frame consumes: 46.6 / 49.0 / 49.9 ms (p50/p90/max), over 17 input frames. Moves 8 ms apart
   are batched into 16.65 ms frames, and an event waits up to one frame for the next paced start.
+
+## Caret
+
+The selection is a world cell holding `(paragraph << 32 | offset) + 1`, or 0 for none. Two
+operators derive what is drawn:
+- **caret(paragraph << 32 | offset):** static, reads the paragraph's text and the width. Java
+  `DeriveLayout.caret` gives TextLayout's primary-caret x (Layout.getPrimaryHorizontal's rule)
+  and the line's top and bottom;
+- **overlay:** reads the viewport and selection cells and walks exact layout heights from the
+  anchor to the selected paragraph, like the scene. It emits the caret as a rectangle, 2 px
+  wide and centred on x, in viewport coordinates. The scene's glyph format is unchanged; the
+  frame draws overlay rectangles under the glyphs (`ps_frame_present` and
+  `ps_frame_submit` take rects).
+
+`deriveTap(x, y)` finds the paragraph and line under a viewport point from the clean layouts
+the scene read. TextLayout's tap rule (Layout.getOffsetForHorizontal) then gives the offset,
+through Java on the calling thread, and the result becomes the selection. `deriveSelect` sets
+it directly. `DerivedView` treats a touch that ends inside the touch slop as a tap: the render
+thread applies it after any pending scroll, then makes a frame.
+
+`android.caret` runs offscreen against StaticLayout over the same paragraphs. Pixel bundle
+`c2b6112a36a6`:
+- 24 taps over the viewport (margins and past line ends included): 0 paragraph or offset
+  mismatches against a flat walk of StaticLayout heights, `getLineForVertical` and
+  `getOffsetForHorizontal`. The caret rectangle equals `getPrimaryHorizontal` ± 1 and the
+  line box exactly (max difference 0);
+- no caret move ran any layout or scene job. A new position costs 2 caret runs (one restart
+  for text and width) and 1-4 overlay runs, depending on which layouts the previous selection
+  read. A position already derived costs no caret run, and the same selection again costs
+  nothing. An edit of the caret's paragraph re-runs its caret once, and the caret stays exact;
+- the frame with the caret against the platform drawing it (no antialiasing, the pixel-centre
+  rule) under the glyphs: 0 bad pixels, max channel diff 1. The first run differed because
+  `new Paint()` antialiases by default on current Android, which was the reference's fault.
+
+`android.touch` now ends with a tap after the fling (bundle `0772e5703eae`). It selects
+(194, 271), as StaticLayout does at the scrolled position, draws one caret, runs no layout or
+scene job, and does not scroll.

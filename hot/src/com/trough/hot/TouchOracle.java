@@ -95,6 +95,28 @@ final class TouchOracle {
             if (consumed - v.flingDy() != 30 * 24) failures.add(Json.map("drag_consumed", consumed - v.flingDy()));
             if (idleFrames != 0) failures.add(Json.map("idle_frames", idleFrames));
             if (st[3] != 0) failures.add(Json.map("error", st[3]));
+
+            /* A tap (down and up in place) places the caret where StaticLayout says, at the
+             * scrolled position, and costs no layout or scene work. */
+            float tx = 333, ty = 700;
+            long[] t0 = NativeCore.deriveStats(d);
+            long td = SystemClock.uptimeMillis();
+            dispatch(activity, v, MotionEvent.obtain(td, td, MotionEvent.ACTION_DOWN, tx, ty, 0));
+            Thread.sleep(40);
+            long tu = SystemClock.uptimeMillis();
+            dispatch(activity, v, MotionEvent.obtain(td, tu, MotionEvent.ACTION_UP, tx, ty, 0));
+            deadline = SystemClock.uptimeMillis() + 5000;
+            while ((v.lastTap < 0 || !v.idle()) && SystemClock.uptimeMillis() < deadline) Thread.sleep(10);
+            long[] t1 = NativeCore.deriveStats(d);
+            int[] tapWant = CaretOracle.tapReference(corpus, want[0], tx, ty + want[1]);
+            long tap = v.lastTap;
+            boolean tapOk = tap >= 0 && (int) (tap >> 32) == tapWant[0] && (int) (tap & 0xffffffffL) == tapWant[1];
+            byte[] ov = NativeCore.deriveBytes(d, -2);
+            int rects = ov == null ? -1 : java.nio.ByteBuffer.wrap(ov).getInt();
+            out.put("tap", Json.map("got", Arrays.asList((int) (tap >> 32), (int) (tap & 0xffffffffL)), "want", Arrays.asList(tapWant[0], tapWant[1]),
+                "overlay_rects", rects, "layout_runs", t1[11] - t0[11], "scene_runs", t1[13] - t0[13], "consumed_after", v.consumedDy() - consumed));
+            if (!tapOk || rects != 1 || t1[11] != t0[11] || t1[13] != t0[13] || v.consumedDy() != consumed)
+                failures.add(Json.map("tap", out.get("tap")));
         } finally {
             if (view[0] != null) view[0].stop();          /* the render thread ends before the deriver */
             NativeCore.deriveClose(d);

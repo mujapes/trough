@@ -731,12 +731,12 @@ int ps_frame_submit(ps_gpu *g, const ps_upload *up, size_t nup, const uint8_t *p
 }
 
 int ps_frame_present(ps_gpu *g, const ps_upload *up, size_t nup, const uint8_t *pixels, size_t pixel_bytes,
-                     const ps_glyph *glyphs, size_t ng, int shot, uint64_t *number) {
-    if (!g || !g->frames || !g->swapchain || (nup && (!up || !pixels)) || (ng && !glyphs)) return fail(VK_ERROR_INITIALIZATION_FAILED);
+                     const ps_rect *rects, size_t nr, const ps_glyph *glyphs, size_t ng, int shot, uint64_t *number) {
+    if (!g || !g->frames || !g->swapchain || (nup && (!up || !pixels)) || (nr && !rects) || (ng && !glyphs)) return fail(VK_ERROR_INITIALIZATION_FAILED);
     uint32_t w = g->extent.width, h = g->extent.height;
     if (shot && (w != g->fw || h != g->fh)) return fail(VK_ERROR_INITIALIZATION_FAILED);   /* the ring's readback size */
     struct ps_frame *f = &g->frame[g->submitted % PS_FRAMES];
-    VkResult r = frame_begin(g, f, up, nup, pixels, pixel_bytes, NULL, 0, glyphs, ng);
+    VkResult r = frame_begin(g, f, up, nup, pixels, pixel_bytes, rects, nr, glyphs, ng);
     if (r) return fail(r);
     uint32_t index;
     r = vkAcquireNextImageKHR(g->device, g->swapchain, UINT64_MAX, f->acquired, VK_NULL_HANDLE, &index);
@@ -751,7 +751,7 @@ int ps_frame_present(ps_gpu *g, const ps_upload *up, size_t nup, const uint8_t *
         if (number) *number = f->number;
         return r == VK_ERROR_OUT_OF_DATE_KHR ? 1 : fail(r);
     }
-    record(g, f->cmd, g->image_fb[index], w, h, 0, ng, f->rects, f->glyphs);
+    record(g, f->cmd, g->image_fb[index], w, h, nr, ng, f->rects, f->glyphs);
     if (shot) readback(f, g->image[index], w, h);
     VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
     VkImageMemoryBarrier to_present = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, NULL,

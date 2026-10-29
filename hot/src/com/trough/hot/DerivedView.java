@@ -26,7 +26,11 @@ final class DerivedView extends SurfaceView implements SurfaceHolder.Callback {
     private int width, height;
     private Thread render;
     private VelocityTracker velocity;
-    private float lastY;
+    private float lastY, downX, downY;
+    private boolean dragged;
+    private float tapX = Float.NaN, tapY;      /* guarded by lock: a tap for the render thread */
+    private final int slop;
+    volatile long lastTap = -1;                /* paragraph << 32 | offset of the last tap */
     private volatile long frames, consumedDy, flingDy;
     volatile Frames observer;
     volatile int openStatus = Integer.MIN_VALUE;
@@ -35,6 +39,7 @@ final class DerivedView extends SurfaceView implements SurfaceHolder.Callback {
         super(context);
         this.deriver = deriver;
         flingVelocity = Float.NaN;
+        slop = android.view.ViewConfiguration.get(context).getScaledTouchSlop();
         setZOrderOnTop(true);
         getHolder().addCallback(this);
     }
@@ -45,9 +50,9 @@ final class DerivedView extends SurfaceView implements SurfaceHolder.Callback {
 
     /** True when no input is pending and no fling runs. */
     boolean idle() {
-        synchronized (lock) { return pendingDy == 0 && Float.isNaN(flingVelocity) && !flinging; }
+        synchronized (lock) { return pendingDy == 0 && Float.isNaN(flingVelocity) && Float.isNaN(tapX) && !flinging && !working; }
     }
-    private volatile boolean flinging;
+    private volatile boolean flinging, working;
 
     @Override public boolean onTouchEvent(MotionEvent e) {
         long t = e.getEventTimeNanos();
@@ -55,11 +60,13 @@ final class DerivedView extends SurfaceView implements SurfaceHolder.Callback {
             case MotionEvent.ACTION_DOWN:
                 if (velocity == null) velocity = VelocityTracker.obtain(); else velocity.clear();
                 velocity.addMovement(e);
-                lastY = e.getY();
+                lastY = downY = e.getY(); downX = e.getX(); dragged = false;
                 synchronized (lock) { flingVelocity = 0; lock.notifyAll(); }   /* 0: stop any fling */
                 return true;
             case MotionEvent.ACTION_MOVE: {
                 if (velocity != null) velocity.addMovement(e);
+                if (!dragged && Math.abs(e.getY() - downY) <= slop && Math.abs(e.getX() - downX) <= slop) return true;
+                dragged = true;
                 int dy = Math.round(lastY - e.getY());               /* finger up: content moves forward */
                 if (dy == 0) return true;
                 lastY -= dy;
@@ -73,6 +80,10 @@ final class DerivedView extends SurfaceView implements SurfaceHolder.Callback {
             }
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL:
+                if (!dragged && e.getActionMasked() == MotionEvent.ACTION_UP) {   /* a tap: place the caret */
+                    synchronized (lock) { tapX = e.getX(); tapY = e.getY(); if (pendingInputNs == 0) pendingInputNs = t; lock.notifyAll(); }
+                    return true;
+                }
                 if (velocity != null) {
                     velocity.addMovement(e);
                     velocity.computeCurrentVelocity(1000);
@@ -120,14 +131,16 @@ final class DerivedView extends SurfaceView implements SurfaceHolder.Callback {
         double[] timing = new double[5];
         while (true) {
             synchronized (lock) {
-                while (running && pendingDy == 0 && Float.isNaN(flingVelocity) && !flinging) {
+                while (running && pendingDy == 0 && Float.isNaN(flingVelocity) && Float.isNaN(tapX) && !flinging) {
                     try { lock.wait(); } catch (InterruptedException e) { return; }
                 }
                 if (!running) return;
+                working = true;
             }
             NativeCore.deriveFrameBegin(deriver);            /* paced: input is sampled after this */
-            int dy; long inputNs; float v;
+            int dy; long inputNs; float v, tx, ty;
             synchronized (lock) {
+                tx = tapX; ty = tapY; tapX = Float.NaN;
                 dy = pendingDy; pendingDy = 0;
                 inputNs = pendingInputNs; pendingInputNs = 0;
                 v = flingVelocity; flingVelocity = Float.NaN;
@@ -146,12 +159,14 @@ final class DerivedView extends SurfaceView implements SurfaceHolder.Callback {
                 else flinging = false;
             }
             int total = dy + fling;
-            if (total == 0) continue;
+            if (total == 0 && Float.isNaN(tx)) { working = false; continue; }
             if (inputNs != 0) NativeCore.deriveFrameInput(deriver, inputNs);
-            NativeCore.deriveScroll(deriver, total);
+            if (total != 0) NativeCore.deriveScroll(deriver, total);
+            if (!Float.isNaN(tx)) lastTap = NativeCore.deriveTap(deriver, tx, ty);   /* after the scroll: what is shown now */
             NativeCore.deriveSettleVisible(deriver);
             NativeCore.deriveFrame(deriver, false, timing);
             consumedDy += total; flingDy += fling; frames++;
+            working = false;
             Frames o = observer;
             if (o != null) o.frame(frames, total);
         }

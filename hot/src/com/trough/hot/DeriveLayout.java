@@ -91,6 +91,20 @@ final class DeriveLayout {
     /** A Font object for a face id (for rasterising its glyphs). */
     static Font face(int id) { synchronized (FONTS) { return FACES.get(id); } }
 
+    /** The caret at offset (clamped to the text): x by TextLayout's primary-caret rules, then
+     * its line's top and bottom, as three big-endian floats. */
+    static byte[] caret(String text, int width, int offset) {
+        TextLayout l = TextLayout.layout(text, PAINT.get(), width, 0, 0);
+        int o = Math.max(0, Math.min(offset, text.length()));
+        TextLayout.Line line = l.lines.get(l.lineOf(o));
+        return java.nio.ByteBuffer.allocate(12).putFloat(l.caretX(o)).putFloat(line.top).putFloat(line.bottom).array();
+    }
+    /** The offset a tap at x on line `line` selects (Layout.getOffsetForHorizontal). */
+    static int offsetAt(String text, int width, int line, float x) {
+        TextLayout l = TextLayout.layout(text, PAINT.get(), width, 0, 0);
+        return l.offsetAt(Math.max(0, Math.min(line, l.lines.size() - 1)), x);
+    }
+
     /** Lines (start, end, baseline, top, bottom, width, rtl), then glyphs (font, id, x, y). */
     static byte[] layout(String text, int width) {
         TextLayout l = TextLayout.layout(text, PAINT.get(), width, 0, 0);
