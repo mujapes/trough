@@ -7,6 +7,7 @@
 #include "exec.h"
 #include "atlas.h"
 #include "scene.h"
+#include <android/native_window.h>
 #include <jni.h>
 #include <stdatomic.h>
 #include <stdlib.h>
@@ -21,7 +22,7 @@ typedef struct {
     tr_id op_mask;
     /* The view's frames (deriveFrameOpen): GPU frame ring and atlas residency, used only by the
      * thread that calls deriveFrame. */
-    ps_gpu *gpu; at_atlas atlas; at_cell *atlas_cells; uint32_t *atlas_index; int32_t atlas_pages[64];
+    ps_gpu *gpu; ANativeWindow *window; at_atlas atlas; at_cell *atlas_cells; uint32_t *atlas_index; int32_t atlas_pages[64];
     uint32_t fw, fh; uint64_t frame_uploads, frame_hits;
     tr_world world; tr_cell *cells; tr_id driver, width, op, viewport, op_sum, op_scene; tr_id *text; int paragraphs;
     int levels; uint32_t scene;                       /* summary levels above paragraphs; the scene node */
@@ -331,6 +332,7 @@ static void trace_rows(void *arg, tr_world *w, dv_graph *g) {
 
 static void destroy(deriver *d) {
     if (d->gpu) ps_close(d->gpu);
+    if (d->window) ANativeWindow_release(d->window);
     free(d->atlas_cells); free(d->atlas_index);
     free(d->cells); free(d->text); free(d->nodes); free(d->blocks); free(d->table); free(d->path); free(d->node);
     free(d->entries); free(d->index); free(d);
@@ -539,15 +541,28 @@ static void collect_masks(void *arg, tr_world *w, dv_graph *g) {
     }
 }
 
-JNIEXPORT jint JNICALL CLASS(deriveFrameOpen)(JNIEnv *env, jclass c, jlong h, jint w, jint hh, jint aw, jint ah) {
-    (void)env; (void)c; deriver *d = (deriver *)(intptr_t)h;
-    char info[256];
+int trough_surface_gpu(JNIEnv *env, jobject surface, uint32_t w, uint32_t h, ps_gpu **out, ANativeWindow **window);   /* present.c */
+static int atlas_open(deriver *d, jint aw, jint ah) {
     size_t cells = (size_t)(aw / 16) * (ah / 16), index = 1; while (index < 2 * cells) index <<= 1;
     if ((size_t)(aw / 256) * (ah / 256) > 64) return -1;
     d->atlas_cells = calloc(cells, sizeof *d->atlas_cells); d->atlas_index = calloc(index, sizeof *d->atlas_index);
     if (!d->atlas_cells || !d->atlas_index) return -2;
-    if (at_init(&d->atlas, (uint32_t)aw, (uint32_t)ah, 256, d->atlas_cells, cells, d->atlas_index, index, d->atlas_pages)) return -3;
-    int st = ps_open(&d->gpu, info, sizeof info);
+    return at_init(&d->atlas, (uint32_t)aw, (uint32_t)ah, 256, d->atlas_cells, cells, d->atlas_index, index, d->atlas_pages) ? -3 : 0;
+}
+/* Frames presented to an Android Surface instead of offscreen targets. */
+JNIEXPORT jint JNICALL CLASS(deriveSurfaceOpen)(JNIEnv *env, jclass c, jlong h, jobject surface, jint w, jint hh, jint aw, jint ah) {
+    (void)c; deriver *d = (deriver *)(intptr_t)h;
+    int st = atlas_open(d, aw, ah);
+    if (!st) st = trough_surface_gpu(env, surface, (uint32_t)w, (uint32_t)hh, &d->gpu, &d->window);
+    if (!st) st = ps_frames_init(d->gpu, (uint32_t)w, (uint32_t)hh, (uint32_t)aw, (uint32_t)ah);
+    d->fw = (uint32_t)w; d->fh = (uint32_t)hh;
+    return st;
+}
+JNIEXPORT jint JNICALL CLASS(deriveFrameOpen)(JNIEnv *env, jclass c, jlong h, jint w, jint hh, jint aw, jint ah) {
+    (void)env; (void)c; deriver *d = (deriver *)(intptr_t)h;
+    char info[256];
+    int st = atlas_open(d, aw, ah);
+    if (!st) st = ps_open(&d->gpu, info, sizeof info);
     if (!st) st = ps_frames_init(d->gpu, (uint32_t)w, (uint32_t)hh, (uint32_t)aw, (uint32_t)ah);
     d->fw = (uint32_t)w; d->fh = (uint32_t)hh;
     return st;
@@ -602,7 +617,9 @@ JNIEXPORT jbyteArray JNICALL CLASS(deriveFrame)(JNIEnv *env, jclass c, jlong h, 
         glyphs[nglyph++] = (ps_glyph){x, y, x + (float)w, y + (float)hh, r.x, r.y, 0, 0, -1e6f, -1e6f, 1e6f, 1e6f, 0, 0, 0, 1};
     }
     uint64_t number;
-    if (ps_frame_submit(d->gpu, ups, nup, staging, staged, NULL, 0, glyphs, nglyph, &number)) goto done;
+    int presented = d->window ? ps_frame_present(d->gpu, ups, nup, staging, staged, glyphs, nglyph, pixels, &number)
+                              : ps_frame_submit(d->gpu, ups, nup, staging, staged, NULL, 0, glyphs, nglyph, &number);
+    if (presented) { at_submit(&d->atlas); ms[4] = -presented; goto done; }   /* 1: swapchain out of date */
     at_submit(&d->atlas);
     clock_gettime(CLOCK_MONOTONIC, &t2);
     if (pixels) {

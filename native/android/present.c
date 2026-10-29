@@ -213,6 +213,26 @@ static int upload(JNIEnv *env, ps_gpu *g, jbyteArray atlas, jint aw, jint ah) {
     if (a) (*env)->ReleaseByteArrayElements(env, atlas, a, JNI_ABORT);
     return st;
 }
+/* A presenting GPU on an Android Surface, for other modules (derive.c): ps_close releases the
+ * Vulkan surface; the caller releases *window. Returns 0 or a status. */
+int trough_surface_gpu(JNIEnv *env, jobject surface, uint32_t w, uint32_t h, ps_gpu **out, ANativeWindow **window) {
+    VkSurfaceKHR vs = VK_NULL_HANDLE;
+    *out = NULL; *window = NULL;
+    int st = ps_open_surface(out, VK_KHR_ANDROID_SURFACE_EXTENSION_NAME, NULL, 0);
+    if (!st && !(*window = ANativeWindow_fromSurface(env, surface))) st = -1;
+    if (!st) {
+        VkAndroidSurfaceCreateInfoKHR sci = {VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR, NULL, 0, *window};
+        VkResult r = vkCreateAndroidSurfaceKHR((VkInstance)ps_instance(*out), &sci, NULL, &vs);
+        st = r ? (int)r : 0;
+    }
+    if (!st) st = ps_swapchain(*out, (uint64_t)(uintptr_t)vs, w, h);
+    if (st) {
+        if (*out) ps_close(*out);
+        if (*window) ANativeWindow_release(*window);
+        *out = NULL; *window = NULL;
+    }
+    return st;
+}
 /* Returns a handle (> 0) or -status. */
 JNIEXPORT jlong JNICALL CLASS(surfaceOpen)(JNIEnv *env, jclass c, jobject surface, jint w, jint h) {
     (void)c;

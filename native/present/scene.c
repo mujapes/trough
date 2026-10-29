@@ -41,7 +41,7 @@ struct ps_gpu {
     VkBuffer vertices; VkDeviceMemory vertices_mem; void *vertices_map; size_t vertex_capacity;
     /* Frames in flight (ps_frames_init): a persistent GENERAL-layout atlas and a ring. */
     struct ps_frame {
-        VkCommandBuffer cmd; VkFence fence; int pending; uint64_t number;
+        VkCommandBuffer cmd; VkFence fence; VkSemaphore acquired; int pending; uint64_t number;
         VkImage target; VkDeviceMemory target_mem; VkImageView view; VkFramebuffer fb;
         VkBuffer readback; VkDeviceMemory readback_mem; void *readback_map;
         VkBuffer rects; VkDeviceMemory rects_mem; void *rects_map; size_t rects_cap;
@@ -553,6 +553,7 @@ static void drop_frames(ps_gpu *g) {
         VkDeviceMemory mems[] = {f->readback_mem, f->rects_mem, f->glyphs_mem, f->staging_mem};
         for (int k = 0; k < 4; k++) { if (bufs[k]) vkDestroyBuffer(g->device, bufs[k], NULL); if (mems[k]) vkFreeMemory(g->device, mems[k], NULL); }
         if (f->fence) vkDestroyFence(g->device, f->fence, NULL);
+        if (f->acquired) vkDestroySemaphore(g->device, f->acquired, NULL);
         if (f->cmd) vkFreeCommandBuffers(g->device, g->pool, 1, &f->cmd);
         memset(f, 0, sizeof *f);
     }
@@ -606,7 +607,9 @@ int ps_frames_init(ps_gpu *g, uint32_t w, uint32_t h, uint32_t aw, uint32_t ah) 
         VkImageCreateInfo ti = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, NULL, 0, VK_IMAGE_TYPE_2D, FORMAT, {w, h, 1}, 1, 1,
             VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
             VK_SHARING_MODE_EXCLUSIVE, 0, NULL, VK_IMAGE_LAYOUT_UNDEFINED};
+        VkSemaphoreCreateInfo semi = {VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, NULL, 0};
         if ((r = vkAllocateCommandBuffers(g->device, &ca, &f->cmd)) || (r = vkCreateFence(g->device, &fi, NULL, &f->fence)) ||
+            (r = vkCreateSemaphore(g->device, &semi, NULL, &f->acquired)) ||
             (r = vkCreateImage(g->device, &ti, NULL, &f->target))) return fail(r);
         vkGetImageMemoryRequirements(g->device, f->target, &req);
         if ((r = allocate(g, req, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 0, &f->target_mem)) ||
@@ -647,20 +650,20 @@ int ps_frames_wait(ps_gpu *g, uint64_t number) {
 }
 int ps_frames_pending(ps_gpu *g) { ps_frames_retired(g); return (int)(g->submitted - g->retired); }
 
-int ps_frame_submit(ps_gpu *g, const ps_upload *up, size_t nup, const uint8_t *pixels, size_t pixel_bytes,
-                    const ps_rect *rects, size_t nr, const ps_glyph *glyphs, size_t ng, uint64_t *number) {
-    if (!g || !g->frames || (nup && (!up || !pixels)) || (nr && !rects) || (ng && !glyphs)) return fail(VK_ERROR_INITIALIZATION_FAILED);
-    struct ps_frame *f = &g->frame[g->submitted % PS_FRAMES];
+/* Takes the next ring slot (waiting only if its frame is still pending), fills its buffers and
+ * begins its command buffer with the frame's uploads. */
+static VkResult frame_begin(ps_gpu *g, struct ps_frame *f, const ps_upload *up, size_t nup, const uint8_t *pixels, size_t pixel_bytes,
+                            const ps_rect *rects, size_t nr, const ps_glyph *glyphs, size_t ng) {
     VkResult r;
     if (f->pending) {                                 /* the ring is full: wait for the oldest */
-        if ((r = vkWaitForFences(g->device, 1, &f->fence, VK_TRUE, UINT64_MAX))) return fail(r);
+        if ((r = vkWaitForFences(g->device, 1, &f->fence, VK_TRUE, UINT64_MAX))) return r;
         f->pending = 0;
         ps_frames_retired(g);
     }
     if ((r = grow(g, &f->staging, &f->staging_mem, &f->staging_map, &f->staging_cap, pixel_bytes ? pixel_bytes : 1, VK_BUFFER_USAGE_TRANSFER_SRC_BIT)) ||
         (r = grow(g, &f->rects, &f->rects_mem, &f->rects_map, &f->rects_cap, (nr ? nr : 1) * sizeof *rects, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT)) ||
         (r = grow(g, &f->glyphs, &f->glyphs_mem, &f->glyphs_map, &f->glyphs_cap, (ng ? ng : 1) * sizeof *glyphs, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT)))
-        return fail(r);
+        return r;
     if (pixel_bytes) memcpy(f->staging_map, pixels, pixel_bytes);
     if (nr) memcpy(f->rects_map, rects, nr * sizeof *rects);
     if (ng) memcpy(f->glyphs_map, glyphs, ng * sizeof *glyphs);
@@ -686,12 +689,24 @@ int ps_frame_submit(ps_gpu *g, const ps_upload *up, size_t nup, const uint8_t *p
             VK_QUEUE_FAMILY_IGNORED, g->atlas, range};
         vkCmdPipelineBarrier(f->cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, NULL, 0, NULL, 1, &visible);
     }
-    record(g, f->cmd, f->fb, g->fw, g->fh, nr, ng, f->rects, f->glyphs);
-    VkBufferImageCopy copy = {0, 0, 0, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, {0, 0, 0}, {g->fw, g->fh, 1}};
-    vkCmdCopyImageToBuffer(f->cmd, f->target, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, f->readback, 1, &copy);
+    return VK_SUCCESS;
+}
+static void readback(struct ps_frame *f, VkImage image, uint32_t w, uint32_t h) {
+    VkBufferImageCopy copy = {0, 0, 0, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, {0, 0, 0}, {w, h, 1}};
+    vkCmdCopyImageToBuffer(f->cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, f->readback, 1, &copy);
     VkBufferMemoryBarrier host = {VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER, NULL, VK_ACCESS_TRANSFER_WRITE_BIT,
         VK_ACCESS_HOST_READ_BIT, VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, f->readback, 0, VK_WHOLE_SIZE};
     vkCmdPipelineBarrier(f->cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 0, NULL, 1, &host, 0, NULL);
+}
+
+int ps_frame_submit(ps_gpu *g, const ps_upload *up, size_t nup, const uint8_t *pixels, size_t pixel_bytes,
+                    const ps_rect *rects, size_t nr, const ps_glyph *glyphs, size_t ng, uint64_t *number) {
+    if (!g || !g->frames || (nup && (!up || !pixels)) || (nr && !rects) || (ng && !glyphs)) return fail(VK_ERROR_INITIALIZATION_FAILED);
+    struct ps_frame *f = &g->frame[g->submitted % PS_FRAMES];
+    VkResult r = frame_begin(g, f, up, nup, pixels, pixel_bytes, rects, nr, glyphs, ng);
+    if (r) return fail(r);
+    record(g, f->cmd, f->fb, g->fw, g->fh, nr, ng, f->rects, f->glyphs);
+    readback(f, f->target, g->fw, g->fh);
     vkEndCommandBuffer(f->cmd);
     VkSubmitInfo si = {VK_STRUCTURE_TYPE_SUBMIT_INFO, NULL, 0, NULL, NULL, 1, &f->cmd, 0, NULL};
     vkResetFences(g->device, 1, &f->fence);
@@ -699,6 +714,49 @@ int ps_frame_submit(ps_gpu *g, const ps_upload *up, size_t nup, const uint8_t *p
     f->pending = 1; f->number = ++g->submitted;
     if (number) *number = f->number;
     return 0;
+}
+
+int ps_frame_present(ps_gpu *g, const ps_upload *up, size_t nup, const uint8_t *pixels, size_t pixel_bytes,
+                     const ps_glyph *glyphs, size_t ng, int shot, uint64_t *number) {
+    if (!g || !g->frames || !g->swapchain || (nup && (!up || !pixels)) || (ng && !glyphs)) return fail(VK_ERROR_INITIALIZATION_FAILED);
+    uint32_t w = g->extent.width, h = g->extent.height;
+    if (shot && (w != g->fw || h != g->fh)) return fail(VK_ERROR_INITIALIZATION_FAILED);   /* the ring's readback size */
+    struct ps_frame *f = &g->frame[g->submitted % PS_FRAMES];
+    VkResult r = frame_begin(g, f, up, nup, pixels, pixel_bytes, NULL, 0, glyphs, ng);
+    if (r) return fail(r);
+    uint32_t index;
+    r = vkAcquireNextImageKHR(g->device, g->swapchain, UINT64_MAX, f->acquired, VK_NULL_HANDLE, &index);
+    if (r == VK_ERROR_OUT_OF_DATE_KHR || r < 0) {
+        /* Not drawn, but the uploads residency already counts must still happen: submit them. */
+        vkEndCommandBuffer(f->cmd);
+        VkSubmitInfo si = {VK_STRUCTURE_TYPE_SUBMIT_INFO, NULL, 0, NULL, NULL, 1, &f->cmd, 0, NULL};
+        vkResetFences(g->device, 1, &f->fence);
+        VkResult s = vkQueueSubmit(g->queue, 1, &si, f->fence);
+        if (s) return fail(s);
+        f->pending = 1; f->number = ++g->submitted;
+        if (number) *number = f->number;
+        return r == VK_ERROR_OUT_OF_DATE_KHR ? 1 : fail(r);
+    }
+    record(g, f->cmd, g->image_fb[index], w, h, 0, ng, f->rects, f->glyphs);
+    if (shot) readback(f, g->image[index], w, h);
+    VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    VkImageMemoryBarrier to_present = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, NULL,
+        VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_TRANSFER_READ_BIT, 0,
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED,
+        g->image[index], range};
+    vkCmdPipelineBarrier(f->cmd, VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                         VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, NULL, 0, NULL, 1, &to_present);
+    vkEndCommandBuffer(f->cmd);
+    VkPipelineStageFlags wait = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    VkSubmitInfo si = {VK_STRUCTURE_TYPE_SUBMIT_INFO, NULL, 1, &f->acquired, &wait, 1, &f->cmd, 1, &g->rendered[index]};
+    vkResetFences(g->device, 1, &f->fence);
+    if ((r = vkQueueSubmit(g->queue, 1, &si, f->fence))) return fail(r);
+    f->pending = 1; f->number = ++g->submitted;
+    if (number) *number = f->number;
+    VkPresentInfoKHR pi = {VK_STRUCTURE_TYPE_PRESENT_INFO_KHR, NULL, 1, &g->rendered[index], 1, &g->swapchain, &index, NULL};
+    VkResult pr = vkQueuePresentKHR(g->queue, &pi);
+    if (pr == VK_ERROR_OUT_OF_DATE_KHR || pr == VK_SUBOPTIMAL_KHR) return 1;
+    return pr < 0 ? fail(pr) : 0;
 }
 
 int ps_frame_pixels(ps_gpu *g, uint64_t number, uint8_t *rgba) {

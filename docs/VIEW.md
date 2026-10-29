@@ -102,6 +102,8 @@ Each resulting scene is byte-identical to the reference at that anchor and offse
 - **Dynamic restarts.** The scene is dynamic, so after a change it re-asks for its visible
   layouts one by one (5-7 runs). Fixes: batched needs, or hinting old dependencies that are
   already memoized.
-- **Presentation:** frames are drawn offscreen and read back. The swapchain path
-  (`ps_present`) must take the frame ring and its atlas; `android.surface` needs Trough
-  visible to check it.
+- **Presentation:** `ps_frame_present` draws a ring frame into the next swapchain image,
+  with a per-slot acquire semaphore and the same uploads and fences. If acquire fails, the
+  frame's uploads are still submitted, so residency stays true. `deriveSurfaceOpen` puts the
+  view on an Android Surface, and `android.viewsurface` checks the presented image and
+  measures pacing. It needs Trough visible and has not run yet.

@@ -61,6 +61,11 @@ int ps_frames_init(ps_gpu *, uint32_t w, uint32_t h, uint32_t atlas_w, uint32_t 
 /* Waits only when the ring slot's previous frame is still pending. *number = this frame (1, 2, ...). */
 int ps_frame_submit(ps_gpu *, const ps_upload *, size_t uploads, const uint8_t *pixels, size_t pixel_bytes,
                     const ps_rect *, size_t rects, const ps_glyph *, size_t glyphs, uint64_t *number);
+/* The same frame drawn into the next swapchain image (ps_swapchain) and presented; with shot,
+ * the presented image is also kept for ps_frame_pixels (the swapchain extent must equal the
+ * ring's w x h). Returns 0, 1 if the swapchain must be rebuilt, or a negative VkResult. */
+int ps_frame_present(ps_gpu *, const ps_upload *, size_t uploads, const uint8_t *pixels, size_t pixel_bytes,
+                     const ps_glyph *, size_t glyphs, int shot, uint64_t *number);
 /* Non-blocking: the newest frame number whose fence (and all earlier ones) has signalled. */
 uint64_t ps_frames_retired(ps_gpu *);
 /* A retired frame's pixels (w*h*4), while its ring slot has not been reused. */

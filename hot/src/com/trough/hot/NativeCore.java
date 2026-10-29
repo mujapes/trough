@@ -44,6 +44,7 @@ final class NativeCore {
     static native long[] deriveStats(long deriver);
     static native long[] deriveTrace(long deriver);
     static native int deriveFrameOpen(long deriver, int w, int h, int atlasW, int atlasH);
+    static native int deriveSurfaceOpen(long deriver, android.view.Surface surface, int w, int h, int atlasW, int atlasH);
     static native byte[] deriveFrame(long deriver, boolean pixels, double[] timing);
     static native void deriveClose(long deriver);
     static native byte[] sceneRender(int w, int h, float[] rects, float[] glyphs, byte[] atlas, int aw, int ah);
