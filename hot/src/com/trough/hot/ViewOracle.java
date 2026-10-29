@@ -88,12 +88,12 @@ final class ViewOracle {
                 if (!same) { ok = false; failures.add(Json.map("scroll", dy, "got", Arrays.asList(ga, go), "want", Arrays.asList(ra, ro))); }
             }
             out.put("scrolls", scrolls);
-            /* Background prefetch: layouts from 2 above to 24 below the anchor are demanded at
+            /* Background prefetch: layouts from 8 above to 24 below the anchor are demanded at
              * DV_BACKGROUND, so a scroll into them crosses laid-out paragraphs without pausing,
              * and the scene settles (deriveSettleVisible) without waiting for the window. */
             List<Object> prefetched = new ArrayList<>();
             long[] p0 = NativeCore.deriveStats(d); long w0 = System.nanoTime();
-            NativeCore.derivePrefetch(d, 2, 24);
+            NativeCore.derivePrefetch(d, 8, 24);
             NativeCore.deriveSettle(d);
             long[] p1 = NativeCore.deriveStats(d);
             out.put("prefetch_window", Json.map("paragraphs", p1[21], "layout_runs", p1[11] - p0[11], "ms", (System.nanoTime() - w0) / 1e6));

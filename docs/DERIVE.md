@@ -114,7 +114,7 @@ A memo-free reference evaluates the current world from scratch.
   every dependency it can name before it stops) and per-operator dependency hints are the
   known fixes; measure them on real operators first.
 - Incremental sweeps. The root list is built: demanded nodes are linked in demand order, so
-  an idle poll over 8192 nodes with 8 demanded costs 0.07 us (VM), down from 33 us when it
+  an idle poll over 8192 nodes with 8 demanded costs 0.07 us (VM; 0.06 us on the Pixel), down from 33 us when it
   scanned every node. A clean root stops its walk at once, so the remaining poll cost is
   proportional to the roots plus the work found under them.
 - Byte/resource admission and cancellation leases joined to `resources.h`, and IO workers.

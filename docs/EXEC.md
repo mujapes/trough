@@ -64,6 +64,10 @@ the "bounded execution / traces" step of stage 3 ([CONSTRUCTION.md](CONSTRUCTION
   job demanded 2 ms in settles in 20.2 ms with 52 background jobs left, and everything
   settles in 112 ms. Mutants are caught: no per-call reset (it returned before the job ran)
   and `ex_settle_at` waiting for everything.
+- **Pixel bundle `79bdc5b7eedb`:** priorities with 1 reserved worker: urgent jobs wait 0.072 ms
+  (p50) and 0.78 ms (p90). Without the reserve they wait 0.90 ms (p50) and up to 3.8 ms. With
+  the visible flood, urgent and promoted jobs start within 3.9 ms. The urgent level settles in
+  23.1 ms with 52 background jobs left.
 - **Unregistered operator:** a sticky `TR_INVALID`; settle returns 0 instead of hanging.
 - **Scaling:** 96 independent 2 ms jobs. On the VM: 1 worker 193 ms, 2 97, 4 54, 8 31.
   This measures scheduling overhead, not energy.

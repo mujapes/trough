@@ -42,8 +42,10 @@ running jobs were cancelled. Pixel run of core.derive/core.exec pending (phone r
 Then: root list (idle poll 33 -> 0.07 us), dv_unsettled + ex_settle_at (urgent settles while
 background runs), and view prefetch (derivePrefetch, VIEW.md "Background prefetch",
 android.view prefetch_scrolls step). Bionic lib + Java compile in the VM; bundle 34936388
-published but NOT yet run on the Pixel. Next: tools/loop.sh NO_PUBLISH=1 once Trough is open;
-then android.viewsurface (needs Trough visible).
+-> Pixel bundle 79bdc5b7eedb: all 38 scenarios pass, including android.viewsurface (first run:
+16.2 ms/frame over 120 frames, 0 bad pixels) and prefetch scrolls (0 pauses, 0.1-0.4 ms).
+Next: present scroll frames continuously on the swapchain (input -> scroll -> frame), then
+selection/caret on the derived scene.
 
 DECIDED (2026-10-28): the Java/native boundary is a bionic build of the same sources, loaded
 in-process (docs/BIONIC.md). All store oracles pass as bionic programs on the Pixel; android.jni

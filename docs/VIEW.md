@@ -122,6 +122,25 @@ that leave it are released. It uses the graph's levels ([DERIVE.md](DERIVE.md), 
 - the executor keeps one worker free of background work, which matters little at 2 workers.
 
 With prefetch off (0, 0), the scheduling is the one measured in the tables above. The
-`android.view` step "prefetch_scrolls" turns on a window of 2 above and 24 below. It then
+`android.view` step "prefetch_scrolls" turns on a window of 8 above and 24 below. It then
 scrolls 700, 1300, 900 and -600 px. Each scene must equal the reference, and no scroll may
-pause. Pixel results are pending.
+pause. Pixel bundle `79bdc5b7eedb`:
+
+| scroll | pauses | scroll call | scene visible | window layouts after |
+|---|---|---|---|---|
+| +700 | 0 | 0.41 ms | 0.84 ms | 2 |
+| +1300 | 0 | 0.13 ms | 0.68 ms | 10 |
+| +900 | 0 | 0.18 ms | 1.06 ms | 8 |
+| -600 | 0 | 0.24 ms | 1.19 ms | 0 |
+
+Without prefetch, the same kind of scroll takes 15-35 ms and pauses up to 11 times (the
+"scrolls" step). Filling the first 33-paragraph window costs 26 layout runs in 32 ms, in the
+background. The first Pixel run used 2 above. The -600 px scroll crossed 3 paragraphs and
+paused once, which was the oracle's window, not the mechanism.
+
+## On the swapchain (`android.viewsurface`)
+
+Pixel bundle `79bdc5b7eedb`, first run (Trough visible): 5 derived frames presented to the
+Surface, 0 bad pixels, max channel diff 1. Build takes 11.0 ms for the first frame (71 uploads)
+and 1.3-1.8 ms after it. Pacing: 120 frames at 16.20 ms per frame, with a worst frame call of
+20.5 ms and 0 failed presents.
