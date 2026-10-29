@@ -86,6 +86,10 @@ Bundle 039653916966 (Trough visible): android.touch passed incl. typing through 
 InputConnection; viewsurface/surface pass; access (bounds clipping) and keys (Selection vertical-move
 memory) fixed in 86947da; vulkan surface-lost now needs_visible_app. User 2026-10-29: don't work on
 keeping the VM->phone loop alive; it goes away when Trough is its own app.
+Loop timing measured 2026-10-29: tools/hot.sh 69 s (native/build.sh 51 s, Java 11 s); phone activation
+~25 s Java + ~2 min native self-build only when native sources changed (cached by tree hash); 46
+scenarios = 176 s of work, 348 s wall (~4 s control-channel overhead each; build.native 51 s). Prefer
+publishing with NO_SCENARIOS=1 tools/loop.sh, then tools/scenario.py <name> for the affected ones.
 
 DECIDED (2026-10-28): the Java/native boundary is a bionic build of the same sources, loaded
 in-process (docs/BIONIC.md). All store oracles pass as bionic programs on the Pixel; android.jni
