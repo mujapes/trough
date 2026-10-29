@@ -68,6 +68,25 @@ final class ViewOracle {
             NativeCore.deriveViewport(d, anchor, 40, VIEW_H);
             NativeCore.deriveSettle(d);
             ok &= step(d, corpus, anchor, 40, "scroll 40 px", before, t0, steps, failures, -1, 0, -1, 0);
+            /* Scrolling by pixels across paragraphs, down then up past the original anchor. */
+            int[] moves = {700, 1300, -2600, -900, 333};
+            int ra = anchor, ro = 40;
+            List<Object> scrolls = new ArrayList<>();
+            for (int dy : moves) {
+                long[] b0 = NativeCore.deriveStats(d); long s0 = System.nanoTime();
+                long pos = NativeCore.deriveScroll(d, dy);
+                NativeCore.deriveSettle(d);
+                int ga = (int) (pos & 0xffffffffL), go = (int) (pos >>> 32);
+                int[] want = scrollReference(corpus, ra, ro, dy);
+                ra = want[0]; ro = want[1];
+                byte[] got = NativeCore.deriveBytes(d, -1);
+                boolean same = ga == ra && go == ro && Arrays.equals(got, reference(corpus, ra, ro));
+                long[] a1 = NativeCore.deriveStats(d);
+                scrolls.add(Json.map("dy", dy, "anchor", ga, "offset", go, "expected", Arrays.asList(ra, ro), "equal", same,
+                    "layout_runs", a1[11] - b0[11], "scene_runs", a1[13] - b0[13], "ms", (System.nanoTime() - s0) / 1e6));
+                if (!same) { ok = false; failures.add(Json.map("scroll", dy, "got", Arrays.asList(ga, go), "want", Arrays.asList(ra, ro))); }
+            }
+            out.put("scrolls", scrolls);
             out.put("steps", steps);
             Map<String, Object> pixels = pixels(NativeCore.deriveBytes(d, -1));
             out.put("pixels", pixels);
@@ -129,6 +148,20 @@ final class ViewOracle {
         int lines = b.getInt();
         if (lines == 0) return 0;
         return (int) (b.getFloat(4 + (lines - 1) * 25 + 16) + 0.5f);
+    }
+    /** The anchor and offset after scrolling by dy over exact heights. */
+    static int[] scrollReference(List<String> corpus, int anchor, int offset, int dy) {
+        long o = (long) offset + dy;
+        int a = anchor;
+        for (;;) {
+            if (o < 0 && a == 0) { o = 0; break; }
+            if (o >= 0 && a == corpus.size() - 1) break;
+            if (o < 0) { a--; o += height(DeriveLayout.layout(corpus.get(a), WIDTH)); continue; }
+            int h = height(DeriveLayout.layout(corpus.get(a), WIDTH));
+            if (o >= h && h > 0) { o -= h; a++; continue; }
+            break;
+        }
+        return new int[]{a, (int) Math.min(o, 0xffff)};
     }
     /** Paragraphs in the 16-paragraph block holding i: what a level-0 summary re-estimates. */
     static long block(int n, int i) { return Math.min(16, n - (i / 16) * 16); }

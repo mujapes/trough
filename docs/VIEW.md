@@ -79,11 +79,26 @@ The max channel diff is 1 throughout. The corpus's 73 distinct glyphs are raster
 the receipt (18-94 ms) includes the oracle's full 1080x1400 readback, so it is not a
 presentation cost.
 
-## Known costs and their workarounds
+## Scrolling by pixels
 
-- **Scrolling by pixels across paragraphs** belongs to the owner: move the anchor across
-  exact heights of the paragraphs scrolled past, which are visible and so already laid out.
-  Flings and the scrollbar map through the estimate tree.
+`deriveScroll(dy)` moves the anchor across *exact* heights on the owner thread. A paragraph
+whose layout is not yet clean (crossed upward, or past the viewport) is demanded, settled and
+released, and the walk continues. The scroll's position lives in the call until the walk
+completes, so the viewport cell is written once. Writing intermediate anchors re-derived the
+scene at every pause: 95 scene runs for one 2600 px scroll, now 8. Bundle `aaec04031403`, from
+the anchor plus 40 px:
+
+| dy | anchor, offset (= exact-height Java walk) | layout runs | scene runs | time |
+|---|---|---|---|---|
+| +700 | 307, 17 | 8 | 8 | 78 ms |
+| +1300 | 312, 81 | 10 | 8 | 87 ms |
+| -2600 | 301, 574 | 6 | 8 | 144 ms |
+| -900 | 299, 102 | 4 | 6 | 60 ms |
+| +333 | 301, 7 | 0 | 5 | 49 ms |
+
+Each resulting scene is byte-identical to the reference at that anchor and offset.
+
+## Known costs and their workarounds
 - **Dynamic restarts.** The scene is dynamic, so after a change it re-asks for its visible
   layouts one by one (5-7 runs). Fixes: batched needs, or hinting old dependencies that are
   already memoized.

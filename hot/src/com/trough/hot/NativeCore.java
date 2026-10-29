@@ -36,6 +36,7 @@ final class NativeCore {
     static native int deriveDemand(long deriver, int paragraph, boolean on);
     static native void deriveViewport(long deriver, int anchor, int offset, int height);
     static native int deriveJump(long deriver, int permille);
+    static native long deriveScroll(long deriver, int dy);
     static native int deriveDemandScene(long deriver, boolean on);
     static native long deriveSettle(long deriver);
     static native long deriveValue(long deriver, int paragraph);

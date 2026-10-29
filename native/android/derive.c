@@ -398,6 +398,54 @@ JNIEXPORT void JNICALL CLASS(deriveViewport)(JNIEnv *env, jclass c, jlong h, jin
     (void)env; (void)c; deriver *d = (deriver *)(intptr_t)h;
     call k = {d, anchor, NULL, (jsize)((offset & 0xffff) | (height & 0xffff) << 16), 0}; ex_call(&d->ex, set_viewport, &k);
 }
+/* Scroll by dy pixels: move the anchor across exact heights. A paragraph whose layout is not
+ * clean yet (crossed upward, or beyond the viewport) is demanded, settled and released. */
+/* The scroll's position lives in the call until it is complete, so pausing to lay out a crossed
+ * paragraph does not re-derive the scene; the viewport cell is written once. */
+typedef struct { deriver *d; int64_t dy, anchor, offset; uint64_t height; uint32_t need; int done, started; } scroll_call;
+static void scroll_step(void *arg, tr_world *w, dv_graph *g) {
+    scroll_call *sc = arg; deriver *d = sc->d; tr_read vp;
+    sc->need = UINT32_MAX; sc->done = 0;
+    if (!sc->started) {
+        if (tr_current(w, d->viewport, &vp)) { sc->done = 1; return; }
+        sc->anchor = (int64_t)(vp.value & 0xffffffffu); sc->offset = (int64_t)((vp.value >> 32) & 0xffff) + sc->dy;
+        sc->height = vp.value >> 48; sc->started = 1;
+    }
+    int64_t anchor = sc->anchor, offset = sc->offset;
+    uint64_t height = sc->height, v; const void *p; size_t n;
+    for (;;) {
+        int64_t i = offset < 0 ? anchor - 1 : anchor;    /* the paragraph whose height decides */
+        if (offset < 0 && anchor == 0) { offset = 0; break; }
+        if (offset >= 0 && anchor == d->paragraphs - 1) break;
+        if (dv_get(g, d->node[i], &v) || !bl_is(v) || bl_get(&d->blobs, v, &p, &n)) { sc->need = (uint32_t)i; break; }
+        int64_t h = (int64_t)layout_height(p, n);
+        if (offset < 0) { anchor--; offset += h; continue; }
+        if (offset >= h && h > 0) { offset -= h; anchor++; continue; }
+        break;
+    }
+    sc->anchor = anchor; sc->offset = offset;
+    if (sc->need != UINT32_MAX) return;              /* paused: lay out sc->need, then continue */
+    if (offset > 0xffff) offset = 0xffff;
+    write_cell(d, d->viewport, (uint64_t)anchor | (uint64_t)offset << 32 | height << 48);
+    sc->done = 1;
+}
+static void demand_layout(void *arg, tr_world *w, dv_graph *g) { (void)w; call *c = arg; c->result = c->length ? dv_demand(g, c->d->node[c->i]) : dv_release(g, c->d->node[c->i]); }
+JNIEXPORT jlong JNICALL CLASS(deriveScroll)(JNIEnv *env, jclass c, jlong h, jint dy) {
+    (void)env; (void)c; deriver *d = (deriver *)(intptr_t)h;
+    scroll_call sc = {d, dy, 0, 0, 0, UINT32_MAX, 0, 0};
+    for (int guard = 0; guard < 100000; guard++) {
+        ex_call(&d->ex, scroll_step, &sc);
+        if (sc.done) break;
+        call k = {d, (int)sc.need, NULL, 1, 0};            /* lay out the paragraph crossed, then continue */
+        ex_call(&d->ex, demand_layout, &k);
+        if (!ex_settle(&d->ex)) return -1;
+        k.length = 0; ex_call(&d->ex, demand_layout, &k);
+    }
+    tr_read vp; uint64_t v = 0;
+    if (tr_current(&d->world, d->viewport, &vp) == TR_OK) v = vp.value;   /* read after the calls: owner idle */
+    return (jlong)(v & 0xffffffffffffULL);           /* anchor | offset << 32 */
+}
+
 /* Anchor at a fraction (per mille) of the estimated height; returns the paragraph, or -1. */
 JNIEXPORT jint JNICALL CLASS(deriveJump)(JNIEnv *env, jclass c, jlong h, jint permille) {
     (void)env; (void)c; deriver *d = (deriver *)(intptr_t)h;
