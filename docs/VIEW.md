@@ -183,9 +183,30 @@ so display timing gives the true input-to-display latency. Pixel, fling with pre
 
 The slack settles near 19-21 ms, about one refresh. That refresh is the compositor's latch
 before scan-out, which the CPU estimate cannot see. The controller still saws: it misses its own
-target 10-17 times per 120 frames, against 1-3 vsyncs actually skipped. Next: take the deadline
-and expected present time from the platform (Android 13+ `AChoreographer_postVsyncCallback`
-frame timelines) instead of learning them.
+target 10-17 times per 120 frames, against 1-3 vsyncs actually skipped.
+
+**Mode 2, platform deadlines.** A looper thread keeps the latest `AChoreographer_postVsyncCallback`
+frame timelines: the compositor latch deadline and the expected present time. The API is
+Android 13+, resolved with dlsym because the library targets API 28. `deriveFrameBegin` aims at
+the earliest deadline the work can meet. Its slack starts at 1 ms, grows 1 ms per frame shown
+more than half a refresh after the expected time, and shrinks 0.05 ms per on-time frame. Same
+fling, bundle `394101b00c66`:
+
+| mode | latency p50 / p90 / max | skipped vsyncs | own-target misses | slack |
+|---|---|---|---|---|
+| 0 unpaced | 75.1 / 76.9 / 78.6 ms | 0 | - | - |
+| 1 learned grid | 27.8 / 38.1 / 76.5 ms | 3 | 16 | 17.8 ms |
+| 1, slack carried | 29.7 / 39.8 / 75.0 ms | 2 | 13 | 21.3 ms |
+| 2 platform deadline (learning) | 54.3 / 60.9 / 72.9 ms | 1 | 33 | 29.6 ms |
+| 2, slack carried | **34.6 / 36.9 / 49.7 ms** | 1 | **0** | 23.6 ms |
+
+The choreographer's deadline is about one refresh optimistic for a Vulkan swapchain producer.
+Its timelines are made for producers that tag frames with `ASurfaceTransaction_setFrameTimeline`,
+while a swapchain buffer must also clear its GPU fence and BufferQueue. So mode 2 still learns
+about 24 ms of slack. Once learned, it is the steadiest mode: 0 misses of its own target and a
+latency spread of 34.6-49.7 ms. Mode 1 is lower at the median, but it has longer tails and more
+skipped vsyncs. Mode 2's first-run overshoot comes from the +1 ms/-0.05 ms steps. Starting the
+slack at one refresh would avoid it.
 
 The first run of this oracle hung the scenario thread. A fling started past the last paragraph,
 and `scroll_step` read a node index out of range. `deriveViewport` now clamps the anchor, and

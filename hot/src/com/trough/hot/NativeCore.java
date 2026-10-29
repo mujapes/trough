@@ -42,7 +42,7 @@ final class NativeCore {
     static native long deriveSettleVisible(long deriver);
     static native void derivePrefetch(long deriver, int before, int after);
     static native long[] derivePresentTimes(long deriver);
-    static native void derivePace(long deriver, boolean on);
+    static native int derivePace(long deriver, int mode);
     static native long deriveFrameBegin(long deriver);
     static native long deriveValue(long deriver, int paragraph);
     static native byte[] deriveBytes(long deriver, int paragraph);

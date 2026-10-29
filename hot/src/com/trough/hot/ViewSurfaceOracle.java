@@ -86,11 +86,13 @@ final class ViewSurfaceOracle {
             /* Flings: 80 px per frame for 120 frames, without and then with background prefetch.
              * Each frame scrolls, settles what is visible and presents; a frame interval over
              * 20 ms is a missed vsync at 60 Hz. */
-            String[] runs = {"fling", "fling_prefetch", "fling_paced", "fling_paced2"};   /* paced2: learned slack kept */
-            for (int pf = 0; pf < 4; pf++) {
-                NativeCore.deriveViewport(d, Math.min(anchor + 40 + 60 * pf, corpus.size() - 120), 0, h);   /* fresh paragraphs each run; 120 x 80 px stays inside */
+            /* paced2: learned slack kept; choreo: platform deadlines (pace mode 2) */
+            String[] runs = {"fling", "fling_prefetch", "fling_paced", "fling_paced2", "fling_choreo", "fling_choreo2"};
+            int[] modes = {0, 0, 1, 1, 2, 2};
+            for (int pf = 0; pf < runs.length; pf++) {
+                NativeCore.deriveViewport(d, Math.min(anchor - 200 + 60 * pf, corpus.size() - 120), 0, h);   /* fresh paragraphs each run; 120 x 80 px stays inside */
                 NativeCore.derivePrefetch(d, pf >= 1 ? 8 : 0, pf >= 1 ? 32 : 0);
-                NativeCore.derivePace(d, pf >= 2);
+                int mode = NativeCore.derivePace(d, modes[pf]);
                 NativeCore.deriveSettle(d);
                 long[] s0 = NativeCore.deriveStats(d);
                 NativeCore.derivePresentTimes(d);                 /* drop earlier frames' timing */
@@ -120,13 +122,13 @@ final class ViewSurfaceOracle {
                 Thread.sleep(100);                                /* the last frames reach the display */
                 Map<String, Object> display = displayTiming(NativeCore.derivePresentTimes(d));
                 out.put(runs[pf] + "_display", display);
-                out.put(runs[pf], Json.map("slept_avg_ms", sleptSum / n, "pace_extra_ms", s1[22] / 1e6, "pace_misses", s1[23] - s0[23], "frames", n, "per_frame_ms", (System.nanoTime() - f0) / 1e6 / n,
+                out.put(runs[pf], Json.map("mode", mode, "slept_avg_ms", sleptSum / n, "pace_extra_ms", s1[22] / 1e6, "pace_misses", s1[23] - s0[23], "frames", n, "per_frame_ms", (System.nanoTime() - f0) / 1e6 / n,
                     "scroll_settle_avg_ms", scrollSum / n, "scroll_settle_worst_ms", scrollWorst, "missed_frames", missed,
                     "pauses", s1[20] - s0[20], "layout_runs", s1[11] - s0[11], "failed_presents", fails, "misses", misses));
                 ok &= fails == 0;
             }
             NativeCore.derivePrefetch(d, 0, 0);
-            NativeCore.derivePace(d, false);
+            NativeCore.derivePace(d, 0);
             out.put("ok", ok);
             return out;
         } finally {

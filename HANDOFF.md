@@ -44,8 +44,12 @@ background runs), and view prefetch (derivePrefetch, VIEW.md "Background prefetc
 android.view prefetch_scrolls step). Bionic lib + Java compile in the VM; bundle 34936388
 -> Pixel bundle 79bdc5b7eedb: all 38 scenarios pass, including android.viewsurface (first run:
 16.2 ms/frame over 120 frames, 0 bad pixels) and prefetch scrolls (0 pauses, 0.1-0.4 ms).
-Next: present scroll frames continuously on the swapchain (input -> scroll -> frame), then
-selection/caret on the derived scene.
+Then (2026-10-29 morning, all on the Pixel): display timing (VK_GOOGLE_display_timing), fling
+oracle (prefetch flings skip 0 vsyncs), frame pacing (derivePace 1 learned grid / 2 choreographer
+deadlines; input-to-display 75 -> 28-35 ms p50, VIEW.md "Frame pacing"). An out-of-range anchor hung
+the scroll walk once: deriveViewport clamps now.
+Next: start mode 2's slack at one refresh; touch-driven scroll (real MotionEvents -> deriveScroll
+with fling velocity, paced); then selection/caret on the derived scene.
 
 DECIDED (2026-10-28): the Java/native boundary is a bionic build of the same sources, loaded
 in-process (docs/BIONIC.md). All store oracles pass as bionic programs on the Pixel; android.jni

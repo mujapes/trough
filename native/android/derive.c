@@ -8,6 +8,9 @@
 #include "atlas.h"
 #include "scene.h"
 #include <android/native_window.h>
+#include <android/choreographer.h>
+#include <android/looper.h>
+#include <dlfcn.h>
 #include <jni.h>
 #include <stdatomic.h>
 #include <stdlib.h>
@@ -32,6 +35,7 @@ typedef struct {
      * and compositor latch need, learned from display timing: +2 ms per miss, -0.25 ms while
      * frames are more than 4 ms early. */
     uint64_t target_ns[256], extra_ns, misses;
+    struct vsync_src *vsync;                          /* derivePace mode 2: platform frame timelines */
     tr_world world; tr_cell *cells; tr_id driver, width, op, viewport, op_sum, op_scene; tr_id *text; int paragraphs;
     int levels; uint32_t scene;                       /* summary levels above paragraphs; the scene node */
     atomic_ullong runs[5];                            /* invocations: layout, summary, scene, mask; [4] paragraphs estimated */
@@ -53,7 +57,10 @@ static void collect_timing(deriver *d) {
         if (t->actual_ns && t->frame >= d->shown_frame) { d->shown_frame = t->frame; d->shown_ns = t->actual_ns; }
         uint64_t target = d->target_ns[t->frame % 256];
         if (target && t->actual_ns && d->refresh_ns) {
-            if (t->actual_ns > target + d->refresh_ns / 2) { d->extra_ns += 2000000; d->misses++; }
+            if (d->pace == 2) {                        /* the deadline already includes the latch */
+                if (t->actual_ns > target + d->refresh_ns / 2) { d->extra_ns += 1000000; d->misses++; }
+                else if (d->extra_ns > 500000) d->extra_ns -= 50000;
+            } else if (t->actual_ns > target + d->refresh_ns / 2) { d->extra_ns += 2000000; d->misses++; }
             else if (t->margin_ns > 4000000) d->extra_ns -= d->extra_ns < 250000 ? d->extra_ns : 250000;
             if (d->extra_ns > 2 * d->refresh_ns) d->extra_ns = 2 * d->refresh_ns;
             d->target_ns[t->frame % 256] = 0;
@@ -61,6 +68,63 @@ static void collect_timing(deriver *d) {
     }
     if (got > 0) d->npresent += (size_t)got;
 }
+/* ---- platform frame timelines (Android 13+): a looper thread keeps the latest choreographer
+ * callback's timelines, each a compositor latch deadline and the expected present time. The
+ * API is newer than the library's target, so it is resolved at run time. ---- */
+typedef struct { int64_t present, deadline; } vs_timeline;
+struct vsync_src {
+    pthread_t thread; ALooper *looper; AChoreographer *choreographer; int run, ready;
+    pthread_mutex_t lock; pthread_cond_t started; vs_timeline tl[16]; size_t n; uint64_t callbacks;
+    void (*post)(AChoreographer *, AChoreographer_vsyncCallback, void *);
+    size_t (*length)(const AChoreographerFrameCallbackData *);
+    int64_t (*present)(const AChoreographerFrameCallbackData *, size_t), (*deadline)(const AChoreographerFrameCallbackData *, size_t);
+};
+static void vs_callback(const AChoreographerFrameCallbackData *data, void *arg) {
+    struct vsync_src *v = arg;
+    size_t n = v->length(data); if (n > 16) n = 16;
+    pthread_mutex_lock(&v->lock);
+    for (size_t i = 0; i < n; i++) { v->tl[i].present = v->present(data, i); v->tl[i].deadline = v->deadline(data, i); }
+    v->n = n; v->callbacks++;
+    pthread_mutex_unlock(&v->lock);
+    if (v->run) v->post(v->choreographer, vs_callback, v);
+}
+static void *vs_main(void *arg) {
+    struct vsync_src *v = arg;
+    v->looper = ALooper_prepare(0);
+    v->choreographer = AChoreographer_getInstance();
+    pthread_mutex_lock(&v->lock); v->ready = v->choreographer ? 1 : -1; pthread_cond_signal(&v->started); pthread_mutex_unlock(&v->lock);
+    if (!v->choreographer) return NULL;
+    v->post(v->choreographer, vs_callback, v);
+    while (v->run) ALooper_pollOnce(-1, NULL, NULL, NULL);
+    return NULL;
+}
+static struct vsync_src *vs_open(void) {
+    void *lib = dlopen("libandroid.so", RTLD_NOW);
+    if (!lib) return NULL;
+    struct vsync_src *v = calloc(1, sizeof *v);
+    if (!v) return NULL;
+    v->post = (void (*)(AChoreographer *, AChoreographer_vsyncCallback, void *))dlsym(lib, "AChoreographer_postVsyncCallback");
+    v->length = (size_t (*)(const AChoreographerFrameCallbackData *))dlsym(lib, "AChoreographerFrameCallbackData_getFrameTimelinesLength");
+    v->present = (int64_t (*)(const AChoreographerFrameCallbackData *, size_t))dlsym(lib, "AChoreographerFrameCallbackData_getFrameTimelineExpectedPresentationTimeNanos");
+    v->deadline = (int64_t (*)(const AChoreographerFrameCallbackData *, size_t))dlsym(lib, "AChoreographerFrameCallbackData_getFrameTimelineDeadlineNanos");
+    if (!v->post || !v->length || !v->present || !v->deadline) { free(v); return NULL; }
+    pthread_mutex_init(&v->lock, NULL); pthread_cond_init(&v->started, NULL);
+    v->run = 1;
+    if (pthread_create(&v->thread, NULL, vs_main, v)) { free(v); return NULL; }
+    pthread_mutex_lock(&v->lock);
+    while (!v->ready) pthread_cond_wait(&v->started, &v->lock);
+    pthread_mutex_unlock(&v->lock);
+    if (v->ready < 0) { pthread_join(v->thread, NULL); free(v); return NULL; }
+    return v;
+}
+static void vs_close(struct vsync_src *v) {
+    if (!v) return;
+    v->run = 0;
+    ALooper_wake(v->looper);
+    pthread_join(v->thread, NULL);
+    free(v);
+}
+
 static size_t pow2(size_t n) { size_t p = 1; while (p < n) p <<= 1; return p; }
 
 static void attach(void *ctx) { deriver *d = ctx; JNIEnv *env; (*d->vm)->AttachCurrentThread(d->vm, (void *)&env, NULL); }
@@ -381,6 +445,7 @@ static void trace_rows(void *arg, tr_world *w, dv_graph *g) {
 }
 
 static void destroy(deriver *d) {
+    vs_close(d->vsync);
     if (d->gpu) ps_close(d->gpu);
     if (d->window) ANativeWindow_release(d->window);
     free(d->atlas_cells); free(d->atlas_index);
@@ -548,10 +613,14 @@ JNIEXPORT jlongArray JNICALL CLASS(derivePresentTimes)(JNIEnv *env, jclass c, jl
 }
 /* Pacing on or off: with it, deriveFrameBegin delays a frame's start (and the input it samples)
  * until its work estimate plus 2 ms before the vsync after the previous frame's. */
-JNIEXPORT void JNICALL CLASS(derivePace)(JNIEnv *env, jclass c, jlong h, jboolean on) {
+/* Mode 0 off, 1 learned grid (display timing), 2 platform deadlines (choreographer frame
+ * timelines). Returns the mode in effect: 2 falls back to 0 without the platform API. */
+JNIEXPORT jint JNICALL CLASS(derivePace)(JNIEnv *env, jclass c, jlong h, jint mode) {
     (void)env; (void)c; deriver *d = (deriver *)(intptr_t)h;
-    d->pace = on;
-    if (on && !d->extra_ns) d->extra_ns = 2000000;
+    if (mode == 2 && !d->vsync && !(d->vsync = vs_open())) mode = 0;
+    if (mode != d->pace) d->extra_ns = mode == 1 ? 2000000 : mode == 2 ? 1000000 : 0;
+    d->pace = mode;
+    return mode;
 }
 /* Called before a frame samples input. Returns the ns slept. The vsync grid comes from the
  * newest displayed frame, extrapolated one refresh per frame presented since (no skips). */
@@ -559,7 +628,23 @@ JNIEXPORT jlong JNICALL CLASS(deriveFrameBegin)(JNIEnv *env, jclass c, jlong h) 
     (void)env; (void)c; deriver *d = (deriver *)(intptr_t)h;
     collect_timing(d);
     uint64_t next = d->last_number + 1, now = mono_ns(), slept = 0, r = d->refresh_ns;
-    if (d->pace && r && d->shown_ns && d->work_ns && d->last_number >= d->shown_frame) {
+    if (d->pace == 2 && d->vsync) {                       /* the earliest deadline the work can meet */
+        uint64_t budget = (d->work_ns ? d->work_ns + 2 * d->work_dev : 4000000) + d->extra_ns, until = 0, present = 0;
+        pthread_mutex_lock(&d->vsync->lock);
+        for (size_t i = 0; i < d->vsync->n; i++) {
+            const vs_timeline *t = &d->vsync->tl[i];
+            if (t->deadline > 0 && (uint64_t)t->deadline > now + budget && (!until || (uint64_t)t->deadline - budget < until)) {
+                until = (uint64_t)t->deadline - budget; present = (uint64_t)t->present;
+            }
+        }
+        pthread_mutex_unlock(&d->vsync->lock);
+        if (until && until < now + 4 * (r ? r : 16666667)) {
+            struct timespec ts = {(time_t)(until / 1000000000u), (long)(until % 1000000000u)};
+            clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, NULL);
+            slept = until - now;
+            d->target_ns[next % 256] = present;
+        }
+    } else if (d->pace == 1 && r && d->shown_ns && d->work_ns && d->last_number >= d->shown_frame) {
         uint64_t vsync = d->shown_ns + (next - d->shown_frame) * r;   /* the previous frame's, plus one */
         uint64_t budget = d->work_ns + 2 * d->work_dev + d->extra_ns;
         while (vsync > now + 4 * r) vsync -= r;            /* a stale grid never sleeps more than ~3 frames */
