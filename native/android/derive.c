@@ -5,6 +5,7 @@
  * canonical blob. Java drives it through owner calls; no Java code sees jobs or the graph. */
 #define _POSIX_C_SOURCE 200809L
 #include "exec.h"
+#include "order.h"
 #include "atlas.h"
 #include "scene.h"
 #include <android/native_window.h>
@@ -46,11 +47,13 @@ typedef struct {
     struct vsync_src *vsync;                          /* derivePace mode 2: platform frame timelines */
     tr_world world; tr_cell *cells; tr_id driver, width, op, viewport, op_sum, op_scene; tr_id *text; int paragraphs;
     /* Paragraph identity (docs/VIEW.md "Paragraph identity"): `paragraphs` is the capacity of
-     * ids; text cells and layout nodes are per id. order[i] holds (id + 1) of the paragraph at
-     * position i, 0 past the end; inserting or removing rewrites order cells, never a layout.
+     * ids; text cells and layout nodes are per id. The order of ids is a B+tree on the owner
+     * (docs/ORDER.md); each tree slot's published form lives in ocell[slot], and operators walk
+     * those from slot 0. Inserting or removing republishes O(log n) slots, never a layout.
      * count mirrors the number of paragraphs (written by the owner thread only). */
-    tr_id *order; atomic_int count; uint32_t *free_ids; int nfree;
-    int levels; uint32_t scene;                       /* summary levels above paragraphs; the scene node */
+    or_tree order; or_node *onodes; uint32_t *ofree, *ochanged; uint8_t *omarked, *oused; tr_id *ocell; uint32_t oslots;
+    atomic_int count; uint32_t *free_ids; int nfree;
+    uint32_t scene;                                   /* the scene node */
     atomic_ullong runs[8];                            /* invocations: layout, summary, scene, mask; [4] paragraphs estimated; caret, overlay */
     /* Prefetch (derivePrefetch): layouts of paragraphs [anchor - before, anchor + after] are
      * demanded at DV_BACKGROUND, owned as [pf_lo, pf_hi); kept on the owner thread. */
@@ -203,27 +206,28 @@ static uint64_t layout_height(const unsigned char *b, size_t n) {
     float bottom = bef(b + 4 + (size_t)(lines - 1) * LINE_BYTES + 16);
     return bottom > 0 ? (uint64_t)(bottom + 0.5f) : 0;
 }
-/* Operators: the id at position i, through its order cell. 0 = not provided (asked for). */
+/* Operators: *id1 = id + 1 at position i, walking the published order tree from slot 0's cell
+ * (docs/ORDER.md); 0 past the end. Returns 0 when a node cell is not provided (asked for). */
 static int id_at(deriver *d, const dv_job *job, ex_out *out, uint64_t i, uint64_t *id1) {
-    if (i >= (uint64_t)d->paragraphs) { *id1 = 0; return 1; }
-    dv_ref r = {DV_CELL, d->order[i], 0};
-    if (!ex_read(job, out, r, id1, NULL)) { ex_need(out, r); return 0; }
+    uint64_t pos = i; uint32_t slot = 0;
+    *id1 = 0;
+    for (int depth = 0; depth < 32; depth++) {
+        dv_ref r = {DV_CELL, d->ocell[slot], 0}; uint64_t v; const void *p = NULL; size_t n = 0;
+        if (!ex_read(job, out, r, &v, NULL)) { ex_need(out, r); return 0; }
+        if (bl_is(v)) bl_get(&d->blobs, v, &p, &n);
+        uint32_t child; int leaf;
+        if (or_step(p, n, &pos, &child, &leaf) != TR_OK) return 1;   /* past the end */
+        if (leaf) { *id1 = (uint64_t)child + 1; return 1; }
+        if (child >= d->oslots) return 1;
+        slot = child;
+    }
     return 1;
 }
 /* Owner thread: id + 1 at position i (0 past the end). */
 static uint64_t owner_id(deriver *d, tr_world *w, int64_t i) {
-    tr_read r;
-    if (i < 0 || i >= d->paragraphs || tr_current(w, d->order[i], &r)) return 0;
-    return r.value;
-}
-static uint64_t count_at(const deriver *d, int level) {           /* nodes at a summary level */
-    uint64_t c = (uint64_t)d->paragraphs;
-    for (int l = 0; l <= level; l++) c = (c + FAN - 1) / FAN;
-    return c;
-}
-static dv_ref child_ref(const deriver *d, int level, uint64_t j) {
-    if (level < 0) return (dv_ref){DV_CELL, d->order[j], 0};         /* level 0 estimates its paragraphs */
-    return (dv_ref){DV_NODE, d->op_sum, (uint64_t)level << 32 | j};
+    (void)w; uint32_t id;
+    if (i < 0 || or_at(&d->order, (uint64_t)i, &id, NULL) != TR_OK) return 0;
+    return (uint64_t)id + 1;
 }
 /* The height a ref stands for: a layout blob's height or a summary's scalar. 0 = missing. */
 static int height_of(deriver *d, const dv_job *job, ex_out *out, dv_ref r, int is_layout, uint64_t *h,
@@ -245,50 +249,39 @@ static uint64_t estimate(uint64_t units, uint64_t width) {
     uint64_t lines = width ? (units * EST_ADVANCE + width - 1) / width : 1;
     return (lines ? lines : 1) * EST_LINE;
 }
-/* Summary (level, j): total estimated height of its children. Level 0 reads its paragraphs' text
- * cells and the width and estimates inline (fused: no node per estimate); higher levels sum
- * child summaries. A summary needs every child, so all missing ones are asked for at once. */
+/* Summary (slot): the total estimated height of an order-tree node (docs/ORDER.md). It reads the
+ * node's cell first, so a republished node re-derives. A leaf reads its paragraphs' text cells
+ * and the width and estimates inline (fused: no node per estimate); an internal node sums its
+ * children's summaries. All missing inputs are asked for at once, after the reads. */
 static int sum_op(void *ctx, const dv_job *job, ex_out *out) {
     deriver *d = ctx;
     atomic_fetch_add(&d->runs[1], 1);
-    int level = (int)(job->key >> 32); uint64_t j = job->key & 0xffffffffu;
-    uint64_t below = level == 0 ? (uint64_t)d->paragraphs : count_at(d, level - 1), total = 0, width = 0;
-    dv_ref rw = {DV_CELL, d->width, 0};
-    int missing = 0, estimated = 0;
-    if (level == 0) {                                 /* order cells, then the texts they name */
-        dv_ref need[2 * FAN + 1]; size_t nn = 0;
-        if (!ex_read(job, out, rw, &width, NULL)) need[nn++] = rw;
-        for (uint64_t c = j * FAN; c < below && c < j * FAN + FAN; c++) {
-            dv_ref ro = child_ref(d, -1, c); uint64_t id1, tv;
-            if (!ex_read(job, out, ro, &id1, NULL)) { need[nn++] = ro; continue; }
-            if (!id1) continue;                       /* past the end */
-            dv_ref rt = {DV_CELL, d->text[id1 - 1], 0};
-            if (!ex_read(job, out, rt, &tv, NULL)) { need[nn++] = rt; continue; }
-            const void *p = NULL; size_t n = 0;
-            if (bl_is(tv)) bl_get(&d->blobs, tv, &p, &n);
-            total += estimate(n / 2, width); estimated++;
-        }
-        if (nn) { for (size_t k = 0; k < nn; k++) ex_need(out, need[k]); return 0; }   /* needs last: reads stay valid */
-    } else {
-        for (uint64_t c = j * FAN; c < below && c < j * FAN + FAN; c++) {
-            dv_ref r = child_ref(d, level - 1, c); uint64_t v;
-            if (!ex_read(job, out, r, &v, NULL)) { missing = 1; continue; }
+    uint32_t slot = (uint32_t)job->key;
+    if (slot >= d->oslots) { out->value = 0; return 0; }
+    dv_ref rn = {DV_CELL, d->ocell[slot], 0}, rw = {DV_CELL, d->width, 0};
+    uint64_t nv, total = 0, width = 0; const void *p = NULL; size_t n = 0;
+    if (!ex_read(job, out, rn, &nv, NULL)) { ex_need(out, rn); return 0; }
+    if (bl_is(nv)) bl_get(&d->blobs, nv, &p, &n);
+    if (!p || n < 4) { out->value = 0; return 0; }   /* an empty document */
+    const unsigned char *b = p; uint32_t head = be32(b), count = head & 0x7fffffffu; int leaf = (int)(head >> 31);
+    if (count > OR_FAN || n < 4 + 8 * (size_t)count) { out->value = 0; return 0; }
+    dv_ref need[OR_FAN + 1]; size_t nn = 0; int estimated = 0;
+    if (leaf && !ex_read(job, out, rw, &width, NULL)) need[nn++] = rw;
+    for (uint32_t k = 0; k < count; k++) {
+        uint32_t child = be32(b + 4 + 8 * (size_t)k); uint64_t v;
+        if (leaf) {
+            if (child >= (uint32_t)d->paragraphs) continue;
+            dv_ref rt = {DV_CELL, d->text[child], 0}; const void *q = NULL; size_t m = 0;
+            if (!ex_read(job, out, rt, &v, NULL)) { need[nn++] = rt; continue; }
+            if (bl_is(v)) bl_get(&d->blobs, v, &q, &m);
+            total += estimate(m / 2, width); estimated++;
+        } else {
+            dv_ref rc = {DV_NODE, d->op_sum, child};
+            if (!ex_read(job, out, rc, &v, NULL)) { need[nn++] = rc; continue; }
             total += v;
         }
-        if (missing) {
-            dv_ref need[FAN]; size_t nn = 0;
-            for (uint64_t c = j * FAN; c < below && c < j * FAN + FAN; c++) {
-                dv_ref r = child_ref(d, level - 1, c); uint64_t v;
-                int have = 0;
-                for (size_t k = 0; k < job->count; k++) if (job->values[k].ref.kind == r.kind && job->values[k].ref.id.slot == r.id.slot
-                    && job->values[k].ref.id.generation == r.id.generation && job->values[k].ref.key == r.key) have = 1;
-                (void)v;
-                if (!have) need[nn++] = r;
-            }
-            for (size_t k = 0; k < nn; k++) ex_need(out, need[k]);
-            return 0;
-        }
     }
+    if (nn) { for (size_t k = 0; k < nn; k++) ex_need(out, need[k]); return 0; }   /* needs last: reads stay valid */
     atomic_fetch_add(&d->runs[4], (unsigned long long)estimated);
     out->value = total;
     return 0;
@@ -500,45 +493,44 @@ static int overlay_op(void *ctx, const dv_job *job, ex_out *out) {
 typedef struct { deriver *d; int64_t permille, anchor, total; } jump_call;
 static void demand_root(void *arg, tr_world *w, dv_graph *g) {
     (void)w; jump_call *j = arg; uint32_t root;
-    dv_ref r = child_ref(j->d, j->d->levels - 1, 0);
-    if (dv_intern(g, r.id, r.key, &root) == TR_OK && !g->nodes[root].demand) dv_demand(g, root);
+    if (dv_intern(g, j->d->op_sum, 0, &root) == TR_OK && !g->nodes[root].demand) dv_demand(g, root);
 }
 static int64_t node_value(deriver *d, dv_graph *g, dv_ref r) {
     uint32_t n; uint64_t v;
     if (dv_intern(g, r.id, r.key, &n) || dv_get(g, n, &v)) return -1;
     (void)d; return (int64_t)v;
 }
+/* Descends the owner's order tree by the node summaries (leaves: the same estimate, from the
+ * cells) to the paragraph holding the target height; past the end, the last one. */
 static void find_anchor(void *arg, tr_world *w, dv_graph *g) {
-    jump_call *j = arg; deriver *d = j->d;
-    int64_t total = node_value(d, g, child_ref(d, d->levels - 1, 0));
+    jump_call *j = arg; deriver *d = j->d; tr_read wd;
+    int64_t total = node_value(d, g, (dv_ref){DV_NODE, d->op_sum, 0});
     j->total = total; j->anchor = -1;
-    if (total < 0) return;
-    int64_t target = total * j->permille / 1000, y = 0;
-    uint64_t node = 0;
-    for (int level = d->levels - 1; level >= 0; level--) {   /* descend: child (level-1) of node */
-        uint64_t below = level == 0 ? (uint64_t)d->paragraphs : count_at(d, level - 1), c = node * FAN;
-        for (; c < below && c < node * FAN + FAN; c++) {
+    if (total < 0 || tr_current(w, d->width, &wd)) return;
+    int64_t target = total * j->permille / 1000, y = 0; uint64_t base = 0;
+    const or_node *x = &d->order.nodes[0];
+    for (;;) {
+        if (!x->n) return;
+        uint32_t k = 0;
+        for (; k < x->n; k++) {
             int64_t h;
-            if (level > 0) h = node_value(d, g, child_ref(d, level - 1, c));
-            else {                                       /* paragraphs: the same estimate, from the cells */
-                tr_read t, wd; const void *p = NULL; size_t n = 0;
-                uint64_t id1 = owner_id(d, w, (int64_t)c);
-                if (!id1) h = 0;                         /* past the end */
-                else {
-                    if (tr_current(w, d->text[id1 - 1], &t) || tr_current(w, d->width, &wd)) return;
-                    if (bl_is(t.value)) bl_get(&d->blobs, t.value, &p, &n);
-                    h = (int64_t)estimate(n / 2, wd.value);
-                }
-            }
+            if (x->leaf) {
+                tr_read t; const void *p = NULL; size_t n = 0;
+                if (tr_current(w, d->text[x->child[k]], &t)) return;
+                if (bl_is(t.value)) bl_get(&d->blobs, t.value, &p, &n);
+                h = (int64_t)estimate(n / 2, wd.value);
+            } else h = node_value(d, g, (dv_ref){DV_NODE, d->op_sum, x->child[k]});
             if (h < 0) return;
             if (y + h > target) break;
             y += h;
         }
-        if (c >= below || c >= node * FAN + FAN) c--;    /* past the end: the last child */
-        node = c;
+        if (k == x->n) k = x->n - 1;                     /* past the end: the last child */
+        if (x->leaf) { base += k; break; }
+        for (uint32_t i = 0; i < k; i++) base += x->count[i];
+        x = &d->order.nodes[x->child[k]];
     }
     int count = atomic_load(&d->count);
-    j->anchor = (int64_t)node < count ? (int64_t)node : count - 1;   /* empty slots trail the document */
+    j->anchor = (int64_t)base < count ? (int64_t)base : count - 1;
 }
 
 /* ---- owner calls ---- */
@@ -548,6 +540,17 @@ static void write_cell(deriver *d, tr_id cell, uint64_t value) {
     tr_current(&d->world, cell, &old);
     if (tr_begin(&t, &d->world, d->driver, r, 4, w, 1) || tr_write_value(&t, cell, value) || tr_commit(&t, &rc)) return;
     if (bl_is(old.value)) bl_release(&d->blobs, old.value);   /* the cell held it */
+}
+/* Republishes the order-tree slots the last mutation changed (docs/ORDER.md "Publication"). */
+static void publish_order(deriver *d) {
+    uint32_t slots[64], k;
+    while ((k = or_take_changed(&d->order, slots, 64)))
+        for (uint32_t i = 0; i < k; i++) {
+            unsigned char b[OR_ENCODED_MAX]; uint64_t h = 0;
+            size_t n = or_encode(&d->order, slots[i], b);
+            if (n && bl_intern(&d->blobs, b, n, 0, &h)) { d->ex.error = TR_CAPACITY; continue; }
+            write_cell(d, d->ocell[slots[i]], n ? h : 0);
+        }
 }
 /* Moves the background prefetch window to the viewport cell's anchor: demands what entered,
  * releases what left. */
@@ -578,7 +581,7 @@ static void set_text(void *arg, tr_world *w, dv_graph *g) {
     c->result = bl_intern(&c->d->blobs, (void *)c->units, (size_t)c->length * 2, 0, &h);
     uint64_t id1 = owner_id(c->d, w, c->i);
     if (!c->result && !id1) { bl_release(&c->d->blobs, h); c->result = TR_INVALID; }
-    if (!c->result) write_cell(c->d, c->d->text[id1 - 1], h);
+    if (!c->result) { write_cell(c->d, c->d->text[id1 - 1], h); or_set_units(&c->d->order, (uint64_t)c->i, (uint64_t)c->length); }
 }
 static void set_width(void *arg, tr_world *w, dv_graph *g) { (void)w; (void)g; call *c = arg; write_cell(c->d, c->d->width, (uint64_t)c->i); }
 static void set_viewport(void *arg, tr_world *w, dv_graph *g) {     /* i = anchor, length = offset | height << 16 */
@@ -648,7 +651,8 @@ static void destroy(deriver *d) {
     if (d->gpu) ps_close(d->gpu);
     if (d->window) ANativeWindow_release(d->window);
     free(d->atlas_cells); free(d->atlas_index);
-    free(d->order); free(d->free_ids); free(d->pf_ids);
+    free(d->onodes); free(d->ofree); free(d->ochanged); free(d->omarked); free(d->oused); free(d->ocell);
+    free(d->free_ids); free(d->pf_ids);
     free(d->cells); free(d->text); free(d->nodes); free(d->blocks); free(d->table); free(d->path); free(d->node);
     free(d->entries); free(d->index); free(d);
 }
@@ -658,18 +662,22 @@ JNIEXPORT jlong JNICALL CLASS(deriveOpen)(JNIEnv *env, jclass c, jint workers, j
     if (paragraphs <= 0 || paragraphs > 100000 || workers <= 0 || workers > EX_WORKERS) return -1;
     deriver *d = calloc(1, sizeof *d);
     if (!d) return -1;
-    /* Ids for twice the initial paragraphs (insertions); text and order cells per id/position. */
-    size_t n = 2 * (size_t)paragraphs + 64, cellc = 2 * n + 16, nodec = n + n / (FAN - 1) + 16 + 4096, blobc = 2 * n + 64 + 4096;   /* + masks */
-    d->paragraphs = (int)n;
+    /* Ids for twice the initial paragraphs (insertions); a text cell per id, an order cell and a
+     * summary node per order-tree slot (at most 2n / (OR_FAN / 2) + 8 slots for n ids). */
+    size_t n = 2 * (size_t)paragraphs + 64, slots = n / 4 + 16;
+    size_t cellc = n + slots + 32, nodec = n + slots + 16 + 4096, blobc = 2 * n + slots + 64 + 4096;   /* + masks */
+    d->paragraphs = (int)n; d->oslots = (uint32_t)slots;
     atomic_store(&d->count, paragraphs);
     d->cells = calloc(cellc, sizeof *d->cells); d->text = calloc(n, sizeof *d->text);
-    d->order = calloc(n, sizeof *d->order); d->free_ids = calloc(n, sizeof *d->free_ids); d->pf_ids = calloc(n, sizeof *d->pf_ids);
+    d->onodes = calloc(slots, sizeof *d->onodes); d->ofree = calloc(slots, sizeof *d->ofree); d->ochanged = calloc(slots, sizeof *d->ochanged);
+    d->omarked = calloc(slots, 1); d->oused = calloc(slots, 1); d->ocell = calloc(slots, sizeof *d->ocell);
+    d->free_ids = calloc(n, sizeof *d->free_ids); d->pf_ids = calloc(n, sizeof *d->pf_ids);
     d->nodes = calloc(nodec, sizeof *d->nodes); d->blocks = calloc(nodec, sizeof *d->blocks);
     d->table = calloc(pow2(2 * nodec), sizeof *d->table); d->path = calloc(nodec, sizeof *d->path);
     d->node = calloc(n, sizeof *d->node);
     d->entries = calloc(blobc, sizeof *d->entries); d->index = calloc(pow2(2 * blobc), sizeof *d->index);
     jclass cls = (*env)->FindClass(env, "com/trough/hot/DeriveLayout");
-    if (!d->order || !d->free_ids || !d->pf_ids || !d->cells || !d->text || !d->nodes || !d->blocks || !d->table || !d->path || !d->node || !d->entries || !d->index || !cls) {
+    if (!d->onodes || !d->ofree || !d->ochanged || !d->omarked || !d->oused || !d->ocell || !d->free_ids || !d->pf_ids || !d->cells || !d->text || !d->nodes || !d->blocks || !d->table || !d->path || !d->node || !d->entries || !d->index || !cls) {
         if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
         destroy(d); return -2;
     }
@@ -687,12 +695,13 @@ JNIEXPORT jlong JNICALL CLASS(deriveOpen)(JNIEnv *env, jclass c, jint workers, j
     tr_create(&d->world, 1, &d->op_mask);
     tr_create(&d->world, 0, &d->selection); tr_create(&d->world, 1, &d->op_caret); tr_create(&d->world, 1, &d->op_overlay);
     tr_create(&d->world, 0, &d->sel_anchor); tr_create(&d->world, 1, &d->op_highlight);
-    d->levels = 1;
-    while (count_at(d, d->levels - 1) > 1) d->levels++;  /* the top level has one node: the root */
     for (size_t i = 0; i < n; i++) tr_create(&d->world, 0, &d->text[i]);
-    for (size_t i = 0; i < n; i++) tr_create(&d->world, i < (size_t)paragraphs ? i + 1 : 0, &d->order[i]);   /* id i at position i */
+    for (size_t i = 0; i < slots; i++) tr_create(&d->world, 0, &d->ocell[i]);
     for (size_t i = n; i > (size_t)paragraphs; i--) d->free_ids[d->nfree++] = (uint32_t)(i - 1);
     bl_init(&d->blobs, d->entries, blobc, d->index, pow2(2 * blobc), 1ULL << 30);
+    or_init(&d->order, d->onodes, (uint32_t)slots, d->ofree, d->ochanged, d->omarked, d->oused);
+    for (int i = 0; i < paragraphs; i++) or_insert(&d->order, (uint64_t)i, (uint32_t)i, 0);   /* id i at position i, empty */
+    publish_order(d);
     dv_init(&d->graph, &d->world, d->nodes, nodec, d->blocks, nodec, d->table, pow2(2 * nodec), d->path);
     for (size_t i = 0; i < n; i++) dv_intern(&d->graph, d->op, i, &d->node[i]);
     dv_intern(&d->graph, d->op_scene, 0, &d->scene);
@@ -700,8 +709,7 @@ JNIEXPORT jlong JNICALL CLASS(deriveOpen)(JNIEnv *env, jclass c, jint workers, j
     ex_init(&d->ex, &d->world, &d->graph, (size_t)workers);
     ex_use_blobs(&d->ex, &d->blobs);
     ex_on_worker(&d->ex, attach, detach, d);
-    dv_set_static(&d->graph, d->op);                  /* layout reads text and width; a summary its children */
-    dv_set_static(&d->graph, d->op_sum);
+    dv_set_static(&d->graph, d->op);                  /* layout reads text and width (a summary's inputs follow its node) */
     ex_register(&d->ex, d->op, layout_op, d);
     ex_register(&d->ex, d->op_sum, sum_op, d);
     ex_register(&d->ex, d->op_scene, scene_op, d);
@@ -933,10 +941,11 @@ static void insert_paragraph(void *arg, tr_world *w, dv_graph *g) {   /* i = pos
     c->result = -1;
     if (c->i < 0 || c->i > count || !d->nfree) return;
     if (bl_intern(&d->blobs, (void *)c->units, (size_t)c->length * 2, 0, &h)) return;
-    uint32_t id = d->free_ids[--d->nfree];
+    uint32_t id = d->free_ids[d->nfree - 1];
+    if (or_insert(&d->order, (uint64_t)c->i, id, (uint64_t)c->length)) { bl_release(&d->blobs, h); return; }
+    d->nfree--;
     write_cell(d, d->text[id], h);
-    for (int64_t i = count; i > c->i; i--) write_cell(d, d->order[i], owner_id(d, w, i - 1));
-    write_cell(d, d->order[c->i], (uint64_t)id + 1);
+    publish_order(d);
     atomic_store(&d->count, count + 1);
     move_spans(d, w, c->i, 1);
     prefetch_update(d, w, g);
@@ -947,9 +956,10 @@ static void remove_paragraph(void *arg, tr_world *w, dv_graph *g) {   /* i = pos
     int count = atomic_load(&d->count);
     c->result = -1;
     if (c->i < 0 || c->i >= count || count <= 1) return;   /* a document keeps one paragraph */
-    uint64_t id1 = owner_id(d, w, c->i);
-    for (int64_t i = c->i; i < count - 1; i++) write_cell(d, d->order[i], owner_id(d, w, i + 1));
-    write_cell(d, d->order[count - 1], 0);
+    uint32_t id;
+    if (or_remove(&d->order, (uint64_t)c->i, &id)) return;
+    uint64_t id1 = (uint64_t)id + 1;
+    publish_order(d);
     write_cell(d, d->text[id1 - 1], 0);                  /* the id's text blob is released */
     d->free_ids[d->nfree++] = (uint32_t)(id1 - 1);
     atomic_store(&d->count, count - 1);
@@ -975,7 +985,7 @@ JNIEXPORT jint JNICALL CLASS(deriveCount)(JNIEnv *env, jclass c, jlong h) {
     (void)env; (void)c; return atomic_load(&((deriver *)(intptr_t)h)->count);
 }
 /* The document as one text, paragraphs joined by '\n' (the IME's view, docs/INPUT.md
- * "Document"). Owner-side walks over order cells: O(paragraphs) until order is a rope. */
+ * "Document"). Offsets come from the order tree's unit totals (docs/ORDER.md): O(log n). */
 static size_t para_units(deriver *d, tr_world *w, int64_t i, const uint16_t **units) {
     uint64_t id1 = owner_id(d, w, i); tr_read t; const void *p = NULL; size_t n = 0;
     if (id1 && tr_current(w, d->text[id1 - 1], &t) == TR_OK && bl_is(t.value)) bl_get(&d->blobs, t.value, &p, &n);
@@ -984,39 +994,36 @@ static size_t para_units(deriver *d, tr_world *w, int64_t i, const uint16_t **un
 }
 typedef struct { deriver *d; int64_t global, para, off; int64_t state[3]; uint16_t *out; int64_t a, b, n; } doc_call;
 static int64_t to_global(deriver *d, tr_world *w, uint64_t cell) {   /* (pos << 32 | off) + 1 -> offset */
-    int64_t pos = (int64_t)((cell - 1) >> 32), g = 0, off = (int64_t)((cell - 1) & 0xffffffffu);
-    for (int64_t i = 0; i < pos; i++) g += (int64_t)para_units(d, w, i, NULL) + 1;
-    int64_t len = (int64_t)para_units(d, w, pos, NULL);
-    return g + (off < len ? off : len);
+    (void)w; uint64_t pos = (cell - 1) >> 32, off = (cell - 1) & 0xffffffffu, g, units;
+    if (or_offset(&d->order, pos, &g) || or_at(&d->order, pos, NULL, &units)) return 0;
+    return (int64_t)(g + (off < units ? off : units));
 }
 static void doc_state(void *arg, tr_world *w, dv_graph *g) {   /* length, anchor, caret */
     (void)g; doc_call *c = arg; deriver *d = c->d; tr_read sel, anc;
-    int count = atomic_load(&d->count); int64_t len = 0;
-    for (int i = 0; i < count; i++) len += (int64_t)para_units(d, w, i, NULL) + (i ? 1 : 0);
-    c->state[0] = len;
+    c->state[0] = (int64_t)or_units(&d->order);
     uint64_t sv = tr_current(w, d->selection, &sel) == TR_OK ? sel.value : 0, av = tr_current(w, d->sel_anchor, &anc) == TR_OK ? anc.value : 0;
     c->state[2] = sv ? to_global(d, w, sv) : 0;
     c->state[1] = av ? to_global(d, w, av) : c->state[2];
 }
 static void doc_locate(void *arg, tr_world *w, dv_graph *g) {   /* global -> (para, off), clamped */
-    (void)g; doc_call *c = arg; deriver *d = c->d;
-    int count = atomic_load(&d->count); int64_t rest = c->global < 0 ? 0 : c->global;
-    for (int i = 0; i < count; i++) {
-        int64_t n = (int64_t)para_units(d, w, i, NULL);
-        if (rest <= n || i == count - 1) { c->para = i; c->off = rest < n ? rest : n; return; }
-        rest -= n + 1;
-    }
-    c->para = 0; c->off = 0;
+    (void)w; (void)g; doc_call *c = arg; uint64_t pos = 0, off = 0;
+    if (or_locate(&c->d->order, c->global < 0 ? 0 : (uint64_t)c->global, &pos, &off)) { pos = 0; off = 0; }
+    c->para = (int64_t)pos; c->off = (int64_t)off;
 }
 static void doc_slice(void *arg, tr_world *w, dv_graph *g) {   /* units [a, b) of the joined text */
-    (void)g; doc_call *c = arg; deriver *d = c->d;
-    int count = atomic_load(&d->count); int64_t at = 0;
+    (void)g; doc_call *c = arg; deriver *d = c->d; uint64_t pos, off, start;
     c->n = 0;
-    for (int i = 0; i < count && at < c->b; i++) {
-        if (i) { if (at >= c->a && at < c->b) c->out[c->n++] = '\n'; at++; }
+    if (c->a >= c->b || or_locate(&d->order, (uint64_t)c->a, &pos, &off) || or_offset(&d->order, pos, &start)) return;
+    int count = atomic_load(&d->count); int64_t at = (int64_t)start;
+    for (int64_t i = (int64_t)pos; i < count && at < c->b; i++) {
+        if (i > (int64_t)pos) { if (at >= c->a && at < c->b) c->out[c->n++] = '\n'; at++; }
         const uint16_t *u; int64_t n = (int64_t)para_units(d, w, i, &u);
         for (int64_t k = 0; k < n && at < c->b; k++, at++) if (at >= c->a) c->out[c->n++] = u[k];
     }
+}
+static void leaf_size(void *arg, tr_world *w, dv_graph *g) {
+    (void)w; (void)g; doc_call *c = arg; uint32_t e = 0;
+    c->n = c->global < 0 || or_leaf_entries(&c->d->order, (uint64_t)c->global, &e) ? -1 : (int64_t)e;
 }
 static void doc_paragraph(void *arg, tr_world *w, dv_graph *g) {   /* para -> its units, copied */
     (void)g; doc_call *c = arg; const uint16_t *u = NULL;
@@ -1027,6 +1034,11 @@ static void doc_paragraph(void *arg, tr_world *w, dv_graph *g) {   /* para -> it
     if (!c->out) return;
     if (n) memcpy(c->out, u, sizeof(uint16_t) * (size_t)n);
     c->n = n;
+}
+JNIEXPORT jint JNICALL CLASS(deriveLeafSize)(JNIEnv *env, jclass c, jlong h, jint position) {   /* paragraphs in its leaf */
+    (void)env; (void)c; deriver *d = (deriver *)(intptr_t)h; doc_call k = {d, position, 0, 0, {0}, NULL, 0, 0, 0};
+    ex_call(&d->ex, leaf_size, &k);
+    return (jint)k.n;
 }
 JNIEXPORT jstring JNICALL CLASS(deriveParagraph)(JNIEnv *env, jclass c, jlong h, jint para) {
     (void)c; doc_call k = {(deriver *)(intptr_t)h, 0, para, 0, {0}, NULL, 0, 0, 0};

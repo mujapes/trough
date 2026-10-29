@@ -50,19 +50,19 @@ final class ViewOracle {
             before = NativeCore.deriveStats(d); t0 = System.nanoTime();
             NativeCore.deriveText(d, below, corpus.get(below));
             NativeCore.deriveSettle(d);
-            ok &= step(d, corpus, anchor, 0, "edit below viewport", before, t0, steps, failures, 0, -1, 0, block(n, below));
+            ok &= step(d, corpus, anchor, 0, "edit below viewport", before, t0, steps, failures, 0, -1, 0, leaf(d, below));
             /* An edit inside the viewport: its layout and the scene. */
             corpus.set(anchor + 1, corpus.get(anchor + 1) + " seen");
             before = NativeCore.deriveStats(d); t0 = System.nanoTime();
             NativeCore.deriveText(d, anchor + 1, corpus.get(anchor + 1));
             NativeCore.deriveSettle(d);
-            ok &= step(d, corpus, anchor, 0, "edit in viewport", before, t0, steps, failures, 1, -1, -1, block(n, anchor + 1));
+            ok &= step(d, corpus, anchor, 0, "edit in viewport", before, t0, steps, failures, 1, -1, -1, leaf(d, anchor + 1));
             /* An edit above the anchor that adds lines: nothing shown moves, no layout, no scene. */
             corpus.set(anchor - 3, corpus.get(anchor - 3) + " " + corpus.get(anchor - 2) + " " + corpus.get(anchor - 1));
             before = NativeCore.deriveStats(d); t0 = System.nanoTime();
             NativeCore.deriveText(d, anchor - 3, corpus.get(anchor - 3));
             NativeCore.deriveSettle(d);
-            ok &= step(d, corpus, anchor, 0, "edit above anchor, taller", before, t0, steps, failures, 0, -1, 0, block(n, anchor - 3));
+            ok &= step(d, corpus, anchor, 0, "edit above anchor, taller", before, t0, steps, failures, 0, -1, 0, leaf(d, anchor - 3));
             /* Scrolling within a paragraph: the offset moves, the same layouts are reused. */
             before = NativeCore.deriveStats(d); t0 = System.nanoTime();
             NativeCore.deriveViewport(d, anchor, 40, VIEW_H);
@@ -201,7 +201,9 @@ final class ViewOracle {
         return new int[]{a, (int) Math.min(o, 0xffff)};
     }
     /** Paragraphs in the 16-paragraph block holding i: what a level-0 summary re-estimates. */
-    static long block(int n, int i) { return Math.min(16, n - (i / 16) * 16); }
+    /** Paragraphs one edit re-estimates: those in the order-tree leaf holding paragraph i
+     * (docs/ORDER.md), 8 to 16 except in a document that small. */
+    static long leaf(long d, int i) { int e = NativeCore.deriveLeafSize(d, i); return e >= 1 && e <= 16 ? e : -2; }
     /** The native estimate: ceil(units * 17 / width) lines (at least 1) of 48 px. */
     static long estimate(String t) { long lines = ((long) t.length() * 17 + WIDTH - 1) / WIDTH; return Math.max(1, lines) * 48; }
     static int estimateAnchor(List<String> corpus, int permille) {

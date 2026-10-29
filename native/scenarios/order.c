@@ -45,6 +45,11 @@ static int depth_of(const or_tree *t, uint32_t s, uint64_t *count, uint64_t *u, 
     return d + 1;
 }
 
+static uint32_t slot_of_leaf(uint64_t pos) {   /* by the published copy's walk */
+    uint32_t slot = 0, child; int leaf = 0;
+    for (;;) { uint32_t from = slot; CHECK(or_step(published[slot], published_n[slot], &pos, &child, &leaf) == TR_OK); if (leaf) return from; slot = child; }
+}
+
 static void publish(or_tree *t, uint32_t *republished) {
     uint32_t s[CAP], k = or_take_changed(t, s, CAP);
     *republished = k;
@@ -78,6 +83,8 @@ static int verify(or_tree *t) {
             slot = child;
         }
         CHECK(child == ids[i]);
+        uint32_t entries;
+        CHECK(or_leaf_entries(t, i, &entries) == TR_OK && entries == t->nodes[slot_of_leaf(i)].n);
         if (next() % 4 == 0 || i + 1 == n) {       /* locate: inside, at the end, on the separator */
             uint64_t q = units[i] ? next() % (units[i] + 1) : 0;
             CHECK(or_locate(t, g + q, &p, &o) == TR_OK && p == i && o == q);

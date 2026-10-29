@@ -40,6 +40,8 @@ tr_status or_offset(const or_tree *, uint64_t pos, uint64_t *offset);
 /* The paragraph holding joined offset g and the offset within it, clamped to the document; a
  * separator belongs to the end of the paragraph before it. */
 tr_status or_locate(const or_tree *, uint64_t g, uint64_t *pos, uint64_t *off);
+/* Entries in the leaf holding pos (how many paragraphs one leaf summary estimates). */
+tr_status or_leaf_entries(const or_tree *, uint64_t pos, uint32_t *entries);
 /* Published changes: copies up to max slots and clears them. */
 uint32_t or_take_changed(or_tree *, uint32_t *slots, uint32_t max);
 

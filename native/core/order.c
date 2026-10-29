@@ -233,6 +233,14 @@ tr_status or_locate(const or_tree *t, uint64_t g, uint64_t *pos, uint64_t *off) 
     return TR_OK;
 }
 
+tr_status or_leaf_entries(const or_tree *t, uint64_t pos, uint32_t *entries) {
+    if (pos >= or_count(t)) return TR_INVALID;
+    const or_node *x = &t->nodes[0];
+    while (!x->leaf) { uint32_t k = find(x, &pos, 0); x = &t->nodes[x->child[k]]; }
+    *entries = x->n;
+    return TR_OK;
+}
+
 uint32_t or_take_changed(or_tree *t, uint32_t *slots, uint32_t max) {
     uint32_t n = t->nchanged < max ? t->nchanged : max;
     for (uint32_t k = 0; k < n; k++) { slots[k] = t->changed[k]; t->marked[slots[k]] = 0; }

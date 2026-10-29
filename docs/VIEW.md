@@ -308,22 +308,26 @@ pixel for pixel. Pixel bundle `50ac6bd7990f`:
 ## Paragraph identity
 
 Paragraphs have stable ids. Text cells, layout nodes, caret nodes and highlight nodes are per
-id. Order cells map position to id (`order[i]` = id + 1, 0 past the end), and `count` holds the
-number of paragraphs. Capacity is twice the initial count plus 64; ids come from a free list.
-Operators reach a paragraph through its order cell: the scene and the overlay walk positions,
-and level-0 summaries read their 16 order cells and then the texts those cells name.
-`deriveInsert(position, text)` and `deriveRemove(position)` rewrite order cells only, so no
-existing layout is redone. Positions held elsewhere move like an Editable's spans:
+id. The order of ids is a B+tree on the owner ([ORDER.md](ORDER.md)); each tree slot's
+published form lives in an order cell. `count` holds the number of paragraphs. Capacity is
+twice the initial count plus 64; ids come from a free list.
+
+Operators reach a paragraph by walking order cells from the root slot with `or_step`. The
+scene and the overlay walk positions this way. Summaries are per tree slot: a leaf estimates
+its paragraphs from their text cells, and an internal node sums its children. A jump descends
+the owner's tree by those summaries. `deriveInsert(position, text)` and
+`deriveRemove(position)` republish O(log n) slots, so no existing layout is redone. Positions held elsewhere move like an Editable's spans:
 - the viewport anchor keeps showing the same paragraph. An insertion at or above it moves it
   down one, and a removal above moves it up one;
 - removing the anchor paragraph shows the next one from its top;
 - selection ends follow their paragraphs.
 The JNI calls (`deriveText`, `deriveValue`, `deriveBytes`, `deriveSelect`...) still take positions.
 
-Cost: an insertion or removal rewrites every order cell after it, so the level-0 summaries
-below it re-estimate (O(n / 16) jobs, each one restart). A position-indexed sequence with
-summaries in its nodes (the text rope's own tree) would make this O(log n), and is the next
-step for long documents.
+Cost (2026-10-29, [ORDER.md](ORDER.md)): an insertion or removal republishes at most
+3 x depth + 3 slots; their summaries and the leaf's estimates re-run. Before the tree it
+rewrote every order cell after the edit and re-estimated O(n / 16) blocks. A text edit
+republishes nothing: unit totals stay on the owner, so only the summaries above the edited
+paragraph re-run. Any root change re-runs the scene, which cuts off when its bytes are equal.
 
 `android.paragraphs` (offscreen): 90 random operations (42 inserts, 27 removals, 21 edits),
 mostly within a few paragraphs of the viewport, mirrored in a Java list. Pixel bundle

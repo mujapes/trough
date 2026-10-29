@@ -55,11 +55,15 @@ each killed: a missing mark after borrow or merge, the separator rule, no rebala
 ancestor units not updated, offsets without separators, the collapsed root's slot leaked, no
 capacity pre-check, and a stale count after a right borrow.
 
-## Next
+## Adoption
 
-Adopt it in `native/android/derive.c`:
-- order cells become node cells holding encoded blobs;
-- level-0 and higher summaries become one summary per tree node (leaf: estimates of its
-  paragraphs; internal: the sum of its children);
-- `id_at` walks with `or_step`, and `find_anchor` descends the node summaries;
-- `doc_state`, `doc_locate` and `to_global` use `or_offset` and `or_locate`.
+`native/android/derive.c` uses it (2026-10-29):
+- order cells are per slot and hold encoded node blobs;
+- `id_at` walks them with `or_step`; `owner_id` is `or_at`;
+- summaries are per slot (leaf: estimates of its paragraphs; internal: the sum of its children);
+- `find_anchor` descends the owner's tree by the summaries;
+- the IME's document offsets (`doc_state`, `doc_locate`, `deriveSlice`) use `or_offset` and
+  `or_locate`; `deriveText` updates unit totals with `or_set_units`.
+
+`deriveLeafSize` reports a paragraph's leaf size. `android.view` expects an edit to re-estimate
+exactly that many paragraphs, where the fixed 16-blocks used to be.
