@@ -21,6 +21,7 @@ tr_status dv_init(dv_graph *g, tr_world *w, dv_node *nodes, size_t node_capacity
     g->world = w; g->nodes = nodes; g->node_capacity = node_capacity; g->blocks = blocks; g->block_capacity = block_capacity;
     g->free_block = block_capacity ? 0 : NONE; g->table = table; g->table_capacity = table_capacity; g->path = path;
     for (size_t i = 0; i < node_capacity; i++) nodes[i].head = NONE;
+    g->root_head = g->root_tail = NONE;
     return TR_OK;
 }
 
@@ -126,13 +127,22 @@ static dv_node *live(const dv_graph *g, uint32_t i) {
 tr_status dv_demand_at(dv_graph *g, uint32_t i, uint32_t level) {
     dv_node *n = live(g, i);
     if (!n || level >= DV_LEVELS || n->demand == UINT32_MAX) return TR_INVALID;
-    n->demand++; n->demand_at[level]++;
+    if (!n->demand++) {
+        n->root_prev = g->root_tail; n->root_next = NONE;
+        if (g->root_tail != NONE) g->nodes[g->root_tail].root_next = i; else g->root_head = i;
+        g->root_tail = i;
+    }
+    n->demand_at[level]++;
     return TR_OK;
 }
 tr_status dv_release_at(dv_graph *g, uint32_t i, uint32_t level) {
     dv_node *n = live(g, i);
     if (!n || level >= DV_LEVELS || !n->demand_at[level]) return TR_INVALID;
-    n->demand--; n->demand_at[level]--;
+    n->demand_at[level]--;
+    if (!--n->demand) {
+        if (n->root_prev != NONE) g->nodes[n->root_prev].root_next = n->root_next; else g->root_head = n->root_next;
+        if (n->root_next != NONE) g->nodes[n->root_next].root_prev = n->root_prev; else g->root_tail = n->root_prev;
+    }
     return TR_OK;
 }
 tr_status dv_demand(dv_graph *g, uint32_t i) { return dv_demand_at(g, i, DV_VISIBLE); }
@@ -282,8 +292,8 @@ tr_status dv_poll_levels(dv_graph *g, dv_job *jobs, size_t capacity, const size_
     tr_status error = TR_OK;
     admit a = {0, capacity, count, {0}, limits};
     for (a.level = 0; a.level < DV_LEVELS; a.level++)
-        for (uint32_t i = 0; i < g->node_capacity; i++) {
-            if (!g->nodes[i].live || !g->nodes[i].demand_at[a.level]) continue;
+        for (uint32_t i = g->root_head; i != NONE; i = g->nodes[i].root_next) {
+            if (!g->nodes[i].demand_at[a.level]) continue;
             if (walk(g, i, jobs, &a, &blocked, &error) == WALK_ERROR) return error;
         }
     *progress = *count ? DV_READY : blocked ? DV_WAITING : DV_IDLE;

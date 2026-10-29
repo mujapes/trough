@@ -43,7 +43,7 @@ typedef struct {
     tr_id op;
     uint64_t key, generation, value, changed_at, verified_at, ticket, sweep, blocked_sweep;
     uint32_t head, count, demand;   /* dependency blocks; demand = owner roots, all levels */
-    uint32_t demand_at[DV_LEVELS];
+    uint32_t demand_at[DV_LEVELS], root_prev, root_next;   /* demanded nodes, in demand order */
     uint8_t live, memo, recompute, running, volatile_, on_path, op_absent;
     uint8_t level;                  /* best level whose roots reached it in sweep `sweep` */
 } dv_node;
@@ -56,6 +56,7 @@ typedef struct {
     uint32_t *table; size_t table_capacity;      /* (op, key) -> node + 1; UINT32_MAX = tombstone */
     dv_frame *path;                               /* walk stack, node_capacity frames */
     uint64_t next_ticket, sweep, computations;
+    uint32_t root_head, root_tail;                /* demanded nodes, so a poll costs roots, not nodes */
     size_t interned, tombstones;
     void (*retain)(void *, uint64_t), (*release)(void *, uint64_t); void *hooks;
     tr_id static_ops[16]; size_t nstatic;

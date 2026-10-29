@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 200809L
 /* core.derive: the derivation graph (docs/DERIVE.md) against a from-scratch reference.
  * Five operator levels with value-dependent dependencies run as "workers" that see only job
  * values. A random driver interleaves cell edits, module replacement, cell removal, demand,
@@ -10,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #define OK(x) do { tr_status s_ = (x); if (s_ != TR_OK) { fprintf(stderr, "%s:%d %s -> %d\n", __FILE__, __LINE__, #x, s_); abort(); } } while (0)
 #define CHECK(c) do { if (!(c)) { fprintf(stderr, "%s:%d check failed: %s\n", __FILE__, __LINE__, #c); abort(); } } while (0)
@@ -466,6 +468,14 @@ static void randomized(int rounds) {
             }
         }
         CHECK(inflight == 0);
+        /* The root list holds exactly the demanded nodes, linked both ways. */
+        size_t listed = 0, demanded_nodes = 0;
+        for (uint32_t i = g.root_head, prev = UINT32_MAX; i != UINT32_MAX; prev = i, i = nodes[i].root_next) {
+            CHECK(nodes[i].live && nodes[i].demand && nodes[i].root_prev == prev && ++listed <= 256);
+            if (nodes[i].root_next == UINT32_MAX) CHECK(g.root_tail == i);
+        }
+        for (uint32_t i = 0; i < 256; i++) demanded_nodes += nodes[i].live && nodes[i].demand;
+        CHECK(listed == demanded_nodes);
         /* Idle: everything demanded, and everything reported clean, equals the reference. */
         for (int i = 0; i < nroots; i++) {
             const dv_node *n = &nodes[roots[i]];
@@ -489,10 +499,38 @@ static void randomized(int rounds) {
            (unsigned long long)checks, (unsigned long long)jobs_total, (unsigned long long)restarts);
 }
 
+/* Owner cost of an idle poll: 8192 clean nodes, of which 8 are demanded. */
+static dv_node big_nodes[8192]; static dv_block big_blocks[8192]; static uint32_t big_table[16384]; static dv_frame big_path[8192];
+static double idle_poll_us(void) {
+    dv_graph b;
+    OK(dv_init(&b, &world, big_nodes, 8192, big_blocks, 8192, big_table, 16384, big_path));
+    uint32_t n;
+    for (uint64_t k = 0; k < 8192; k++) OK(dv_intern(&b, op[0], k, &n));
+    for (uint64_t k = 0; k < 8; k++) { OK(dv_intern(&b, op[0], k * 1000, &n)); OK(dv_demand_at(&b, n, (uint32_t)(k % DV_LEVELS))); }
+    dv_job jobs[JOBS]; size_t count; dv_progress pr;
+    for (;;) {                                                /* settle: restart, then value */
+        prepare(jobs, JOBS, 0);
+        OK(dv_poll(&b, jobs, JOBS, &count, &pr));
+        if (pr == DV_IDLE) break;
+        for (size_t i = 0; i < count; i++) {
+            reader r = {job_read, {{0}}, 0, {0}, 0}; current_job = &jobs[i]; uint64_t v;
+            dv_result res = eval(0, jobs[i].op_value, jobs[i].key, &r, &v) ? (dv_result){DV_RESULT_VALUE, v, r.used, r.nused} : (dv_result){DV_RESULT_NEED, 0, &r.need, 1};
+            OK(dv_complete(&b, &jobs[i], &res));
+        }
+    }
+    struct timespec t0, t1; clock_gettime(CLOCK_MONOTONIC, &t0);
+    for (int i = 0; i < 1000; i++) { OK(dv_poll(&b, jobs, JOBS, &count, &pr)); CHECK(pr == DV_IDLE); }
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    return ((t1.tv_sec - t0.tv_sec) * 1e9 + (t1.tv_nsec - t0.tv_nsec)) / 1000 / 1e3;
+}
+
 int main(int argc, char **argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
     deterministic();
     levels();
+    double idle = idle_poll_us();
+    printf("ok idle poll over 8192 nodes, 8 demanded: %.2f us\n", idle);
+    setup();
     restarts = 0;
     int rounds = argc > 1 ? atoi(argv[1]) : 3000;
     uint64_t seed = rng;

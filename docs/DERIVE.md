@@ -94,7 +94,8 @@ A memo-free reference evaluates the current world from scratch.
   a running job still wanted after an earlier root fills capacity, promotion and demotion of a
   running job, and per-level release. The random run gives each root a random level and
   random per-level limits while jobs run, and checks issue order, limits and wantedness on
-  every poll. 5 of 5 mutants caught (stopping the walk at capacity, ignoring limits, ignoring
+  every poll. The random run also checks at every idle point that the root list holds exactly the
+  demanded nodes, linked both ways. 5 of 5 mutants caught (stopping the walk at capacity, ignoring limits, ignoring
   level order, the last reach setting the level, releasing at the wrong level).
 - Pixel bundle `0ab61dc6c126...`: `core.derive` passes in 63 ms, and `build.native` rebuilds every
   output, including `core-derive`, byte-identically on the phone.
@@ -108,7 +109,10 @@ A memo-free reference evaluates the current world from scratch.
 - Restart cost: 35% of random-run jobs are restarts (29% with static operators, `dv_set_static`). Batching needs (an operator asks for
   every dependency it can name before it stops) and per-operator dependency hints are the
   known fixes; measure them on real operators first.
-- A root list instead of scanning every node per poll, plus incremental sweeps.
+- Incremental sweeps. The root list is built: demanded nodes are linked in demand order, so
+  an idle poll over 8192 nodes with 8 demanded costs 0.07 us (VM), down from 33 us when it
+  scanned every node. A clean root stops its walk at once, so the remaining poll cost is
+  proportional to the roots plus the work found under them.
 - Byte/resource admission and cancellation leases joined to `resources.h`, and IO workers.
   Job-count admission per level is built (above).
 - Real operators: document layout and scene compilation as nodes, which is the next consumer.

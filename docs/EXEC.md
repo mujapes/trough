@@ -79,7 +79,8 @@ the "bounded execution / traces" step of stage 3 ([CONSTRUCTION.md](CONSTRUCTION
 - **Admission:** by bytes and resources (`resources.h` leases for job inputs and outputs).
   Priorities and the background reserve are built. Preempting a running background job is
   not: an urgent job can wait for one only when every worker runs visible work.
-- **Owner cost:** the owner sweeps the whole demanded graph after each completion. A
-  dirty-root worklist is the fix once real graphs are large.
+- **Owner cost:** each completion triggers a poll over the demanded roots (the graph's root
+  list; clean roots cost O(1)). A dirty-root worklist would skip even those, but it only
+  matters with thousands of roots.
 - **Real operators:** text layout and scene compilation as registered operators (JNI for
   the platform text stack).
