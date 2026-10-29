@@ -48,6 +48,9 @@ final class NativeCore {
     static native long deriveTap(long deriver, float x, float y);
     static native void deriveSelect(long deriver, int paragraph, int offset);
     static native void deriveSelectRange(long deriver, int pa, int oa, int pb, int ob);
+    static native int deriveInsert(long deriver, int position, String text);
+    static native int deriveRemove(long deriver, int position);
+    static native int deriveCount(long deriver);
     static native long deriveValue(long deriver, int paragraph);
     static native byte[] deriveBytes(long deriver, int paragraph);
     static native long[] deriveStats(long deriver);

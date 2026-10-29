@@ -52,8 +52,11 @@ Mode 2 slack now starts at 1.5 refreshes. DerivedView + android.touch: real Moti
 fling the paced view; touch-to-display is 46.6 ms p50, and the position equals the reference
 (VIEW.md "Touch"). Caret + taps done (VIEW.md "Caret", android.caret: 24/24 taps = StaticLayout, caret exact, 0 bad
 pixels; DerivedView taps). Range selection done (VIEW.md "Selection", android.selection: 160 random ranges = getSelectionPath
-pixel-exact, incl. bidi whitespace rules). Next: IME editing in the derived view (the InputConnection
-adapter from docs/INPUT.md driving paragraph text cells + selection cells), then drag-select handles.
+pixel-exact, incl. bidi whitespace rules). Paragraph identity done (VIEW.md "Paragraph identity", android.paragraphs: inserts/removes never
+relayout others; anchoring holds). Next: IME editing in the derived view: an InputConnection over the
+document (paragraphs joined by '\n'), Enter splits (deriveInsert), backspace at start merges
+(deriveRemove), verified against BaseInputConnection over an Editable like android.ime; then
+CursorAnchorInfo from caret nodes; then the rope-backed order (O(log n) inserts).
 
 DECIDED (2026-10-28): the Java/native boundary is a bionic build of the same sources, loaded
 in-process (docs/BIONIC.md). All store oracles pass as bionic programs on the Pixel; android.jni

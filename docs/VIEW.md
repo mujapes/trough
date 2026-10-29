@@ -304,3 +304,35 @@ pixel for pixel. Pixel bundle `50ac6bd7990f`:
 - extending the focus: 2 highlight runs, 4 overlay runs, 0 layout, 0 scene;
 - frame with the highlight under the glyphs against the platform: 0 bad pixels, max channel diff 2;
 - setting a caret afterwards clears the range: no highlight, one caret.
+
+## Paragraph identity
+
+Paragraphs have stable ids. Text cells, layout nodes, caret nodes and highlight nodes are per
+id. Order cells map position to id (`order[i]` = id + 1, 0 past the end), and `count` holds the
+number of paragraphs. Capacity is twice the initial count plus 64; ids come from a free list.
+Operators reach a paragraph through its order cell: the scene and the overlay walk positions,
+and level-0 summaries read their 16 order cells and then the texts those cells name.
+`deriveInsert(position, text)` and `deriveRemove(position)` rewrite order cells only, so no
+existing layout is redone. Positions held elsewhere move like an Editable's spans:
+- the viewport anchor keeps showing the same paragraph. An insertion at or above it moves it
+  down one, and a removal above moves it up one;
+- removing the anchor paragraph shows the next one from its top;
+- selection ends follow their paragraphs.
+The JNI calls (`deriveText`, `deriveValue`, `deriveBytes`, `deriveSelect`...) still take positions.
+
+Cost: an insertion or removal rewrites every order cell after it, so the level-0 summaries
+below it re-estimate (O(n / 16) jobs, each one restart). A position-indexed sequence with
+summaries in its nodes (the text rope's own tree) would make this O(log n), and is the next
+step for long documents.
+
+`android.paragraphs` (offscreen): 90 random operations (42 inserts, 27 removals, 21 edits),
+mostly within a few paragraphs of the viewport, mirrored in a Java list. Pixel bundle
+`4645ba76741a`:
+- after every operation, the scene equals the flat reference at the anchor given by the
+  anchoring rule, and the count matches;
+- layouts run only for shown paragraphs whose layout was not already derived (28 runs in total,
+  at most 4 per operation), and never for an operation above the anchor;
+- a jump afterwards equals the estimate walk over the list (192), and 3 scrolls equal the exact walk.
+The oracle tracks paragraphs by identity token: the corpus repeats String objects (every 8th
+paragraph is the same object as one 5 earlier), and an identity check by string had
+conflated two ids.
