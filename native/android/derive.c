@@ -992,18 +992,19 @@ static size_t para_units(deriver *d, tr_world *w, int64_t i, const uint16_t **un
     if (units) *units = p;
     return n / 2;
 }
-typedef struct { deriver *d; int64_t global, para, off; int64_t state[3]; uint16_t *out; int64_t a, b, n; } doc_call;
+typedef struct { deriver *d; int64_t global, para, off; int64_t state[4]; uint16_t *out; int64_t a, b, n; } doc_call;
 static int64_t to_global(deriver *d, tr_world *w, uint64_t cell) {   /* (pos << 32 | off) + 1 -> offset */
     (void)w; uint64_t pos = (cell - 1) >> 32, off = (cell - 1) & 0xffffffffu, g, units;
     if (or_offset(&d->order, pos, &g) || or_at(&d->order, pos, NULL, &units)) return 0;
     return (int64_t)(g + (off < units ? off : units));
 }
-static void doc_state(void *arg, tr_world *w, dv_graph *g) {   /* length, anchor, caret */
+static void doc_state(void *arg, tr_world *w, dv_graph *g) {   /* length, anchor, caret, has a selection */
     (void)g; doc_call *c = arg; deriver *d = c->d; tr_read sel, anc;
     c->state[0] = (int64_t)or_units(&d->order);
     uint64_t sv = tr_current(w, d->selection, &sel) == TR_OK ? sel.value : 0, av = tr_current(w, d->sel_anchor, &anc) == TR_OK ? anc.value : 0;
     c->state[2] = sv ? to_global(d, w, sv) : 0;
     c->state[1] = av ? to_global(d, w, av) : c->state[2];
+    c->state[3] = sv != 0;
 }
 static void doc_locate(void *arg, tr_world *w, dv_graph *g) {   /* global -> (para, off), clamped */
     (void)w; (void)g; doc_call *c = arg; uint64_t pos = 0, off = 0;
@@ -1050,8 +1051,8 @@ JNIEXPORT jstring JNICALL CLASS(deriveParagraph)(JNIEnv *env, jclass c, jlong h,
 JNIEXPORT jlongArray JNICALL CLASS(deriveDocState)(JNIEnv *env, jclass c, jlong h) {
     (void)c; doc_call k = {(deriver *)(intptr_t)h, 0, 0, 0, {0}, NULL, 0, 0, 0};
     ex_call(&k.d->ex, doc_state, &k);
-    jlongArray r = (*env)->NewLongArray(env, 3);
-    if (r) (*env)->SetLongArrayRegion(env, r, 0, 3, (const jlong *)k.state);
+    jlongArray r = (*env)->NewLongArray(env, 4);
+    if (r) (*env)->SetLongArrayRegion(env, r, 0, 4, (const jlong *)k.state);
     return r;
 }
 JNIEXPORT jlong JNICALL CLASS(deriveLocate)(JNIEnv *env, jclass c, jlong h, jlong global) {
@@ -1109,6 +1110,49 @@ JNIEXPORT jfloatArray JNICALL CLASS(deriveCursorAnchor)(JNIEnv *env, jclass c, j
  * (Layout.getOffsetForHorizontal) through Java on the calling thread. The selection becomes a
  * caret there. Returns paragraph << 32 | offset, or -1 (layouts not settled). */
 typedef struct { deriver *d; float x, y; int64_t para; int line; void *text; size_t length; uint64_t width; int ok; } tap_call;
+/* The paragraphs the viewport shows (accessibility, docs/ACCESSIBILITY.md): the layout width,
+ * then per paragraph its position, id, viewport top and height, from the clean layouts the
+ * scene read, walking exact heights from the anchor. Stops at the first layout not clean (none
+ * after a settle). */
+typedef struct { deriver *d; int64_t *rows; size_t n, max; int64_t width; } visible_call;
+static void visible_rows(void *arg, tr_world *w, dv_graph *g) {
+    visible_call *c = arg; deriver *d = c->d; tr_read vp; uint64_t v; const void *p; size_t n;
+    tr_read wd;
+    c->n = 0;
+    if (tr_current(w, d->viewport, &vp) || tr_current(w, d->width, &wd)) return;
+    c->width = (int64_t)wd.value;
+    uint64_t anchor = vp.value & 0xffffffffu, height = vp.value >> 48; int64_t y = -(int64_t)((vp.value >> 32) & 0xffff);
+    uint64_t count = (uint64_t)atomic_load(&d->count);
+    for (uint64_t i = anchor; i < count && y < (int64_t)height && c->n < c->max; i++) {
+        uint64_t id1 = owner_id(d, w, (int64_t)i);
+        if (!id1 || dv_get(g, d->node[id1 - 1], &v) || !bl_is(v) || bl_get(&d->blobs, v, &p, &n)) return;
+        int64_t h = (int64_t)layout_height(p, n);
+        int64_t *r = c->rows + 4 * c->n++;
+        r[0] = (int64_t)i; r[1] = (int64_t)(id1 - 1); r[2] = y; r[3] = h;
+        y += h;
+    }
+}
+JNIEXPORT jlongArray JNICALL CLASS(deriveVisible)(JNIEnv *env, jclass c, jlong h) {
+    (void)c; deriver *d = (deriver *)(intptr_t)h;
+    int64_t rows[1 + 4 * 256];
+    visible_call k = {d, rows + 1, 0, 256, 0};
+    ex_call(&d->ex, visible_rows, &k);
+    rows[0] = k.width;
+    jlongArray r = (*env)->NewLongArray(env, (jsize)(1 + 4 * k.n));
+    if (r) (*env)->SetLongArrayRegion(env, r, 0, (jsize)(1 + 4 * k.n), (const jlong *)rows);
+    return r;
+}
+/* Position of paragraph id (accessibility nodes are named by id), or -1: O(paragraphs) walk. */
+static void position_of(void *arg, tr_world *w, dv_graph *g) {
+    (void)g; doc_call *c = arg; int count = atomic_load(&c->d->count);
+    c->n = -1;
+    for (int i = 0; i < count; i++) if ((int64_t)owner_id(c->d, w, i) == c->global + 1) { c->n = i; return; }
+}
+JNIEXPORT jint JNICALL CLASS(derivePosition)(JNIEnv *env, jclass c, jlong h, jint id) {
+    (void)env; (void)c; deriver *d = (deriver *)(intptr_t)h; doc_call k = {d, id, 0, 0, {0}, NULL, 0, 0, 0};
+    ex_call(&d->ex, position_of, &k);
+    return (jint)k.n;
+}
 static void tap_find(void *arg, tr_world *w, dv_graph *g) {
     tap_call *t = arg; deriver *d = t->d; tr_read vp, wd, tx; uint64_t v; const void *p; size_t n;
     t->ok = 0;

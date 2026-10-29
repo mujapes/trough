@@ -113,6 +113,14 @@ final class DeriveLayout {
         }
         return out;
     }
+    /** Lines of a paragraph: start, end and direction (1 LTR, -1 RTL) per line, as
+     * Layout.getLineStart/getLineEnd/getParagraphDirection. */
+    static int[] lines(String text, int width) {
+        TextLayout l = TextLayout.layout(text, PAINT.get(), width, 0, 0);
+        int[] out = new int[3 * l.lines.size()];
+        for (int i = 0; i < l.lines.size(); i++) { TextLayout.Line line = l.lines.get(i); out[3 * i] = line.start; out[3 * i + 1] = line.end; out[3 * i + 2] = line.rtl ? -1 : 1; }
+        return out;
+    }
     /** The offset a tap at x on line `line` selects (Layout.getOffsetForHorizontal). */
     static int offsetAt(String text, int width, int line, float x) {
         TextLayout l = TextLayout.layout(text, PAINT.get(), width, 0, 0);

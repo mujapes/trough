@@ -57,6 +57,8 @@ final class NativeCore {
     static native String deriveParagraph(long deriver, int position);
     static native float[] deriveCursorAnchor(long deriver);
     static native int deriveLeafSize(long deriver, int position);
+    static native long[] deriveVisible(long deriver);
+    static native int derivePosition(long deriver, int id);
     static native long deriveValue(long deriver, int paragraph);
     static native byte[] deriveBytes(long deriver, int paragraph);
     static native long[] deriveStats(long deriver);

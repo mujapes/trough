@@ -7,6 +7,9 @@ import android.view.MotionEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.VelocityTracker;
+import android.view.accessibility.AccessibilityEvent;
+import android.view.accessibility.AccessibilityManager;
+import android.view.accessibility.AccessibilityNodeProvider;
 import android.view.inputmethod.CursorAnchorInfo;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
@@ -24,7 +27,10 @@ import android.widget.OverScroller;
  * It is also the document's text editor (docs/INPUT.md "Editor view"): the IME edits the
  * paragraphs through TextInput over DocumentText; each edit marks the content dirty and wakes the
  * render thread. Selection changes reach the IME through updateSelection (after IME edits and
- * after taps), and CursorAnchorInfo after frames while the IME monitors it. */
+ * after taps), and CursorAnchorInfo after frames while the IME monitors it.
+ *
+ * Accessibility (docs/ACCESSIBILITY.md): a node provider exposes the shown paragraphs as
+ * virtual text nodes; page scrolls go through the render thread like touch scrolls. */
 final class DerivedView extends SurfaceView implements SurfaceHolder.Callback {
     interface Frames { void frame(long number, int dy); }
 
@@ -51,6 +57,7 @@ final class DerivedView extends SurfaceView implements SurfaceHolder.Callback {
     private final long[] reported = {-2, -2, -2, -2};   /* UI thread: last updateSelection */
     volatile long selectionReports, anchorReports;
     private static final int SURROUNDING = 1024;
+    private DocumentAccessibility accessibility;
 
     DerivedView(Context context, long deriver) {
         super(context);
@@ -62,6 +69,29 @@ final class DerivedView extends SurfaceView implements SurfaceHolder.Callback {
         setFocusableInTouchMode(true);
         doc = new DocumentText(deriver);
         getHolder().addCallback(this);
+    }
+
+    @Override public AccessibilityNodeProvider getAccessibilityNodeProvider() {
+        if (accessibility == null) accessibility = new DocumentAccessibility(this, deriver, new DocumentAccessibility.Scroller() {
+            @Override public boolean scroll(boolean forward) {
+                int page = Math.max(1, getHeight() > 0 ? getHeight() * 4 / 5 : 800);
+                synchronized (lock) { pendingDy += forward ? page : -page; if (pendingInputNs == 0) pendingInputNs = System.nanoTime(); lock.notifyAll(); }
+                return true;
+            }
+        });
+        return accessibility;
+    }
+    private boolean accessible() {
+        AccessibilityManager am = (AccessibilityManager) getContext().getSystemService(Context.ACCESSIBILITY_SERVICE);
+        return am != null && am.isEnabled();
+    }
+    /** UI thread: what accessibility services see changed (scroll, edit, selection). */
+    void reportAccessibility(boolean scrolled, boolean edited) {
+        if (!accessible()) return;
+        if (scrolled) sendAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_SCROLLED);
+        AccessibilityEvent e = AccessibilityEvent.obtain(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED);
+        e.setContentChangeTypes(edited ? AccessibilityEvent.CONTENT_CHANGE_TYPE_SUBTREE | AccessibilityEvent.CONTENT_CHANGE_TYPE_TEXT : AccessibilityEvent.CONTENT_CHANGE_TYPE_SUBTREE);
+        if (getParent() != null) getParent().requestSendAccessibilityEvent(this, e);
     }
 
     private InputMethodManager imm() { return (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE); }
@@ -100,6 +130,7 @@ final class DerivedView extends SurfaceView implements SurfaceHolder.Callback {
         reported[0] = v[1]; reported[1] = v[2]; reported[2] = v[3]; reported[3] = v[4];
         selectionReports++;
         imm().updateSelection(this, (int) v[1], (int) v[2], (int) v[3], (int) v[4]);
+        if (accessible()) sendAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED);
     }
     /** UI thread: CursorAnchorInfo for the settled frame, if the IME asked for it. */
     void reportCursor() {
@@ -239,8 +270,12 @@ final class DerivedView extends SurfaceView implements SurfaceHolder.Callback {
             NativeCore.deriveSettleVisible(deriver);
             NativeCore.deriveFrame(deriver, false, timing);
             consumedDy += total; flingDy += fling; frames++;
-            final boolean tapped = !Float.isNaN(tx);
-            if (tapped || cursorMonitor) post(new Runnable() { public void run() { if (tapped) reportSelection(); reportCursor(); } });
+            final boolean tapped = !Float.isNaN(tx), scrolled = total != 0, changed = edited;
+            post(new Runnable() { public void run() {
+                if (tapped) reportSelection();
+                reportCursor();
+                if (scrolled || changed) reportAccessibility(scrolled, changed);
+            } });
             working = false;
             Frames o = observer;
             if (o != null) o.frame(frames, total);
