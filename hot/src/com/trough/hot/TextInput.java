@@ -9,24 +9,42 @@ import android.view.inputmethod.TextAttribute;
  * the queue (no Java mirror). Semantics follow Android's BaseInputConnection over an Editable,
  * which the android.ime scenario uses as a differential reference. Offsets are UTF-16 units. */
 final class TextInput extends BaseInputConnection {
-    private final long keeper, queue;
+    /** Where the text lives. The IME rules below are the same for every backend. */
+    interface Backend {
+        /** {length, anchor, caret, composingStart, composingEnd}. */
+        long[] state();
+        /** Replace ranges in order (each in the text the previous one left), then set the
+         * selection and composing region (final coordinates; -1 = none) atomically. */
+        void apply(int[] ranges, String[] texts, int anchor, int caret, int cs, int ce);
+        String slice(int start, int end);
+    }
+    /** The native draft queue (docs/DRAFTS.md). */
+    static final class Draft implements Backend {
+        private final long keeper, queue;
+        Draft(long keeper, long queue) { this.keeper = keeper; this.queue = queue; }
+        @Override public long[] state() {
+            long[] v = NativeCore.value(queue);
+            if (v == null) throw new IllegalStateException("draft value");
+            return v;
+        }
+        @Override public void apply(int[] ranges, String[] texts, int anchor, int caret, int cs, int ce) {
+            long r = NativeCore.batch(keeper, queue, ranges, texts, anchor, caret, cs, ce);
+            if (r < 0) throw new IllegalStateException("draft edit: ts_status " + (-r));
+        }
+        @Override public String slice(int start, int end) { return NativeCore.slice(queue, start, end); }
+    }
+
+    private final Backend text;
     private int batchDepth;
 
-    TextInput(View view, long keeper, long queue) {
+    TextInput(View view, long keeper, long queue) { this(view, new Draft(keeper, queue)); }
+    TextInput(View view, Backend text) {
         super(view, true);    // a full editor; false is the key-event fallback mode
-        this.keeper = keeper; this.queue = queue;
+        this.text = text;
     }
 
-    /** {length, anchor, caret, composingStart, composingEnd}. */
-    private long[] state() {
-        long[] v = NativeCore.value(queue);
-        if (v == null) throw new IllegalStateException("draft value");
-        return v;
-    }
-    private void apply(int[] ranges, String[] texts, int anchor, int caret, int cs, int ce) {
-        long r = NativeCore.batch(keeper, queue, ranges, texts, anchor, caret, cs, ce);
-        if (r < 0) throw new IllegalStateException("draft edit: ts_status " + (-r));
-    }
+    private long[] state() { return text.state(); }
+    private void apply(int[] ranges, String[] texts, int anchor, int caret, int cs, int ce) { text.apply(ranges, texts, anchor, caret, cs, ce); }
     /** Where a cursor point at p lands when [a, b) is replaced by n units (Editable's point rule:
      * an insertion at the point pushes it forward; inside a replaced range it moves to the end). */
     private static int point(int p, int a, int b, int n) {
@@ -122,18 +140,18 @@ final class TextInput extends BaseInputConnection {
         long[] v = state();
         int a = (int) Math.min(v[1], v[2]);
         if (n < 0) return null;
-        return NativeCore.slice(queue, a - Math.min(n, a), a);
+        return text.slice(a - Math.min(n, a), a);
     }
     @Override public CharSequence getTextAfterCursor(int n, int flags) {
         long[] v = state();
         int b = (int) Math.max(v[1], v[2]), len = (int) v[0];
         if (n < 0) return null;
-        return NativeCore.slice(queue, b, (int) Math.min((long) b + n, len));
+        return text.slice(b, (int) Math.min((long) b + n, len));
     }
     @Override public CharSequence getSelectedText(int flags) {
         long[] v = state();
         int a = (int) Math.min(v[1], v[2]), b = (int) Math.max(v[1], v[2]);
-        return a == b ? null : NativeCore.slice(queue, a, b);
+        return a == b ? null : text.slice(a, b);
     }
 
     /** Batches are already atomic per operation; nesting is tracked for IME bookkeeping only. */

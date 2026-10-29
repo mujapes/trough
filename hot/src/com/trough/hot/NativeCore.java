@@ -51,6 +51,10 @@ final class NativeCore {
     static native int deriveInsert(long deriver, int position, String text);
     static native int deriveRemove(long deriver, int position);
     static native int deriveCount(long deriver);
+    static native long[] deriveDocState(long deriver);
+    static native long deriveLocate(long deriver, long global);
+    static native String deriveSlice(long deriver, long start, long end);
+    static native String deriveParagraph(long deriver, int position);
     static native long deriveValue(long deriver, int paragraph);
     static native byte[] deriveBytes(long deriver, int paragraph);
     static native long[] deriveStats(long deriver);

@@ -974,6 +974,89 @@ JNIEXPORT jint JNICALL CLASS(deriveRemove)(JNIEnv *env, jclass c, jlong h, jint 
 JNIEXPORT jint JNICALL CLASS(deriveCount)(JNIEnv *env, jclass c, jlong h) {
     (void)env; (void)c; return atomic_load(&((deriver *)(intptr_t)h)->count);
 }
+/* The document as one text, paragraphs joined by '\n' (the IME's view, docs/INPUT.md
+ * "Document"). Owner-side walks over order cells: O(paragraphs) until order is a rope. */
+static size_t para_units(deriver *d, tr_world *w, int64_t i, const uint16_t **units) {
+    uint64_t id1 = owner_id(d, w, i); tr_read t; const void *p = NULL; size_t n = 0;
+    if (id1 && tr_current(w, d->text[id1 - 1], &t) == TR_OK && bl_is(t.value)) bl_get(&d->blobs, t.value, &p, &n);
+    if (units) *units = p;
+    return n / 2;
+}
+typedef struct { deriver *d; int64_t global, para, off; int64_t state[3]; uint16_t *out; int64_t a, b, n; } doc_call;
+static int64_t to_global(deriver *d, tr_world *w, uint64_t cell) {   /* (pos << 32 | off) + 1 -> offset */
+    int64_t pos = (int64_t)((cell - 1) >> 32), g = 0, off = (int64_t)((cell - 1) & 0xffffffffu);
+    for (int64_t i = 0; i < pos; i++) g += (int64_t)para_units(d, w, i, NULL) + 1;
+    int64_t len = (int64_t)para_units(d, w, pos, NULL);
+    return g + (off < len ? off : len);
+}
+static void doc_state(void *arg, tr_world *w, dv_graph *g) {   /* length, anchor, caret */
+    (void)g; doc_call *c = arg; deriver *d = c->d; tr_read sel, anc;
+    int count = atomic_load(&d->count); int64_t len = 0;
+    for (int i = 0; i < count; i++) len += (int64_t)para_units(d, w, i, NULL) + (i ? 1 : 0);
+    c->state[0] = len;
+    uint64_t sv = tr_current(w, d->selection, &sel) == TR_OK ? sel.value : 0, av = tr_current(w, d->sel_anchor, &anc) == TR_OK ? anc.value : 0;
+    c->state[2] = sv ? to_global(d, w, sv) : 0;
+    c->state[1] = av ? to_global(d, w, av) : c->state[2];
+}
+static void doc_locate(void *arg, tr_world *w, dv_graph *g) {   /* global -> (para, off), clamped */
+    (void)g; doc_call *c = arg; deriver *d = c->d;
+    int count = atomic_load(&d->count); int64_t rest = c->global < 0 ? 0 : c->global;
+    for (int i = 0; i < count; i++) {
+        int64_t n = (int64_t)para_units(d, w, i, NULL);
+        if (rest <= n || i == count - 1) { c->para = i; c->off = rest < n ? rest : n; return; }
+        rest -= n + 1;
+    }
+    c->para = 0; c->off = 0;
+}
+static void doc_slice(void *arg, tr_world *w, dv_graph *g) {   /* units [a, b) of the joined text */
+    (void)g; doc_call *c = arg; deriver *d = c->d;
+    int count = atomic_load(&d->count); int64_t at = 0;
+    c->n = 0;
+    for (int i = 0; i < count && at < c->b; i++) {
+        if (i) { if (at >= c->a && at < c->b) c->out[c->n++] = '\n'; at++; }
+        const uint16_t *u; int64_t n = (int64_t)para_units(d, w, i, &u);
+        for (int64_t k = 0; k < n && at < c->b; k++, at++) if (at >= c->a) c->out[c->n++] = u[k];
+    }
+}
+static void doc_paragraph(void *arg, tr_world *w, dv_graph *g) {   /* para -> its units, copied */
+    (void)g; doc_call *c = arg; const uint16_t *u = NULL;
+    c->n = -1;
+    if (c->para < 0 || c->para >= atomic_load(&c->d->count)) return;
+    int64_t n = (int64_t)para_units(c->d, w, c->para, &u);
+    c->out = malloc(sizeof(uint16_t) * (size_t)(n + 1));
+    if (!c->out) return;
+    if (n) memcpy(c->out, u, sizeof(uint16_t) * (size_t)n);
+    c->n = n;
+}
+JNIEXPORT jstring JNICALL CLASS(deriveParagraph)(JNIEnv *env, jclass c, jlong h, jint para) {
+    (void)c; doc_call k = {(deriver *)(intptr_t)h, 0, para, 0, {0}, NULL, 0, 0, 0};
+    ex_call(&k.d->ex, doc_paragraph, &k);
+    jstring r = k.n >= 0 ? (*env)->NewString(env, k.out, (jsize)k.n) : NULL;
+    free(k.out);
+    return r;
+}
+JNIEXPORT jlongArray JNICALL CLASS(deriveDocState)(JNIEnv *env, jclass c, jlong h) {
+    (void)c; doc_call k = {(deriver *)(intptr_t)h, 0, 0, 0, {0}, NULL, 0, 0, 0};
+    ex_call(&k.d->ex, doc_state, &k);
+    jlongArray r = (*env)->NewLongArray(env, 3);
+    if (r) (*env)->SetLongArrayRegion(env, r, 0, 3, (const jlong *)k.state);
+    return r;
+}
+JNIEXPORT jlong JNICALL CLASS(deriveLocate)(JNIEnv *env, jclass c, jlong h, jlong global) {
+    (void)env; (void)c; doc_call k = {(deriver *)(intptr_t)h, global, 0, 0, {0}, NULL, 0, 0, 0};
+    ex_call(&k.d->ex, doc_locate, &k);
+    return k.para << 32 | k.off;
+}
+JNIEXPORT jstring JNICALL CLASS(deriveSlice)(JNIEnv *env, jclass c, jlong h, jlong a, jlong b) {
+    (void)c;
+    if (a < 0 || b < a) return NULL;
+    doc_call k = {(deriver *)(intptr_t)h, 0, 0, 0, {0}, malloc(sizeof(uint16_t) * (size_t)(b - a + 1)), a, b, 0};
+    if (!k.out) return NULL;
+    ex_call(&k.d->ex, doc_slice, &k);
+    jstring r = (*env)->NewString(env, k.out, (jsize)k.n);
+    free(k.out);
+    return r;
+}
 /* Tap at viewport (x, y): the paragraph and line under it, from the clean layouts the scene
  * read (exact heights from the anchor), then the offset by TextLayout's tap rules
  * (Layout.getOffsetForHorizontal) through Java on the calling thread. The selection becomes a
