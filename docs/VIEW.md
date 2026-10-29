@@ -107,3 +107,21 @@ Each resulting scene is byte-identical to the reference at that anchor and offse
   frame's uploads are still submitted, so residency stays true. `deriveSurfaceOpen` puts the
   view on an Android Surface, and `android.viewsurface` checks the presented image and
   measures pacing. It needs Trough visible and has not run yet.
+
+## Background prefetch
+
+`derivePrefetch(before, after)` demands the layouts of paragraphs `[anchor - before, anchor +
+after]` at `DV_BACKGROUND` and moves that window whenever the viewport cell is written, by
+`deriveViewport` or the end of a scroll. Paragraphs that enter it are demanded, and paragraphs
+that leave it are released. It uses the graph's levels ([DERIVE.md](DERIVE.md), [EXEC.md](EXEC.md)):
+- a scroll that crosses a paragraph with no clean layout pauses (stats[20] counts pauses), and
+  demands that paragraph at `DV_URGENT`. It waits with `ex_settle_at(DV_URGENT)`, so
+  prefetching never delays a crossing;
+- `deriveSettleVisible`, jumps and the mask settle in `deriveFrame` wait for `DV_VISIBLE` and
+  more urgent work only; `deriveSettle` still waits for everything;
+- the executor keeps one worker free of background work, which matters little at 2 workers.
+
+With prefetch off (0, 0), the scheduling is the one measured in the tables above. The
+`android.view` step "prefetch_scrolls" turns on a window of 2 above and 24 below. It then
+scrolls 700, 1300, 900 and -600 px. Each scene must equal the reference, and no scroll may
+pause. Pixel results are pending.

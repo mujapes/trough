@@ -83,10 +83,47 @@ final class ViewOracle {
                 boolean same = ga == ra && go == ro && Arrays.equals(got, reference(corpus, ra, ro));
                 long[] a1 = NativeCore.deriveStats(d);
                 scrolls.add(Json.map("dy", dy, "anchor", ga, "offset", go, "expected", Arrays.asList(ra, ro), "equal", same,
-                    "layout_runs", a1[11] - b0[11], "scene_runs", a1[13] - b0[13], "ms", (System.nanoTime() - s0) / 1e6));
+                    "layout_runs", a1[11] - b0[11], "scene_runs", a1[13] - b0[13], "pauses", a1[20] - b0[20],
+                    "ms", (System.nanoTime() - s0) / 1e6));
                 if (!same) { ok = false; failures.add(Json.map("scroll", dy, "got", Arrays.asList(ga, go), "want", Arrays.asList(ra, ro))); }
             }
             out.put("scrolls", scrolls);
+            /* Background prefetch: layouts from 2 above to 24 below the anchor are demanded at
+             * DV_BACKGROUND, so a scroll into them crosses laid-out paragraphs without pausing,
+             * and the scene settles (deriveSettleVisible) without waiting for the window. */
+            List<Object> prefetched = new ArrayList<>();
+            long[] p0 = NativeCore.deriveStats(d); long w0 = System.nanoTime();
+            NativeCore.derivePrefetch(d, 2, 24);
+            NativeCore.deriveSettle(d);
+            long[] p1 = NativeCore.deriveStats(d);
+            out.put("prefetch_window", Json.map("paragraphs", p1[21], "layout_runs", p1[11] - p0[11], "ms", (System.nanoTime() - w0) / 1e6));
+            for (int dy : new int[] {700, 1300, 900, -600}) {
+                long[] b0 = NativeCore.deriveStats(d); long s0 = System.nanoTime();
+                long pos = NativeCore.deriveScroll(d, dy);
+                double scrollMs = (System.nanoTime() - s0) / 1e6;
+                NativeCore.deriveSettleVisible(d);
+                double visibleMs = (System.nanoTime() - s0) / 1e6;
+                int ga = (int) (pos & 0xffffffffL), go = (int) (pos >>> 32);
+                int[] want = scrollReference(corpus, ra, ro, dy);
+                ra = want[0]; ro = want[1];
+                boolean same = ga == ra && go == ro && Arrays.equals(NativeCore.deriveBytes(d, -1), reference(corpus, ra, ro));
+                long[] a1 = NativeCore.deriveStats(d);
+                long pauses = a1[20] - b0[20];
+                NativeCore.deriveSettle(d);                  /* the window catches up before the next scroll */
+                long[] a2 = NativeCore.deriveStats(d);
+                prefetched.add(Json.map("dy", dy, "anchor", ga, "offset", go, "equal", same, "pauses", pauses,
+                    "scroll_ms", scrollMs, "visible_ms", visibleMs, "window_layout_runs", a2[11] - b0[11],
+                    "window", a2[21], "ms", (System.nanoTime() - s0) / 1e6));
+                if (!same || pauses != 0) {
+                    ok = false;
+                    failures.add(Json.map("prefetch_scroll", dy, "equal", same, "pauses", pauses, "got", Arrays.asList(ga, go), "want", Arrays.asList(ra, ro)));
+                }
+            }
+            NativeCore.derivePrefetch(d, 0, 0);
+            NativeCore.deriveSettle(d);
+            long[] p2 = NativeCore.deriveStats(d);
+            if (p2[21] != 0) { ok = false; failures.add(Json.map("prefetch_off_window", p2[21])); }
+            out.put("prefetch_scrolls", prefetched);
             out.put("steps", steps);
             Map<String, Object> pixels = pixels(NativeCore.deriveBytes(d, -1));
             out.put("pixels", pixels);

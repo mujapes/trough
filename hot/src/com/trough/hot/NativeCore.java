@@ -39,6 +39,8 @@ final class NativeCore {
     static native long deriveScroll(long deriver, int dy);
     static native int deriveDemandScene(long deriver, boolean on);
     static native long deriveSettle(long deriver);
+    static native long deriveSettleVisible(long deriver);
+    static native void derivePrefetch(long deriver, int before, int after);
     static native long deriveValue(long deriver, int paragraph);
     static native byte[] deriveBytes(long deriver, int paragraph);
     static native long[] deriveStats(long deriver);

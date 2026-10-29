@@ -27,6 +27,9 @@ typedef struct {
     tr_world world; tr_cell *cells; tr_id driver, width, op, viewport, op_sum, op_scene; tr_id *text; int paragraphs;
     int levels; uint32_t scene;                       /* summary levels above paragraphs; the scene node */
     atomic_ullong runs[5];                            /* invocations: layout, summary, scene, mask; [4] paragraphs estimated */
+    /* Prefetch (derivePrefetch): layouts of paragraphs [anchor - before, anchor + after] are
+     * demanded at DV_BACKGROUND, owned as [pf_lo, pf_hi); kept on the owner thread. */
+    int pf_before, pf_after, pf_lo, pf_hi; uint64_t scroll_pauses;
     dv_graph graph; dv_node *nodes; dv_block *blocks; uint32_t *table; dv_frame *path; uint32_t *node;
     bl_store blobs; bl_entry *entries; uint32_t *index;
     ex_exec ex;
@@ -272,6 +275,20 @@ static void write_cell(deriver *d, tr_id cell, uint64_t value) {
     if (tr_begin(&t, &d->world, d->driver, r, 4, w, 1) || tr_write_value(&t, cell, value) || tr_commit(&t, &rc)) return;
     if (bl_is(old.value)) bl_release(&d->blobs, old.value);   /* the cell held it */
 }
+/* Moves the background prefetch window to the viewport cell's anchor: demands what entered,
+ * releases what left. */
+static void prefetch_update(deriver *d, tr_world *w, dv_graph *g) {
+    tr_read vp; int lo = 0, hi = 0;
+    if ((d->pf_before || d->pf_after) && tr_current(w, d->viewport, &vp) == TR_OK) {
+        int anchor = (int)(vp.value & 0xffffffffu);
+        lo = anchor - d->pf_before; if (lo < 0) lo = 0;
+        hi = anchor + d->pf_after + 1; if (hi > d->paragraphs) hi = d->paragraphs;
+        if (lo > hi) lo = hi;
+    }
+    for (int i = d->pf_lo; i < d->pf_hi; i++) if (i < lo || i >= hi) dv_release_at(g, d->node[i], DV_BACKGROUND);
+    for (int i = lo; i < hi; i++) if (i < d->pf_lo || i >= d->pf_hi) dv_demand_at(g, d->node[i], DV_BACKGROUND);
+    d->pf_lo = lo; d->pf_hi = hi;
+}
 typedef struct { deriver *d; int i; const jchar *units; jsize length; int64_t result; } call;
 static void set_text(void *arg, tr_world *w, dv_graph *g) {
     (void)w; (void)g;
@@ -281,9 +298,14 @@ static void set_text(void *arg, tr_world *w, dv_graph *g) {
 }
 static void set_width(void *arg, tr_world *w, dv_graph *g) { (void)w; (void)g; call *c = arg; write_cell(c->d, c->d->width, (uint64_t)c->i); }
 static void set_viewport(void *arg, tr_world *w, dv_graph *g) {     /* i = anchor, length = offset | height << 16 */
-    (void)w; (void)g; call *c = arg;
+    call *c = arg;
     write_cell(c->d, c->d->viewport, (uint64_t)(uint32_t)c->i | ((uint64_t)(uint32_t)c->length & 0xffff) << 32
                                      | ((uint64_t)(uint32_t)c->length >> 16) << 48);
+    prefetch_update(c->d, w, g);
+}
+static void set_prefetch(void *arg, tr_world *w, dv_graph *g) {   /* i = before, length = after */
+    call *c = arg; c->d->pf_before = c->i; c->d->pf_after = (int)c->length;
+    prefetch_update(c->d, w, g);
 }
 static void demand_scene(void *arg, tr_world *w, dv_graph *g) {
     (void)w; call *c = arg; c->result = c->length ? dv_demand(g, c->d->scene) : dv_release(g, c->d->scene);
@@ -315,6 +337,7 @@ static void stats(void *arg, tr_world *w, dv_graph *g) {
     for (int k = 0; k < 3; k++) s[11 + k] = (int64_t)atomic_load(&d->runs[k]);
     s[14] = (int64_t)atomic_load(&d->runs[3]); s[15] = (int64_t)d->frame_uploads; s[16] = (int64_t)d->frame_hits;
     s[17] = (int64_t)d->atlas.evictions; s[18] = (int64_t)d->atlas.refusals; s[19] = (int64_t)atomic_load(&d->runs[4]);
+    s[20] = (int64_t)d->scroll_pauses; s[21] = d->pf_hi - d->pf_lo;
 }
 
 /* The newest trace records: (operator 0 layout / 1 summary / 2 scene, key, outcome, worker). */
@@ -426,12 +449,17 @@ static void scroll_step(void *arg, tr_world *w, dv_graph *g) {
         break;
     }
     sc->anchor = anchor; sc->offset = offset;
-    if (sc->need != UINT32_MAX) return;              /* paused: lay out sc->need, then continue */
+    if (sc->need != UINT32_MAX) { d->scroll_pauses++; return; }   /* paused: lay out sc->need, then continue */
     if (offset > 0xffff) offset = 0xffff;
     write_cell(d, d->viewport, (uint64_t)anchor | (uint64_t)offset << 32 | height << 48);
+    prefetch_update(d, w, g);
     sc->done = 1;
 }
-static void demand_layout(void *arg, tr_world *w, dv_graph *g) { (void)w; call *c = arg; c->result = c->length ? dv_demand(g, c->d->node[c->i]) : dv_release(g, c->d->node[c->i]); }
+/* A scroll waits for a crossed paragraph: urgent, so it runs ahead of prefetching. */
+static void demand_layout(void *arg, tr_world *w, dv_graph *g) {
+    (void)w; call *c = arg;
+    c->result = c->length ? dv_demand_at(g, c->d->node[c->i], DV_URGENT) : dv_release_at(g, c->d->node[c->i], DV_URGENT);
+}
 JNIEXPORT jlong JNICALL CLASS(deriveScroll)(JNIEnv *env, jclass c, jlong h, jint dy) {
     (void)env; (void)c; deriver *d = (deriver *)(intptr_t)h;
     scroll_call sc = {d, dy, 0, 0, 0, UINT32_MAX, 0, 0};
@@ -440,7 +468,7 @@ JNIEXPORT jlong JNICALL CLASS(deriveScroll)(JNIEnv *env, jclass c, jlong h, jint
         if (sc.done) break;
         call k = {d, (int)sc.need, NULL, 1, 0};            /* lay out the paragraph crossed, then continue */
         ex_call(&d->ex, demand_layout, &k);
-        if (!ex_settle(&d->ex)) return -1;
+        if (!ex_settle_at(&d->ex, DV_URGENT)) return -1;
         k.length = 0; ex_call(&d->ex, demand_layout, &k);
     }
     tr_read vp; uint64_t v = 0;
@@ -453,7 +481,7 @@ JNIEXPORT jint JNICALL CLASS(deriveJump)(JNIEnv *env, jclass c, jlong h, jint pe
     (void)env; (void)c; deriver *d = (deriver *)(intptr_t)h;
     jump_call j = {d, permille, -1, -1};
     ex_call(&d->ex, demand_root, &j);
-    if (!ex_settle(&d->ex)) return -1;
+    if (!ex_settle_at(&d->ex, DV_VISIBLE)) return -1;
     ex_call(&d->ex, find_anchor, &j);
     return (jint)j.anchor;
 }
@@ -467,6 +495,16 @@ JNIEXPORT jint JNICALL CLASS(deriveDemand)(JNIEnv *env, jclass c, jlong h, jint 
 }
 JNIEXPORT jlong JNICALL CLASS(deriveSettle)(JNIEnv *env, jclass c, jlong h) {
     (void)env; (void)c; return (jlong)ex_settle(&((deriver *)(intptr_t)h)->ex);
+}
+/* Settles what is on screen (DV_VISIBLE and urgent), not the prefetch. */
+JNIEXPORT jlong JNICALL CLASS(deriveSettleVisible)(JNIEnv *env, jclass c, jlong h) {
+    (void)env; (void)c; return (jlong)ex_settle_at(&((deriver *)(intptr_t)h)->ex, DV_VISIBLE);
+}
+/* Lays out `before` paragraphs above the anchor and `after` below it in the background, and
+ * keeps that window around the anchor as the viewport moves. 0, 0 turns it off. */
+JNIEXPORT void JNICALL CLASS(derivePrefetch)(JNIEnv *env, jclass c, jlong h, jint before, jint after) {
+    (void)env; (void)c; deriver *d = (deriver *)(intptr_t)h;
+    call k = {d, before < 0 ? 0 : before, NULL, after < 0 ? 0 : after, 0}; ex_call(&d->ex, set_prefetch, &k);
 }
 JNIEXPORT jlong JNICALL CLASS(deriveValue)(JNIEnv *env, jclass c, jlong h, jint i) {
     (void)env; (void)c; deriver *d = (deriver *)(intptr_t)h;
@@ -485,11 +523,11 @@ JNIEXPORT jbyteArray JNICALL CLASS(deriveBytes)(JNIEnv *env, jclass c, jlong h, 
 }
 JNIEXPORT jlongArray JNICALL CLASS(deriveStats)(JNIEnv *env, jclass c, jlong h) {
     (void)c; deriver *d = (deriver *)(intptr_t)h;
-    int64_t s[20] = {0};
+    int64_t s[22] = {0};
     call k = {d, 0, (const jchar *)(void *)s, 0, 0};
     ex_call(&d->ex, stats, &k);
-    jlongArray r = (*env)->NewLongArray(env, 20);
-    if (r) (*env)->SetLongArrayRegion(env, r, 0, 20, (const jlong *)s);
+    jlongArray r = (*env)->NewLongArray(env, 22);
+    if (r) (*env)->SetLongArrayRegion(env, r, 0, 22, (const jlong *)s);
     return r;
 }
 JNIEXPORT jlongArray JNICALL CLASS(deriveTrace)(JNIEnv *env, jclass c, jlong h) {
@@ -589,7 +627,7 @@ JNIEXPORT jbyteArray JNICALL CLASS(deriveFrame)(JNIEnv *env, jclass c, jlong h, 
     clock_gettime(CLOCK_MONOTONIC, &t0);
     masks_call mc = {d, sc.bytes, sc.length, nodes, 0, 0};
     ex_call(&d->ex, demand_masks, &mc);
-    if (mc.result || !ex_settle(&d->ex)) goto done;
+    if (mc.result || !ex_settle_at(&d->ex, DV_VISIBLE)) goto done;   /* not the prefetch */
     clock_gettime(CLOCK_MONOTONIC, &t1);
     mask_bytes mb = {d, nodes, count, handles, bytes, lengths, 0};
     ex_call(&d->ex, collect_masks, &mb);
