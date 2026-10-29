@@ -65,6 +65,15 @@ measures up to 3 times (flaked once cold). Next: DerivedView as the editor (onCr
 over DocumentText, IME edits wake the render thread, taps -> updateSelection, requestCursorUpdates ->
 updateCursorAnchorInfo after frames), android.touch extended to type; then character bounds,
 marker for ranges/offscreen carets, rope-backed order.
+Done (evening): bundle 5f12a5595147 all offscreen scenarios pass (android.anchor: 80 markers, 12 clipped,
+14 RTL, worst diff 0). DerivedView hosts the IME (INPUT.md "Editor view"; android.touch types "typed\n"
+through the view's InputConnection; needs Trough visible, NOT RUN YET). Character bounds (INPUT.md
+"Cursor anchor"; TextLayout.characterBounds ports TextLine.measureAllBounds). core.order: B+tree order
+(docs/ORDER.md), 9/9 mutants, ASan clean; adopted in derive.c (commit 988279f): order cells per slot,
+summaries per slot, O(log n) doc offsets. Pixel run of 988279f pending (loop3). Next: fix whatever the
+Pixel finds; ask the user to foreground Trough for android.touch/viewsurface/surface/vulkan; then
+Android accessibility for the derived view (AccessibilityNodeProvider: paragraphs as virtual text
+nodes, selection/scroll actions, vs TextView's node info), CONSTRUCTION.md stage 4.
 
 DECIDED (2026-10-28): the Java/native boundary is a bionic build of the same sources, loaded
 in-process (docs/BIONIC.md). All store oracles pass as bionic programs on the Pixel; android.jni
