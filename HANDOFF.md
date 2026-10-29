@@ -57,6 +57,14 @@ relayout others; anchoring holds). Next: IME editing in the derived view: an Inp
 document (paragraphs joined by '\n'), Enter splits (deriveInsert), backspace at start merges
 (deriveRemove), verified against BaseInputConnection over an Editable like android.ime; then
 CursorAnchorInfo from caret nodes; then the rope-backed order (O(log n) inserts).
+Done (2026-10-29 afternoon): IME over the derived document (INPUT.md "Document"): TextInput.Backend
+(Draft | DocumentText); android.docime on Pixel bundle 7daed7e9f654: 16 seeds, 4800 ops, 2064 queries,
+0 mismatches, final scenes equal. CursorAnchorInfo (INPUT.md "Cursor anchor", android.anchor; caret
+records now 20 bytes with baseline + RTL; deriveCursorAnchor). core.exec's urgent p90 check now
+measures up to 3 times (flaked once cold). Next: DerivedView as the editor (onCreateInputConnection
+over DocumentText, IME edits wake the render thread, taps -> updateSelection, requestCursorUpdates ->
+updateCursorAnchorInfo after frames), android.touch extended to type; then character bounds,
+marker for ranges/offscreen carets, rope-backed order.
 
 DECIDED (2026-10-28): the Java/native boundary is a bionic build of the same sources, loaded
 in-process (docs/BIONIC.md). All store oracles pass as bionic programs on the Pixel; android.jni
