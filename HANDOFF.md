@@ -26,6 +26,9 @@ core.atlas shadow-GPU oracle 6/6 mutants. Next: presenter integration (mask node
 Done: ps_frames_* (3-frame ring, GENERAL-layout atlas, partial uploads, in-order fence retirement);
 android.frames on Mali: 300 frames, 200 overlapped, 0 bad; fence-ignoring mutant gives 1527 bad pixels.
 Next: glyph-mask nodes + view scene through the frame ring to the swapchain (needs Trough visible).
+Done: mask nodes + deriveFrame: android.view renders 5 scrolled frames from derived masks/atlas/ring,
+0 bad pixels; masks rasterised once (73), later frames 0 uploads, 2-7 ms build. Next: swapchain
+presentation of the ring (visible), estimated heights for unmeasured paragraphs.
 
 DECIDED (2026-10-28): the Java/native boundary is a bionic build of the same sources, loaded
 in-process (docs/BIONIC.md). All store oracles pass as bionic programs on the Pixel; android.jni

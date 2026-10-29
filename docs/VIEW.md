@@ -42,6 +42,32 @@ Operator runs per step, the same in three runs on bundle `07ee550eef85`:
   trace showed that an early count mismatch was the oracle's own race (it snapshotted after
   the demand had started work), not the graph.
 
+## Derived frames
+
+`deriveFrame` turns the settled scene into a GPU frame, using only derived values and the
+fenced atlas:
+- every distinct glyph's **mask node** (face and glyph id as key, no dependencies) is demanded;
+  each is rasterised once by the platform on a worker, as a canonical blob;
+- each glyph is placed with `at_use`, keyed by the mask's blob handle, and new masks are
+  uploaded as rectangles;
+- the frame is submitted through the presenter's frame ring ([ATLAS.md](ATLAS.md)).
+
+`android.view` renders 5 viewports, scrolling through the document and back. Each frame must
+match the platform drawing the same scene glyphs. Bundle `2168390adcb1`:
+
+| frame | glyphs | mask settle | build | uploads | atlas hits (cumulative) | bad pixels |
+|---|---|---|---|---|---|---|
+| 1 (middle) | 1162 | 20.0 ms | 30.6 ms | 71 | 1091 | 0 |
+| 2 (+300 px) | 1215 | 0.4 ms | 4.2 ms | 0 | 2306 | 0 |
+| 3 (+900 px) | 1161 | 0.6 ms | 3.9 ms | 0 | 3467 | 0 |
+| 4 (+2400 px) | 1198 | 0.4 ms | 7.3 ms | 0 | 4665 | 0 |
+| 5 (middle again) | 1162 | 0.4 ms | 2.4 ms | 0 | 5827 | 0 |
+
+The max channel diff is 1 throughout. The corpus's 73 distinct glyphs are rasterised once
+(73 mask runs in total), and later frames only reuse resident masks. The frame wait shown in
+the receipt (18-94 ms) includes the oracle's full 1080x1400 readback, so it is not a
+presentation cost.
+
 ## Known costs and their workarounds
 
 - **Exact positions are expensive.** Scrolling to the middle lays out every paragraph above
@@ -53,6 +79,6 @@ Operator runs per step, the same in three runs on bundle `07ee550eef85`:
 - **Dynamic restarts.** The scene is dynamic, so after a height change above the viewport it
   re-asks for its visible layouts one by one (12 runs, about 14 ms). Fixes: batched needs, or
   hinting old dependencies that are already memoized.
-- **Rasterising and atlas packing** are done by the oracle here. They belong to the presenter
-  as glyph-mask nodes plus an atlas resource whose slots are leased until the GPU fence of
-  the frame that used them.
+- **Presentation:** frames are drawn offscreen and read back. The swapchain path
+  (`ps_present`) must take the frame ring and its atlas; `android.surface` needs Trough
+  visible to check it.

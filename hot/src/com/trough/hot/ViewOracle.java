@@ -84,6 +84,27 @@ final class ViewOracle {
             Map<String, Object> pixels = pixels(NativeCore.deriveBytes(d, -1));
             out.put("pixels", pixels);
             ok &= Boolean.TRUE.equals(pixels.get("ok"));
+            /* The derived frame: mask nodes, atlas residency and the frame ring, scrolling. */
+            int fo = NativeCore.deriveFrameOpen(d, VIEW_W, VIEW_H, 1024, 1024);
+            List<Object> frames = new ArrayList<>();
+            boolean framesOk = fo == 0;
+            int[] scrolls = {middle, middle + 300, middle + 900, middle + 2400, middle};
+            for (int k = 0; k < scrolls.length && framesOk; k++) {
+                NativeCore.deriveViewport(d, scrolls[k], VIEW_H);
+                NativeCore.deriveSettle(d);
+                double[] timing = new double[5];
+                byte[] got = NativeCore.deriveFrame(d, true, timing);
+                byte[] scene = NativeCore.deriveBytes(d, -1);
+                Map<String, Object> cmp = got == null ? Json.map("ok", false, "error", "no frame") : compare(got, reference(scene));
+                long[] st = NativeCore.deriveStats(d);
+                frames.add(Json.map("scroll", scrolls[k], "mask_settle_ms", timing[0], "build_ms", timing[1], "gpu_ms", timing[2],
+                    "glyphs", (long) timing[3], "uploads", (long) timing[4], "bad_pixels", cmp.get("bad_pixels"),
+                    "max_channel_diff", cmp.get("max_channel_diff"), "mask_runs", st[14], "atlas_hits", st[16], "atlas_evictions", st[17]));
+                framesOk &= Boolean.TRUE.equals(cmp.get("ok"));
+            }
+            out.put("frame_open", fo);
+            out.put("frames", frames);
+            ok &= framesOk;
             long[] s = NativeCore.deriveStats(d);
             out.put("error", s[3]);
             ok &= s[3] == 0;
@@ -169,6 +190,38 @@ final class ViewOracle {
         }
         out.putInt(0, count);
         return Arrays.copyOf(out.array(), out.position());
+    }
+
+    /** The platform drawing a scene's glyphs (black, at their rounded positions). */
+    static byte[] reference(byte[] scene) {
+        ByteBuffer b = ByteBuffer.wrap(scene);
+        int count = b.getInt();
+        Paint paint = new Paint();
+        paint.setAntiAlias(true);
+        paint.setTextSize(DeriveLayout.TEXT_SIZE);
+        paint.setColor(Color.BLACK);
+        Bitmap reference = Bitmap.createBitmap(VIEW_W, VIEW_H, Bitmap.Config.ARGB_8888);
+        Canvas rc = new Canvas(reference);
+        for (int k = 0; k < count; k++) {
+            int face = b.getInt(), id = b.getInt();
+            float fx = b.getFloat(), fy = b.getFloat();
+            rc.drawGlyphs(new int[]{id}, 0, new float[]{Math.round(fx), Math.round(fy)}, 0, 1, DeriveLayout.face(face), paint);
+        }
+        ByteBuffer rb = ByteBuffer.allocate(VIEW_W * VIEW_H * 4);
+        reference.copyPixelsToBuffer(rb);
+        reference.recycle();
+        return rb.array();
+    }
+    static Map<String, Object> compare(byte[] ours, byte[] ref) {
+        long bad = 0, ink = 0; int max = 0;
+        for (int p = 0; p < VIEW_W * VIEW_H; p++) {
+            int worst = 0;
+            for (int ch = 0; ch < 4; ch++) worst = Math.max(worst, Math.abs((ours[p * 4 + ch] & 255) - (ref[p * 4 + ch] & 255)));
+            if ((ref[p * 4 + 3] & 255) != 0) ink++;
+            max = Math.max(max, worst);
+            if (worst > 3) bad++;
+        }
+        return Json.map("ok", bad == 0 && ink > 0, "bad_pixels", bad, "max_channel_diff", max, "ink_pixels", ink);
     }
 
     /** The derived scene through the GPU renderer against the platform drawing the same glyphs. */

@@ -65,6 +65,29 @@ final class DeriveLayout {
         return id;
     }
 
+    /** One glyph's coverage mask, as the platform rasterises it in black at TEXT_SIZE:
+     * width, height, left, top (ints), then width*height coverage bytes. Empty glyphs are 0x0. */
+    static byte[] mask(int faceId, int glyph) {
+        Font font = face(faceId);
+        Paint p = PAINT.get();
+        p.setColor(android.graphics.Color.BLACK);
+        android.graphics.RectF b = new android.graphics.RectF();
+        font.getGlyphBounds(glyph, p, b);
+        java.nio.ByteBuffer out;
+        if (b.isEmpty()) { out = java.nio.ByteBuffer.allocate(16); out.putInt(0).putInt(0).putInt(0).putInt(0); return out.array(); }
+        int left = (int) Math.floor(b.left) - 2, top = (int) Math.floor(b.top) - 2;
+        int w = (int) Math.ceil(b.right) + 2 - left, h = (int) Math.ceil(b.bottom) + 2 - top;
+        android.graphics.Bitmap m = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ALPHA_8);
+        new android.graphics.Canvas(m).drawGlyphs(new int[]{glyph}, 0, new float[]{-left, -top}, 0, 1, font, p);
+        java.nio.ByteBuffer px = java.nio.ByteBuffer.allocate(m.getRowBytes() * h);
+        m.copyPixelsToBuffer(px);
+        m.recycle();
+        out = java.nio.ByteBuffer.allocate(16 + w * h);
+        out.putInt(w).putInt(h).putInt(left).putInt(top);
+        for (int y = 0; y < h; y++) out.put(px.array(), y * (px.capacity() / h), w);
+        return out.array();
+    }
+
     /** A Font object for a face id (for rasterising its glyphs). */
     static Font face(int id) { synchronized (FONTS) { return FACES.get(id); } }
 

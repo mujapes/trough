@@ -5,18 +5,27 @@
  * canonical blob. Java drives it through owner calls; no Java code sees jobs or the graph. */
 #define _POSIX_C_SOURCE 200809L
 #include "exec.h"
+#include "atlas.h"
+#include "scene.h"
 #include <jni.h>
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
+#include <time.h>
 
 #define CLASS(name) Java_com_trough_hot_NativeCore_##name
 
 typedef struct {
-    JavaVM *vm; jclass cls; jmethodID layout;
+    JavaVM *vm; jclass cls; jmethodID layout, mask;
+    tr_id op_mask;
+    /* The view's frames (deriveFrameOpen): GPU frame ring and atlas residency, used only by the
+     * thread that calls deriveFrame. */
+    ps_gpu *gpu; at_atlas atlas; at_cell *atlas_cells; uint32_t *atlas_index; int32_t atlas_pages[64];
+    uint32_t fw, fh; uint64_t frame_uploads, frame_hits;
     tr_world world; tr_cell *cells; tr_id driver, width, op, viewport, op_sum, op_scene; tr_id *text; int paragraphs;
     int levels; uint32_t scene;                       /* summary levels above paragraphs; the scene node */
-    atomic_ullong runs[3];                            /* operator invocations: layout, summary, scene */
+    atomic_ullong runs[4];                            /* operator invocations: layout, summary, scene, mask */
     dv_graph graph; dv_node *nodes; dv_block *blocks; uint32_t *table; dv_frame *path; uint32_t *node;
     bl_store blobs; bl_entry *entries; uint32_t *index;
     ex_exec ex;
@@ -53,6 +62,23 @@ static int layout_op(void *ctx, const dv_job *job, ex_out *out) {
         (*env)->DeleteLocalRef(env, r);
     } else out->value = 0;                            /* layout failed: a scalar error value */
     if (s) (*env)->DeleteLocalRef(env, s);
+    return 0;
+}
+
+/* Mask (face << 32 | glyph): the platform's coverage for one glyph. No dependencies: valid until
+ * the operator changes. */
+static int mask_op(void *ctx, const dv_job *job, ex_out *out) {
+    deriver *d = ctx;
+    atomic_fetch_add(&d->runs[3], 1);
+    JNIEnv *env;
+    if ((*d->vm)->GetEnv(d->vm, (void **)&env, JNI_VERSION_1_6) != JNI_OK) { out->value = 0; return 0; }
+    jbyteArray r = (*env)->CallStaticObjectMethod(env, d->cls, d->mask, (jint)(job->key >> 32), (jint)(job->key & 0xffffffffu));
+    if ((*env)->ExceptionCheck(env)) { (*env)->ExceptionClear(env); r = NULL; }
+    if (!r) { out->value = 0; return 0; }
+    jsize n = (*env)->GetArrayLength(env, r);
+    out->blob = malloc(n ? (size_t)n : 1);
+    if (out->blob) { (*env)->GetByteArrayRegion(env, r, 0, n, out->blob); out->blob_length = (size_t)n; }
+    (*env)->DeleteLocalRef(env, r);
     return 0;
 }
 
@@ -243,6 +269,8 @@ static void stats(void *arg, tr_world *w, dv_graph *g) {
     for (size_t k = 0; k < n; k++) { busy += t[k].end_ns - t[k].start_ns; wait += t[k].start_ns - t[k].queued_ns; }
     s[8] = (int64_t)busy; s[9] = (int64_t)wait; s[10] = (int64_t)n;
     for (int k = 0; k < 3; k++) s[11 + k] = (int64_t)atomic_load(&d->runs[k]);
+    s[14] = (int64_t)atomic_load(&d->runs[3]); s[15] = (int64_t)d->frame_uploads; s[16] = (int64_t)d->frame_hits;
+    s[17] = (int64_t)d->atlas.evictions; s[18] = (int64_t)d->atlas.refusals;
 }
 
 /* The newest trace records: (operator 0 layout / 1 summary / 2 scene, key, outcome, worker). */
@@ -259,6 +287,8 @@ static void trace_rows(void *arg, tr_world *w, dv_graph *g) {
 }
 
 static void destroy(deriver *d) {
+    if (d->gpu) ps_close(d->gpu);
+    free(d->atlas_cells); free(d->atlas_index);
     free(d->cells); free(d->text); free(d->nodes); free(d->blocks); free(d->table); free(d->path); free(d->node);
     free(d->entries); free(d->index); free(d);
 }
@@ -268,7 +298,7 @@ JNIEXPORT jlong JNICALL CLASS(deriveOpen)(JNIEnv *env, jclass c, jint workers, j
     if (paragraphs <= 0 || paragraphs > 100000 || workers <= 0 || workers > EX_WORKERS) return -1;
     deriver *d = calloc(1, sizeof *d);
     if (!d) return -1;
-    size_t n = (size_t)paragraphs, cellc = n + 8, nodec = n + n / (FAN - 1) + 16, blobc = 3 * n + 64;
+    size_t n = (size_t)paragraphs, cellc = n + 8, nodec = n + n / (FAN - 1) + 16 + 4096, blobc = 3 * n + 64 + 4096;   /* + masks */
     d->paragraphs = paragraphs;
     d->cells = calloc(cellc, sizeof *d->cells); d->text = calloc(n, sizeof *d->text);
     d->nodes = calloc(nodec, sizeof *d->nodes); d->blocks = calloc(nodec, sizeof *d->blocks);
@@ -283,10 +313,12 @@ JNIEXPORT jlong JNICALL CLASS(deriveOpen)(JNIEnv *env, jclass c, jint workers, j
     (*env)->GetJavaVM(env, &d->vm);
     d->cls = (*env)->NewGlobalRef(env, cls);
     d->layout = (*env)->GetStaticMethodID(env, cls, "layout", "(Ljava/lang/String;I)[B");
-    if (!d->layout) { (*env)->ExceptionClear(env); (*env)->DeleteGlobalRef(env, d->cls); destroy(d); return -3; }
+    d->mask = d->layout ? (*env)->GetStaticMethodID(env, cls, "mask", "(II)[B") : NULL;
+    if (!d->layout || !d->mask) { (*env)->ExceptionClear(env); (*env)->DeleteGlobalRef(env, d->cls); destroy(d); return -3; }
     tr_world_init(&d->world, d->cells, cellc);
     tr_create(&d->world, 1, &d->driver); tr_create(&d->world, 1, &d->op); tr_create(&d->world, 0, &d->width);
     tr_create(&d->world, 1, &d->op_sum); tr_create(&d->world, 1, &d->op_scene); tr_create(&d->world, 0, &d->viewport);
+    tr_create(&d->world, 1, &d->op_mask);
     d->levels = 1;
     while (count_at(d, d->levels - 1) > 1) d->levels++;  /* the top level has one node: the root */
     for (size_t i = 0; i < n; i++) tr_create(&d->world, 0, &d->text[i]);
@@ -302,6 +334,7 @@ JNIEXPORT jlong JNICALL CLASS(deriveOpen)(JNIEnv *env, jclass c, jint workers, j
     ex_register(&d->ex, d->op, layout_op, d);
     ex_register(&d->ex, d->op_sum, sum_op, d);
     ex_register(&d->ex, d->op_scene, scene_op, d);
+    ex_register(&d->ex, d->op_mask, mask_op, d);
     if (ex_start(&d->ex)) { (*env)->DeleteGlobalRef(env, d->cls); destroy(d); return -4; }
     return (jlong)(intptr_t)d;
 }
@@ -348,11 +381,11 @@ JNIEXPORT jbyteArray JNICALL CLASS(deriveBytes)(JNIEnv *env, jclass c, jlong h, 
 }
 JNIEXPORT jlongArray JNICALL CLASS(deriveStats)(JNIEnv *env, jclass c, jlong h) {
     (void)c; deriver *d = (deriver *)(intptr_t)h;
-    int64_t s[14] = {0};
+    int64_t s[19] = {0};
     call k = {d, 0, (const jchar *)(void *)s, 0, 0};
     ex_call(&d->ex, stats, &k);
-    jlongArray r = (*env)->NewLongArray(env, 14);
-    if (r) (*env)->SetLongArrayRegion(env, r, 0, 14, (const jlong *)s);
+    jlongArray r = (*env)->NewLongArray(env, 19);
+    if (r) (*env)->SetLongArrayRegion(env, r, 0, 19, (const jlong *)s);
     return r;
 }
 JNIEXPORT jlongArray JNICALL CLASS(deriveTrace)(JNIEnv *env, jclass c, jlong h) {
@@ -371,4 +404,122 @@ JNIEXPORT void JNICALL CLASS(deriveClose)(JNIEnv *env, jclass c, jlong h) {
     ex_stop(&d->ex);
     (*env)->DeleteGlobalRef(env, d->cls);
     destroy(d);
+}
+
+/* ---- the view's frames ---- */
+typedef struct { deriver *d; const unsigned char *scene; size_t n; uint32_t *nodes; size_t count; int64_t result; } masks_call;
+static void scene_copy(void *arg, tr_world *w, dv_graph *g) {
+    (void)w; copy *c = arg; uint64_t v; const void *p; size_t n;
+    if (dv_get(g, c->d->scene, &v) || !bl_is(v) || bl_get(&c->d->blobs, v, &p, &n)) return;
+    c->bytes = malloc(n ? n : 1);
+    if (c->bytes) { memcpy(c->bytes, p, n); c->length = n; c->ok = 1; }
+}
+/* Interns and demands the mask node of every glyph in the scene (once per distinct glyph). */
+static void demand_masks(void *arg, tr_world *w, dv_graph *g) {
+    (void)w; masks_call *m = arg; uint32_t count = be32(m->scene);
+    m->count = 0; m->result = 0;
+    for (uint32_t k = 0; k < count; k++) {
+        const unsigned char *q = m->scene + 4 + (size_t)k * 16;
+        uint32_t node;
+        if (dv_intern(g, m->d->op_mask, (uint64_t)be32(q) << 32 | be32(q + 4), &node)) { m->result = -1; return; }
+        m->nodes[k] = node;
+        if (!g->nodes[node].demand) { dv_demand(g, node); m->count++; }
+    }
+}
+typedef struct { deriver *d; const uint32_t *nodes; uint32_t count; uint64_t *handles; unsigned char **bytes; size_t *lengths; int ok; } mask_bytes;
+static void collect_masks(void *arg, tr_world *w, dv_graph *g) {
+    (void)w; mask_bytes *m = arg; m->ok = 1;
+    for (uint32_t k = 0; k < m->count; k++) {
+        uint64_t v; const void *p; size_t n;
+        if (dv_get(g, m->nodes[k], &v) || !bl_is(v) || bl_get(&m->d->blobs, v, &p, &n) || n < 16) { m->ok = 0; m->handles[k] = 0; continue; }
+        m->handles[k] = v;
+        m->bytes[k] = malloc(n); if (m->bytes[k]) memcpy(m->bytes[k], p, n); m->lengths[k] = n;
+    }
+}
+
+JNIEXPORT jint JNICALL CLASS(deriveFrameOpen)(JNIEnv *env, jclass c, jlong h, jint w, jint hh, jint aw, jint ah) {
+    (void)env; (void)c; deriver *d = (deriver *)(intptr_t)h;
+    char info[256];
+    size_t cells = (size_t)(aw / 16) * (ah / 16), index = 1; while (index < 2 * cells) index <<= 1;
+    if ((size_t)(aw / 256) * (ah / 256) > 64) return -1;
+    d->atlas_cells = calloc(cells, sizeof *d->atlas_cells); d->atlas_index = calloc(index, sizeof *d->atlas_index);
+    if (!d->atlas_cells || !d->atlas_index) return -2;
+    if (at_init(&d->atlas, (uint32_t)aw, (uint32_t)ah, 256, d->atlas_cells, cells, d->atlas_index, index, d->atlas_pages)) return -3;
+    int st = ps_open(&d->gpu, info, sizeof info);
+    if (!st) st = ps_frames_init(d->gpu, (uint32_t)w, (uint32_t)hh, (uint32_t)aw, (uint32_t)ah);
+    d->fw = (uint32_t)w; d->fh = (uint32_t)hh;
+    return st;
+}
+/* Builds and submits the frame for the current scene; with `pixels`, waits and returns them.
+ * timing: [mask settle ms, build ms, gpu wait ms, glyphs, new masks]. */
+JNIEXPORT jbyteArray JNICALL CLASS(deriveFrame)(JNIEnv *env, jclass c, jlong h, jboolean pixels, jdoubleArray timing) {
+    (void)c; deriver *d = (deriver *)(intptr_t)h;
+    struct timespec t0, t1, t2, t3;
+    copy sc = {d, -1, NULL, 0, 0};
+    ex_call(&d->ex, scene_copy, &sc);
+    if (!sc.ok || sc.length < 4) { free(sc.bytes); return NULL; }
+    uint32_t count = be32(sc.bytes);
+    uint32_t *nodes = malloc(sizeof *nodes * (count ? count : 1));
+    uint64_t *handles = calloc(count ? count : 1, sizeof *handles);
+    unsigned char **bytes = calloc(count ? count : 1, sizeof *bytes);
+    size_t *lengths = calloc(count ? count : 1, sizeof *lengths);
+    ps_glyph *glyphs = malloc(sizeof *glyphs * (count ? count : 1));
+    ps_upload *ups = malloc(sizeof *ups * (count ? count : 1));
+    unsigned char *staging = NULL; size_t staged = 0, cap = 0;
+    jbyteArray result = NULL;
+    double ms[5] = {0};
+    if (!nodes || !handles || !bytes || !lengths || !glyphs || !ups) goto done;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    masks_call mc = {d, sc.bytes, sc.length, nodes, 0, 0};
+    ex_call(&d->ex, demand_masks, &mc);
+    if (mc.result || !ex_settle(&d->ex)) goto done;
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    mask_bytes mb = {d, nodes, count, handles, bytes, lengths, 0};
+    ex_call(&d->ex, collect_masks, &mb);
+    if (!mb.ok) goto done;
+    size_t nglyph = 0, nup = 0;
+    for (uint32_t k = 0; k < count; k++) {
+        const unsigned char *q = sc.bytes + 4 + (size_t)k * 16, *m = bytes[k];
+        uint32_t w = be32(m), hh = be32(m + 4); int32_t left = (int32_t)be32(m + 8), top = (int32_t)be32(m + 12);
+        if (!w || !hh) continue;                       /* empty glyph */
+        at_rect r;
+        tr_status s = at_use(&d->atlas, handles[k], (uint16_t)w, (uint16_t)hh, &r);
+        if (s == TR_CAPACITY) continue;                /* refused: drawn next frame (counted) */
+        if (s == TR_STALE) {
+            if (staged + (size_t)w * hh > cap) {
+                cap = (staged + (size_t)w * hh) * 2 + 65536;
+                unsigned char *grown = realloc(staging, cap);
+                if (!grown) goto done;
+                staging = grown;
+            }
+            memcpy(staging + staged, m + 16, (size_t)w * hh);
+            ups[nup++] = (ps_upload){r.x, r.y, (uint16_t)w, (uint16_t)hh, (uint32_t)staged};
+            staged += (size_t)w * hh; d->frame_uploads++;
+        } else d->frame_hits++;
+        float x = floorf(bef(q + 8) + 0.5f) + (float)left, y = floorf(bef(q + 12) + 0.5f) + (float)top;
+        glyphs[nglyph++] = (ps_glyph){x, y, x + (float)w, y + (float)hh, r.x, r.y, 0, 0, -1e6f, -1e6f, 1e6f, 1e6f, 0, 0, 0, 1};
+    }
+    uint64_t number;
+    if (ps_frame_submit(d->gpu, ups, nup, staging, staged, NULL, 0, glyphs, nglyph, &number)) goto done;
+    at_submit(&d->atlas);
+    clock_gettime(CLOCK_MONOTONIC, &t2);
+    if (pixels) {
+        if (ps_frames_wait(d->gpu, number)) goto done;
+        size_t bytes_px = (size_t)d->fw * d->fh * 4;
+        unsigned char *rgba = malloc(bytes_px);
+        if (rgba && !ps_frame_pixels(d->gpu, number, rgba) && (result = (*env)->NewByteArray(env, (jsize)bytes_px)))
+            (*env)->SetByteArrayRegion(env, result, 0, (jsize)bytes_px, (const jbyte *)rgba);
+        free(rgba);
+    }
+    at_retire(&d->atlas, ps_frames_retired(d->gpu));
+    clock_gettime(CLOCK_MONOTONIC, &t3);
+    ms[0] = (t1.tv_sec - t0.tv_sec) * 1e3 + (t1.tv_nsec - t0.tv_nsec) / 1e6;
+    ms[1] = (t2.tv_sec - t1.tv_sec) * 1e3 + (t2.tv_nsec - t1.tv_nsec) / 1e6;
+    ms[2] = (t3.tv_sec - t2.tv_sec) * 1e3 + (t3.tv_nsec - t2.tv_nsec) / 1e6;
+    ms[3] = (double)nglyph; ms[4] = (double)nup;
+done:
+    if (timing) (*env)->SetDoubleArrayRegion(env, timing, 0, 5, ms);
+    for (uint32_t k = 0; bytes && k < count; k++) free(bytes[k]);
+    free(sc.bytes); free(nodes); free(handles); free(bytes); free(lengths); free(glyphs); free(ups); free(staging);
+    return result;
 }
