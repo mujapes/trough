@@ -291,10 +291,12 @@ tr_status dv_poll_levels(dv_graph *g, dv_job *jobs, size_t capacity, const size_
     int blocked = 0;
     tr_status error = TR_OK;
     admit a = {0, capacity, count, {0}, limits};
+    g->unsettled = DV_LEVELS;
     for (a.level = 0; a.level < DV_LEVELS; a.level++)
         for (uint32_t i = g->root_head; i != NONE; i = g->nodes[i].root_next) {
             if (!g->nodes[i].demand_at[a.level]) continue;
-            if (walk(g, i, jobs, &a, &blocked, &error) == WALK_ERROR) return error;
+            if (walk(g, i, jobs, &a, &blocked, &error) == WALK_ERROR) { g->unsettled = 0; return error; }
+            if (g->unsettled == DV_LEVELS && !clean(&g->nodes[i], g->world->publication)) g->unsettled = a.level;
         }
     *progress = *count ? DV_READY : blocked ? DV_WAITING : DV_IDLE;
     return TR_OK;
@@ -389,6 +391,7 @@ int dv_wanted(const dv_graph *g, const dv_job *job) {
     const dv_node *n = live(g, job->node);
     return n && n->generation == job->generation && n->sweep == g->sweep;
 }
+uint32_t dv_unsettled(const dv_graph *g) { return g->unsettled; }
 uint32_t dv_job_level(const dv_graph *g, const dv_job *job) {
     return dv_wanted(g, job) ? g->nodes[job->node].level : DV_LEVELS;
 }

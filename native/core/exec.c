@@ -195,7 +195,7 @@ static void *owner(void *arg) {
         while (e->calls) {
             ex_call_t *c = e->calls;
             e->calls = c->next; if (!e->calls) e->calls_tail = NULL;
-            e->idle = 0;
+            e->idle = 0; memset(e->settled_at, 0, sizeof e->settled_at);   /* a call may demand */
             pthread_mutex_unlock(&e->lock);
             c->fn(c->arg, e->world, e->graph);
             pthread_mutex_lock(&e->lock);
@@ -204,6 +204,11 @@ static void *owner(void *arg) {
         }
         for (int i = 0; i < EX_SLOTS; i++) if (e->slots[i].state == EX_DONE) { complete(e, &e->slots[i]); worked = 1; }
         dv_progress progress = e->error ? DV_IDLE : schedule(e);
+        if (!e->error) {
+            uint32_t u = dv_unsettled(e->graph); int moved = 0;
+            for (uint32_t l = 0; l < u; l++) if (e->settled_at[l] != e->world->publication) { e->settled_at[l] = e->world->publication; moved = 1; }
+            if (moved) pthread_cond_broadcast(&e->settled);
+        }
         int busy = 0;
         for (int i = 0; i < EX_SLOTS; i++) if (e->slots[i].state != EX_FREE) busy = 1;
         if (progress == DV_IDLE && !busy && !e->calls) {
@@ -255,6 +260,17 @@ uint64_t ex_settle(ex_exec *e) {
     pthread_mutex_lock(&e->lock);
     while (!e->error && !(e->idle && e->idle_at >= target && !e->calls)) pthread_cond_wait(&e->settled, &e->lock);
     uint64_t at = e->error ? 0 : e->idle_at;
+    pthread_mutex_unlock(&e->lock);
+    return at;
+}
+
+uint64_t ex_settle_at(ex_exec *e, uint32_t level) {
+    if (level >= DV_LEVELS) return ex_settle(e);
+    uint64_t target;
+    ex_call(e, read_publication, &target);
+    pthread_mutex_lock(&e->lock);
+    while (!e->error && !(e->settled_at[level] >= target && !e->calls)) pthread_cond_wait(&e->settled, &e->lock);
+    uint64_t at = e->error ? 0 : e->settled_at[level];
     pthread_mutex_unlock(&e->lock);
     return at;
 }

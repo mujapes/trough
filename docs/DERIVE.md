@@ -54,6 +54,10 @@ records the most urgent level that reached it in the sweep; `dv_job_level` reads
 so a queued job follows its demand (promoted by an urgent root, demoted when that root goes,
 `DV_LEVELS` when unwanted).
 
+`dv_unsettled` is the most urgent level that still has a demanded root not verified by the last
+poll. Every level more urgent than that one is settled at the poll's publication. This lets the
+executor settle the urgent roots without waiting for background work.
+
 `dv_poll_levels` takes a per-level limit on new jobs. A refused node stays to recompute and is
 reported blocked, so the poll returns `DV_WAITING` and a later poll issues it. Every root is
 still walked after capacity or a limit runs out. Stopping early, as the first `dv_poll` did,

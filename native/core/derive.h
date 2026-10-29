@@ -57,6 +57,7 @@ typedef struct {
     dv_frame *path;                               /* walk stack, node_capacity frames */
     uint64_t next_ticket, sweep, computations;
     uint32_t root_head, root_tail;                /* demanded nodes, so a poll costs roots, not nodes */
+    uint32_t unsettled;                           /* see dv_unsettled */
     size_t interned, tombstones;
     void (*retain)(void *, uint64_t), (*release)(void *, uint64_t); void *hooks;
     tr_id static_ops[16]; size_t nstatic;
@@ -111,6 +112,9 @@ int dv_wanted(const dv_graph *, const dv_job *);
 /* The most urgent level that reached the job's node in the last poll (DV_LEVELS: none). A
  * running background job becomes urgent when an urgent root comes to need it. */
 uint32_t dv_job_level(const dv_graph *, const dv_job *);
+/* The most urgent level with a demanded root that was not verified by the last poll (DV_LEVELS:
+ * every root was). Levels above it are settled at the publication the poll ran at. */
+uint32_t dv_unsettled(const dv_graph *);
 /* The node's value, only when verified at the current publication (TR_STALE otherwise). */
 tr_status dv_get(const dv_graph *, uint32_t node, uint64_t *value);
 /* Drops a node and its memo. Refused (TR_INVALID) while demanded or running. Dependants see

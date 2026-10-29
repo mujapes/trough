@@ -356,16 +356,16 @@ static void levels(void) {
     size_t none[DV_LEVELS] = {JOBS, JOBS, 0}, all[DV_LEVELS] = {JOBS, JOBS, JOBS};
     prepare(jobs, JOBS, 0);
     OK(dv_poll_levels(&g, jobs, JOBS, none, &n, &pr));
-    CHECK(n == 2 && jobs[0].node == c && jobs[1].node == b && pr == DV_READY);
+    CHECK(n == 2 && jobs[0].node == c && jobs[1].node == b && pr == DV_READY && dv_unsettled(&g) == DV_URGENT);
     OK(run(&jobs[0])); OK(run(&jobs[1]));
     prepare(jobs, JOBS, 0);
     OK(dv_poll_levels(&g, jobs, JOBS, none, &n, &pr));
-    CHECK(n == 0 && pr == DV_WAITING);
+    CHECK(n == 0 && pr == DV_WAITING && dv_unsettled(&g) == DV_BACKGROUND);   /* urgent and visible settled */
     OK(dv_poll_levels(&g, jobs, JOBS, all, &n, &pr));
     CHECK(n == 1 && jobs[0].node == a);
     OK(run(&jobs[0]));
     prepare(jobs, JOBS, 0);
-    OK(dv_poll(&g, jobs, JOBS, &n, &pr)); CHECK(pr == DV_IDLE);
+    OK(dv_poll(&g, jobs, JOBS, &n, &pr)); CHECK(pr == DV_IDLE && dv_unsettled(&g) == DV_LEVELS);
 
     /* Capacity runs out at an earlier root: a later root's running job is still wanted. */
     set(cell[1], 101); set(cell[2], 101);

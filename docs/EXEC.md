@@ -26,6 +26,9 @@ the "bounded execution / traces" step of stage 3 ([CONSTRUCTION.md](CONSTRUCTION
 - **Settling:** `ex_settle` waits until every demanded node is verified at the publication
   current when it was called (or later), with no job running. `on_settled` runs on the owner
   thread once per new settled publication, in increasing order. It must not call `ex_call`.
+- **Settling by level:** `ex_settle_at(level)` returns once the roots at that level and every
+  more urgent one are verified (`dv_unsettled`), while background work may still run. Every
+  call resets the per-level marks, because demand changes do not move the publication.
 - **Errors are sticky:** a graph capacity or invalid-result error, or a job for an
   unregistered operator, stops scheduling, and `ex_settle` returns 0.
 - **Tracing:** every job leaves a record in a 1024-entry ring. It holds the node, operator,
@@ -57,6 +60,10 @@ the "bounded execution / traces" step of stage 3 ([CONSTRUCTION.md](CONSTRUCTION
   thresholds are p90 < 1.5 ms and < 10 ms, because the host preempts the VM's vCPUs and causes
   single 2-4 ms outliers. 3 of 3 mutants caught (no background cap, first-ready-slot pick,
   levels frozen at issue). TSan and ASan/UBSan clean.
+- **Settle by level:** the executor runs 64 background 5 ms jobs on 4 workers. A 20 ms urgent
+  job demanded 2 ms in settles in 20.2 ms with 52 background jobs left, and everything
+  settles in 112 ms. Mutants are caught: no per-call reset (it returned before the job ran)
+  and `ex_settle_at` waiting for everything.
 - **Unregistered operator:** a sticky `TR_INVALID`; settle returns 0 instead of hanging.
 - **Scaling:** 96 independent 2 ms jobs. On the VM: 1 worker 193 ms, 2 97, 4 54, 8 31.
   This measures scheduling overhead, not energy.

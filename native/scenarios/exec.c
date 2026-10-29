@@ -294,6 +294,34 @@ static void visible_flood(double *urgent_max, double *promoted) {
     CHECK(*promoted >= 0);
 }
 
+/* ex_settle_at(DV_URGENT) returns once the urgent root is verified, with background work
+ * still running; ex_settle waits for all of it. */
+/* 20 ms, so a settle that returns before the job ran cannot be covered by the race to check. */
+static int urgent20_op(void *ctx, const dv_job *job, ex_out *out) { (void)ctx; if (spin(job, 20000)) return 1; out->value = job->key + 1; return 0; }
+static void urgent_value(void *arg, tr_world *w, dv_graph *g) { (void)w; uint64_t v; *(int *)arg = dv_get(g, urgent_node[0], &v) == TR_OK && v == 1; }
+static void bg_left(void *arg, tr_world *w, dv_graph *g) {
+    (void)w; int *n = arg; *n = 0;
+    for (uint64_t k = 0; k < BG; k++) { uint32_t x; uint64_t v; OK(dv_intern(g, op[7], k, &x)); *n += dv_get(g, x, &v) != TR_OK; }
+}
+static void settle_levels(double *urgent_ms, int *left, double *all_ms) {
+    setup(4);
+    OK(ex_register(&ex, op[6], urgent20_op, NULL)); OK(ex_register(&ex, op[7], bg_op, NULL));
+    OK(ex_start(&ex));
+    ex_call(&ex, demand_bg, NULL);
+    struct timespec pause = {0, 2000000}; nanosleep(&pause, NULL);
+    int i = 0, ok = 0;
+    uint64_t t0 = now_ns();
+    ex_call(&ex, demand_urgent, &i);
+    CHECK(ex_settle_at(&ex, DV_URGENT));
+    *urgent_ms = (now_ns() - t0) / 1e6;
+    ex_call(&ex, urgent_value, &ok); CHECK(ok);
+    ex_call(&ex, bg_left, left);
+    CHECK(ex_settle_at(&ex, DV_BACKGROUND));
+    *all_ms = (now_ns() - t0) / 1e6;
+    int none; ex_call(&ex, bg_left, &none); CHECK(none == 0);
+    ex_stop(&ex);
+}
+
 /* ---- 4: unregistered operator ---- */
 static void demand_unknown(void *arg, tr_world *w, dv_graph *g) { (void)arg; (void)w; uint32_t n; OK(dv_intern(g, op[6], 0, &n)); OK(dv_demand(g, n)); }
 static void unregistered(void) {
@@ -315,6 +343,10 @@ int main(void) {
     /* A background job is 5 ms; urgent ones do not wait for one. p90, because the VM's vCPUs
      * are themselves preempted by the host now and then (single 2-4 ms outliers). */
     CHECK(kept.wait_p90 < 1.5);
+    double urgent_ms, all_ms; int left;
+    settle_levels(&urgent_ms, &left, &all_ms);
+    CHECK(left > BG / 2 && urgent_ms >= 20 && urgent_ms < all_ms / 3);
+    printf("ok settle by level: the urgent root (a 20 ms job) settles in %.3f ms with %d of %d background jobs left; all in %.0f ms\n", urgent_ms, left, BG, all_ms);
     double flood_max, promoted;
     visible_flood(&flood_max, &promoted);
     CHECK(flood_max < 10 && promoted < 10);     /* about one running job, not the 11 queued ahead (~14 ms) */

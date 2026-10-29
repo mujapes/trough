@@ -50,6 +50,7 @@ typedef struct {
     ex_call_t *calls, *calls_tail;
     int stop, idle;                  /* idle: verified at `idle_at` with nothing running */
     uint64_t idle_at;
+    uint64_t settled_at[DV_LEVELS];  /* levels <= l verified at this publication (ex_settle_at) */
     tr_status error;                 /* sticky: a graph call failed (e.g. TR_CAPACITY) */
     ex_trace trace[EX_TRACE]; uint64_t traced;
     uint64_t jobs, cancelled, stale, issued;
@@ -80,6 +81,8 @@ void ex_call(ex_exec *, void (*fn)(void *, tr_world *, dv_graph *), void *arg);
 /* Waits until every demanded node is verified at a publication >= the one current when called
  * and no job runs. Returns that publication, or 0 after a sticky error (ex->error). */
 uint64_t ex_settle(ex_exec *);
+/* ex_settle for the roots at levels <= level only: background work may still run. */
+uint64_t ex_settle_at(ex_exec *, uint32_t level);
 void ex_stop(ex_exec *);
 
 /* For operators: the job's value for ref (0 when the job was not given it), recording the
