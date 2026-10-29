@@ -131,9 +131,30 @@ without touch input; the paragraph count grows by one; the caret is at the start
 paragraph; exactly one selection report and at least one CursorAnchorInfo report; and the
 scene equals the reference for the edited corpus. Needs Trough visible.
 
+## Keys
+
+2026-10-29. Hardware keyboards, and IMEs that send key events (`KEYCODE_DEL`, Enter) through
+`BaseInputConnection.sendKeyEvent`, reach `DerivedView.onKeyDown`/`onKeyUp`. `DocumentKeys` runs
+the platform's own `TextKeyListener`, the one EditText uses for this inputType (sentence caps,
+no autotext). It runs on an Editable window of the document: the paragraphs holding the
+selection, one more on each side, and further back over empty paragraphs (at most 64) so the
+caps rules see the preceding sentence. The listener's change to the window becomes one
+replacement in the document. The composing region survives a key that only moves the
+selection; a key that changes text clears it (not mapped yet).
+
+Arrow, Home/End and Page keys are not handled yet: they need the view's Layout, through
+ArrowKeyMovementMethod's rules. Meta state held as spans (sticky shift) does not outlive one
+key, because the window is rebuilt for each key.
+
+Evidence: `android.keys` (`KeysOracle.java`) runs 12 seeds of 150 steps against an EditText
+with the same inputType. The steps are random KeyEvents (backspace and forward delete over
+emoji modifier and ZWJ sequences, flags, keycaps and combining marks; Enter; letters with and
+without shift after sentence ends; space, period and digits) and selection changes. After every
+event the joined document and the selection must match.
+
 ## Not yet built
 
 - The view becomes the native presenter's surface view. Its touch handling, focus and
   `showSoftInput` belong to the interaction layer.
-- `sendKeyEvent` for hardware keys, plus clipboard, extracted text and accessibility. Bidi
-  and grapheme-aware cursor movement belong to the text layout layer.
+- Clipboard and extracted text. Arrow-key movement (bidi- and grapheme-aware) belongs to the
+  text layout layer.

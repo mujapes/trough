@@ -32,7 +32,7 @@ final class Development implements AutoCloseable, ScenarioProtocol.Handler {
         all.add("core.processes"); all.add("build.native");
         if(new File(bundle,"lib/libtrough-android.so").isFile()) {
             for(String s:STORE) all.add("android."+s);
-            all.add("android.jni"); all.add("android.ime"); all.add("android.editor"); all.add("android.vulkan"); all.add("android.scene"); all.add("android.glyphs"); all.add("android.text"); all.add("android.surface"); all.add("android.layout"); all.add("android.derive"); all.add("android.view"); all.add("android.frames"); all.add("android.viewsurface"); all.add("android.touch"); all.add("android.caret"); all.add("android.selection"); all.add("android.paragraphs"); all.add("android.docime"); all.add("android.anchor"); all.add("android.access");
+            all.add("android.jni"); all.add("android.ime"); all.add("android.editor"); all.add("android.vulkan"); all.add("android.scene"); all.add("android.glyphs"); all.add("android.text"); all.add("android.surface"); all.add("android.layout"); all.add("android.derive"); all.add("android.view"); all.add("android.frames"); all.add("android.viewsurface"); all.add("android.touch"); all.add("android.caret"); all.add("android.selection"); all.add("android.paragraphs"); all.add("android.docime"); all.add("android.anchor"); all.add("android.access"); all.add("android.keys");
             all.add("android.retire.setup"); all.add("android.retire.check");
         }
         return all;
@@ -78,6 +78,14 @@ final class Development implements AutoCloseable, ScenarioProtocol.Handler {
         }
         if("android.retire.setup".equals(name)) return Retirement.setup(activity,bundle);
         if("android.retire.check".equals(name)) return Retirement.check(activity,bundle);
+        if("android.keys".equals(name)) {
+            NativeCore.load(bundle);
+            final FutureTask<Map<String,Object>> keys=new FutureTask<>(new Callable<Map<String,Object>>() {
+                public Map<String,Object> call() throws Exception { return KeysOracle.run(activity); }
+            });
+            activity.runOnUiThread(keys);
+            try { return keys.get(100,TimeUnit.SECONDS); } finally { keys.cancel(false); }
+        }
         if("android.access".equals(name)) {
             NativeCore.load(bundle);
             final FutureTask<Map<String,Object>> access=new FutureTask<>(new Callable<Map<String,Object>>() {

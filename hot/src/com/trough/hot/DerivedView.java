@@ -52,6 +52,7 @@ final class DerivedView extends SurfaceView implements SurfaceHolder.Callback {
     volatile Frames observer;
     volatile int openStatus = Integer.MIN_VALUE;
     final DocumentText doc;
+    private final DocumentKeys keys;
     private boolean contentDirty;             /* guarded by lock: an edit not yet drawn */
     private volatile boolean cursorMonitor, cursorImmediate;
     private final long[] reported = {-2, -2, -2, -2};   /* UI thread: last updateSelection */
@@ -68,6 +69,7 @@ final class DerivedView extends SurfaceView implements SurfaceHolder.Callback {
         setFocusable(true);
         setFocusableInTouchMode(true);
         doc = new DocumentText(deriver);
+        keys = new DocumentKeys(deriver, doc);
         getHolder().addCallback(this);
     }
 
@@ -97,6 +99,15 @@ final class DerivedView extends SurfaceView implements SurfaceHolder.Callback {
     private InputMethodManager imm() { return (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE); }
 
     @Override public boolean onCheckIsTextEditor() { return true; }
+    /* Keys (docs/INPUT.md "Keys"): hardware keyboards and IMEs' sendKeyEvent land here. */
+    @Override public boolean onKeyDown(int keyCode, android.view.KeyEvent event) {
+        if (keys.down(this, keyCode, event)) { contentChanged(); reportSelection(); return true; }
+        return super.onKeyDown(keyCode, event);
+    }
+    @Override public boolean onKeyUp(int keyCode, android.view.KeyEvent event) {
+        if (keys.up(this, keyCode, event)) { contentChanged(); reportSelection(); return true; }
+        return super.onKeyUp(keyCode, event);
+    }
     @Override public InputConnection onCreateInputConnection(EditorInfo out) {
         out.inputType = InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES;
         out.imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN | EditorInfo.IME_ACTION_NONE;
