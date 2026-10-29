@@ -2,7 +2,6 @@ package com.trough.hot;
 
 import android.app.Activity;
 import android.os.SystemClock;
-import android.text.InputType;
 import android.view.KeyEvent;
 import android.widget.EditText;
 import java.util.*;
@@ -10,7 +9,8 @@ import java.util.*;
 /** android.keys: key events on the derived document (docs/INPUT.md "Keys") against an EditText
  * with the same inputType holding the joined text. The same random KeyEvents (backspace and
  * forward delete over emoji sequences, flags, keycaps and combining marks; Enter; letters with
- * and without shift after sentence ends; space, period, digits) and selection changes go to
+ * and without shift after sentence ends; space, period, digits; arrows and Home/End, with and
+ * without shift, through bidi text and across paragraphs) and selection changes go to
  * both: DerivedView.onKeyDown/onKeyUp and EditText.onKeyDown/onKeyUp. After every event the
  * joined document and the selection must equal the EditText's. Runs on the UI thread. */
 final class KeysOracle {
@@ -20,8 +20,10 @@ final class KeysOracle {
         List<Object> mismatches = new ArrayList<>();
         int seeds = 12, steps = 150, events = 0, maxParagraphs = 0;
         int[] codes = {KeyEvent.KEYCODE_DEL, KeyEvent.KEYCODE_FORWARD_DEL, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_SPACE, KeyEvent.KEYCODE_PERIOD,
-            KeyEvent.KEYCODE_A, KeyEvent.KEYCODE_B, KeyEvent.KEYCODE_Z, KeyEvent.KEYCODE_1, KeyEvent.KEYCODE_COMMA};
-        int[] weights = {34, 8, 8, 8, 6, 12, 8, 6, 5, 5};
+            KeyEvent.KEYCODE_A, KeyEvent.KEYCODE_B, KeyEvent.KEYCODE_Z, KeyEvent.KEYCODE_1, KeyEvent.KEYCODE_COMMA,
+            KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN,
+            KeyEvent.KEYCODE_MOVE_HOME, KeyEvent.KEYCODE_MOVE_END};
+        int[] weights = {22, 6, 6, 6, 5, 9, 6, 5, 4, 3, 8, 8, 4, 4, 2, 2};
         for (int seed = 1; seed <= seeds; seed++) {
             long d = NativeCore.deriveOpen(1, 60);
             if (d < 0) return Json.map("ok", false, "error", "deriveOpen " + d);
@@ -30,9 +32,9 @@ final class KeysOracle {
                 for (int i = 0; i < 60 - START.length; i++) NativeCore.deriveRemove(d, START.length);
                 for (int i = 0; i < START.length; i++) NativeCore.deriveText(d, i, START[i]);
                 DerivedView view = new DerivedView(activity, d);
-                EditText ref = new EditText(activity);
-                ref.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+                EditText ref = DocumentKeys.laidOut(activity);      /* laid out: arrow keys need a Layout */
                 ref.setText(String.join("\n", START));
+                DocumentKeys.layout(ref, ViewOracle.WIDTH);
                 Random r = new Random(seed);
                 Deque<String> recent = new ArrayDeque<>();
                 String diff = null;
@@ -55,6 +57,7 @@ final class KeysOracle {
                         KeyEvent down = new KeyEvent(t, t, KeyEvent.ACTION_DOWN, code, 0, meta), up = new KeyEvent(t, t + 1, KeyEvent.ACTION_UP, code, 0, meta);
                         boolean x = ref.onKeyDown(code, down), y = view.onKeyDown(code, down);
                         ref.onKeyUp(code, up); view.onKeyUp(code, up);
+                        DocumentKeys.layout(ref, ViewOracle.WIDTH);   /* the reference's layout follows its edits */
                         op = KeyEvent.keyCodeToString(code) + (meta != 0 ? "+shift" : "");
                         if (x != y) diff = "handled " + x + " vs " + y;
                         events++;

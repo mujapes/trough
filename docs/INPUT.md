@@ -142,14 +142,18 @@ caps rules see the preceding sentence. The listener's change to the window becom
 replacement in the document. The composing region survives a key that only moves the
 selection; a key that changes text clears it (not mapped yet).
 
-Arrow, Home/End and Page keys are not handled yet: they need the view's Layout, through
-ArrowKeyMovementMethod's rules. Meta state held as spans (sticky shift) does not outlive one
+Movement keys (arrows, Home/End, Page) run the platform's `ArrowKeyMovementMethod` on a scratch
+EditText holding the window. It is laid out as the derived paragraphs are: same width, text
+size, no font padding, high-quality breaking, no hyphenation. `android.access` checks that
+those lines equal TextLayout's. So visual (bidi) left/right, line up/down and line edges follow
+the platform. Page keys move within the window only, which is not yet a viewport page. Meta state held as spans (sticky shift) does not outlive one
 key, because the window is rebuilt for each key.
 
 Evidence: `android.keys` (`KeysOracle.java`) runs 12 seeds of 150 steps against an EditText
-with the same inputType. The steps are random KeyEvents (backspace and forward delete over
-emoji modifier and ZWJ sequences, flags, keycaps and combining marks; Enter; letters with and
-without shift after sentence ends; space, period and digits) and selection changes. After every
+with the same inputType and layout settings, laid out again after each key. The steps are
+random KeyEvents (backspace and forward delete over emoji modifier and ZWJ sequences, flags,
+keycaps and combining marks; Enter; letters with and without shift after sentence ends; space,
+period and digits; arrows and Home/End, with and without shift) and selection changes. After every
 event the joined document and the selection must match.
 
 ## Not yet built

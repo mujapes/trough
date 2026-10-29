@@ -3,7 +3,14 @@ package com.trough.hot;
 import android.text.Editable;
 import android.text.Selection;
 import android.text.SpannableStringBuilder;
+import android.graphics.text.LineBreaker;
+import android.text.InputType;
+import android.text.Layout;
+import android.text.Spannable;
+import android.text.method.ArrowKeyMovementMethod;
 import android.text.method.KeyListener;
+import android.util.TypedValue;
+import android.widget.EditText;
 import android.text.method.TextKeyListener;
 import android.view.KeyEvent;
 import android.view.View;
@@ -14,14 +21,40 @@ import android.view.View;
  * runs on an Editable window of the document: the paragraphs holding the selection, one more on
  * each side, and further back over empty paragraphs so caps rules see the preceding sentence.
  * Its change to the window becomes one replacement in the document; paragraphs outside the
- * window are untouched. Arrow keys are not handled yet (they need the view's Layout). */
+ * window are untouched. Movement keys (arrows, Home/End, Page) run the platform's
+ * ArrowKeyMovementMethod on a scratch EditText holding the window, laid out exactly as the
+ * derived paragraphs are (same width, text size and line breaking: android.access checks the
+ * lines are equal), so visual bidi movement and line moves follow the platform. */
 final class DocumentKeys {
     private static final int CONTEXT = 64;           /* empty paragraphs looked back over at most */
     private final long deriver;
     private final DocumentText doc;
     private final KeyListener listener = TextKeyListener.getInstance(false, TextKeyListener.Capitalize.SENTENCES);
 
+    private EditText scratch;
+
     DocumentKeys(long deriver, DocumentText doc) { this.deriver = deriver; this.doc = doc; }
+
+    /** An EditText laid out like the derived view's paragraphs (AccessOracle.reference's settings). */
+    static EditText laidOut(android.content.Context context) {
+        EditText e = new EditText(context);
+        e.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        e.setTextSize(TypedValue.COMPLEX_UNIT_PX, DeriveLayout.TEXT_SIZE);
+        e.setPadding(0, 0, 0, 0);
+        e.setIncludeFontPadding(false);
+        e.setBreakStrategy(LineBreaker.BREAK_STRATEGY_HIGH_QUALITY);
+        e.setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE);
+        return e;
+    }
+    static void layout(EditText e, int width) {
+        e.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+        e.layout(0, 0, width, e.getMeasuredHeight());
+    }
+    private static boolean movement(int keyCode) {
+        return keyCode == KeyEvent.KEYCODE_DPAD_LEFT || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT || keyCode == KeyEvent.KEYCODE_DPAD_UP
+            || keyCode == KeyEvent.KEYCODE_DPAD_DOWN || keyCode == KeyEvent.KEYCODE_MOVE_HOME || keyCode == KeyEvent.KEYCODE_MOVE_END
+            || keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_PAGE_DOWN;
+    }
 
     /** A window of the document: its text, where it starts, and the selection within it. */
     private static final class Window { Editable text; int start; String before; }
@@ -47,12 +80,20 @@ final class DocumentKeys {
     boolean up(View view, int keyCode, KeyEvent event) { return run(view, keyCode, event, false); }
 
     private boolean run(View view, int keyCode, KeyEvent event, boolean down) {
-        if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT || keyCode == KeyEvent.KEYCODE_DPAD_UP
-                || keyCode == KeyEvent.KEYCODE_DPAD_DOWN || keyCode == KeyEvent.KEYCODE_MOVE_HOME || keyCode == KeyEvent.KEYCODE_MOVE_END
-                || keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_PAGE_DOWN) return false;
         long[] s = doc.state();
         Window w = window(s);
-        boolean handled = down ? listener.onKeyDown(view, w.text, keyCode, event) : listener.onKeyUp(view, w.text, keyCode, event);
+        boolean handled;
+        if (movement(keyCode)) {
+            if (scratch == null) scratch = laidOut(view.getContext());
+            long[] visible = NativeCore.deriveVisible(deriver);
+            scratch.setText(w.text);
+            layout(scratch, visible != null && visible.length > 0 ? (int) visible[0] : ViewOracle.WIDTH);
+            Spannable t = (Spannable) scratch.getText();
+            Selection.setSelection(t, Selection.getSelectionStart(w.text), Selection.getSelectionEnd(w.text));
+            ArrowKeyMovementMethod m = (ArrowKeyMovementMethod) ArrowKeyMovementMethod.getInstance();
+            handled = down ? m.onKeyDown(scratch, t, keyCode, event) : m.onKeyUp(scratch, t, keyCode, event);
+            w.text = (Editable) t;
+        } else handled = down ? listener.onKeyDown(view, w.text, keyCode, event) : listener.onKeyUp(view, w.text, keyCode, event);
         String after = w.text.toString();
         int sa = Selection.getSelectionStart(w.text), sb = Selection.getSelectionEnd(w.text);
         if (after.equals(w.before) && sa == s[1] - w.start && sb == s[2] - w.start) return handled;
