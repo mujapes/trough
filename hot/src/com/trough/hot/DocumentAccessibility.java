@@ -95,12 +95,13 @@ final class DocumentAccessibility extends AccessibilityNodeProvider {
         info.addAction(accessibilityFocus == virtualId ? AccessibilityNodeInfo.AccessibilityAction.ACTION_CLEAR_ACCESSIBILITY_FOCUS
             : AccessibilityNodeInfo.AccessibilityAction.ACTION_ACCESSIBILITY_FOCUS);
         info.setAccessibilityFocused(accessibilityFocus == virtualId);
+        /* As ExploreByTouchHelper: parent bounds unclipped; screen bounds clipped to what the host shows. */
         Rect r = new Rect(0, (int) at.top, host.getWidth() > 0 ? host.getWidth() : width[0], (int) (at.top + at.height));
-        if (!r.intersect(0, 0, host.getWidth() > 0 ? host.getWidth() : Integer.MAX_VALUE, host.getHeight() > 0 ? host.getHeight() : Integer.MAX_VALUE)) r.setEmpty();
         info.setBoundsInParent(r);
+        Rect screen = new Rect(r);
+        if (host.getWidth() > 0 && host.getHeight() > 0 && !screen.intersect(0, 0, host.getWidth(), host.getHeight())) screen.setEmpty();
         int[] loc = new int[2];
         host.getLocationOnScreen(loc);
-        Rect screen = new Rect(r);
         screen.offset(loc[0], loc[1]);
         info.setBoundsInScreen(screen);
         return info;

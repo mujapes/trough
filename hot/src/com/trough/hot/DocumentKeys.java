@@ -32,6 +32,10 @@ final class DocumentKeys {
     private final KeyListener listener = TextKeyListener.getInstance(false, TextKeyListener.Capitalize.SENTENCES);
 
     private EditText scratch;
+    /* Selection's own spans (its vertical-move column memory, android.text.Selection$...) left on
+     * the window by the last movement key, in document offsets, kept while the selection stays
+     * where that key put it. Rebuilding the window would otherwise forget the column. */
+    private Object[] memory = new Object[0]; private int[] memoryAt = new int[0]; private long memoryAnchor = -1, memoryCaret = -1;
 
     DocumentKeys(long deriver, DocumentText doc) { this.deriver = deriver; this.doc = doc; }
 
@@ -92,10 +96,30 @@ final class DocumentKeys {
             layout(scratch, visible != null && visible.length > 0 ? (int) visible[0] : ViewOracle.WIDTH);
             Spannable t = (Spannable) scratch.getText();
             Selection.setSelection(t, Selection.getSelectionStart(w.text), Selection.getSelectionEnd(w.text));
+            if (memoryAnchor == s[1] && memoryCaret == s[2])
+                for (int k = 0; k < memory.length; k++) {
+                    int a = memoryAt[3 * k] - w.start, b = memoryAt[3 * k + 1] - w.start;
+                    if (a >= 0 && b <= t.length() && a <= b) t.setSpan(memory[k], a, b, memoryAt[3 * k + 2]);
+                }
             ArrowKeyMovementMethod m = (ArrowKeyMovementMethod) ArrowKeyMovementMethod.getInstance();
             handled = down ? m.onKeyDown(scratch, t, keyCode, event) : m.onKeyUp(scratch, t, keyCode, event);
             w.text = (Editable) t;
-        } else handled = down ? listener.onKeyDown(view, w.text, keyCode, event) : listener.onKeyUp(view, w.text, keyCode, event);
+            if (down) {
+                java.util.List<Object> keep = new java.util.ArrayList<>(); java.util.List<Integer> at = new java.util.ArrayList<>();
+                for (Object span : t.getSpans(0, t.length(), Object.class)) {
+                    String name = span.getClass().getName();
+                    if (!name.startsWith("android.text.Selection$") || span == Selection.SELECTION_START || span == Selection.SELECTION_END) continue;
+                    keep.add(span); at.add(w.start + t.getSpanStart(span)); at.add(w.start + t.getSpanEnd(span)); at.add(t.getSpanFlags(span));
+                }
+                memory = keep.toArray();
+                memoryAt = new int[at.size()];
+                for (int k = 0; k < memoryAt.length; k++) memoryAt[k] = at.get(k);
+                memoryAnchor = w.start + Selection.getSelectionStart(t); memoryCaret = w.start + Selection.getSelectionEnd(t);
+            }
+        } else {
+            handled = down ? listener.onKeyDown(view, w.text, keyCode, event) : listener.onKeyUp(view, w.text, keyCode, event);
+            if (down) memoryAnchor = memoryCaret = -1;   /* an edit or typing ends the column memory */
+        }
         String after = w.text.toString();
         int sa = Selection.getSelectionStart(w.text), sb = Selection.getSelectionEnd(w.text);
         if (after.equals(w.before) && sa == s[1] - w.start && sb == s[2] - w.start) return handled;
