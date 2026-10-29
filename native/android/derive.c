@@ -618,7 +618,10 @@ JNIEXPORT jlongArray JNICALL CLASS(derivePresentTimes)(JNIEnv *env, jclass c, jl
 JNIEXPORT jint JNICALL CLASS(derivePace)(JNIEnv *env, jclass c, jlong h, jint mode) {
     (void)env; (void)c; deriver *d = (deriver *)(intptr_t)h;
     if (mode == 2 && !d->vsync && !(d->vsync = vs_open())) mode = 0;
-    if (mode != d->pace) d->extra_ns = mode == 1 ? 2000000 : mode == 2 ? 1000000 : 0;
+    /* Mode 2 starts at 1.5 refreshes, measured on the Pixel's Vulkan swapchain (VIEW.md): the
+     * platform deadline does not cover the GPU fence and BufferQueue; on-time frames trim it. */
+    uint64_t r = d->refresh_ns ? d->refresh_ns : 16666667;
+    if (mode != d->pace) d->extra_ns = mode == 1 ? 2000000 : mode == 2 ? r * 3 / 2 : 0;
     d->pace = mode;
     return mode;
 }

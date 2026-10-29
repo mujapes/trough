@@ -205,8 +205,12 @@ Its timelines are made for producers that tag frames with `ASurfaceTransaction_s
 while a swapchain buffer must also clear its GPU fence and BufferQueue. So mode 2 still learns
 about 24 ms of slack. Once learned, it is the steadiest mode: 0 misses of its own target and a
 latency spread of 34.6-49.7 ms. Mode 1 is lower at the median, but it has longer tails and more
-skipped vsyncs. Mode 2's first-run overshoot comes from the +1 ms/-0.05 ms steps. Starting the
-slack at one refresh would avoid it.
+skipped vsyncs. Mode 2's first-run overshoot came from the +1 ms/-0.05 ms steps starting at 1 ms.
+The slack now starts at 1.5 refreshes. Bundle `bbbd9d3616b5`: a cold mode 2 run measures
+29.6 / 32.4 / 43.3 ms with 0 own-target misses and 1 skipped vsync. A second run (13 ms slack)
+measures 36.6 / 39.9 / 40.7 ms, also with 0 misses; why the lower slack gave a higher median is
+unexplained. Mode 1 in the same session: 28.6 / 39.7 / 75.4 ms, 4 skipped. Mode 2 is the default
+candidate: its median is similar and its tails are bounded.
 
 The first run of this oracle hung the scenario thread. A fling started past the last paragraph,
 and `scroll_step` read a node index out of range. `deriveViewport` now clamps the anchor, and
