@@ -163,3 +163,30 @@ frames: those were queueing jitter, not dropped vsyncs. Display timing is the me
 3-frame ring hides most layout stalls, at a cost of latency. Each frame is ready about 43 ms
 (2.6 refreshes) before its vsync, so a scroll reaches the glass about 3 frames late. Next:
 pace frame starts from the display timing so the margin shrinks to the build time.
+
+## Frame pacing (latency)
+
+`deriveFrameBegin` runs before a frame samples input. With `derivePace` on, it sleeps until
+`vsync - budget`. The vsync is the one after the previous frame's, extrapolated from the newest
+displayed frame at one refresh per frame. The budget is the CPU work estimate (start to present,
+EWMA mean + 2 deviations) plus a learned slack for GPU and compositor latch. The slack starts at
+2 ms. It grows by 2 ms whenever a frame lands more than half a refresh after its target, and
+shrinks by 0.25 ms while frames are more than 4 ms early. Each frame's start time is recorded,
+so display timing gives the true input-to-display latency. Pixel, fling with prefetch, bundle `b373f4aac810`:
+
+| | latency p50 / p90 | skipped vsyncs / 120 | margin |
+|---|---|---|---|
+| unpaced (3-frame ring full) | 75.2 / 76.5 ms | 0 | 42.8 ms |
+| paced, fixed 2 ms slack (earlier bundle) | 22.1 / 33.4 ms | 37-38 | 6.7 ms |
+| paced, learned slack | 27.9 / 38.5 ms | 3 | 8.3 ms |
+| paced, slack carried over | 29.9 / 40.3 ms | 1 | 10.5 ms |
+
+The slack settles near 19-21 ms, about one refresh. That refresh is the compositor's latch
+before scan-out, which the CPU estimate cannot see. The controller still saws: it misses its own
+target 10-17 times per 120 frames, against 1-3 vsyncs actually skipped. Next: take the deadline
+and expected present time from the platform (Android 13+ `AChoreographer_postVsyncCallback`
+frame timelines) instead of learning them.
+
+The first run of this oracle hung the scenario thread. A fling started past the last paragraph,
+and `scroll_step` read a node index out of range. `deriveViewport` now clamps the anchor, and
+the scroll walk stops at or past the last paragraph.

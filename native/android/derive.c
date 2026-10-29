@@ -25,6 +25,13 @@ typedef struct {
     ps_gpu *gpu; ANativeWindow *window; at_atlas atlas; at_cell *atlas_cells; uint32_t *atlas_index; int32_t atlas_pages[64];
     uint32_t fw, fh; uint64_t frame_uploads, frame_hits;
     ps_present_time present_times[1024]; size_t npresent; uint64_t refresh_ns;   /* derivePresentTimes */
+    /* Frame pacing (deriveFrameBegin): the newest displayed frame, each frame's start time (when
+     * its input was sampled) by number, and the work estimate from start to present. */
+    int pace; uint64_t last_number, shown_frame, shown_ns, frame_start[256], work_ns, work_dev, slept_ns;
+    /* The vsync each paced frame aimed at, and the slack beyond the CPU work estimate that GPU
+     * and compositor latch need, learned from display timing: +2 ms per miss, -0.25 ms while
+     * frames are more than 4 ms early. */
+    uint64_t target_ns[256], extra_ns, misses;
     tr_world world; tr_cell *cells; tr_id driver, width, op, viewport, op_sum, op_scene; tr_id *text; int paragraphs;
     int levels; uint32_t scene;                       /* summary levels above paragraphs; the scene node */
     atomic_ullong runs[5];                            /* invocations: layout, summary, scene, mask; [4] paragraphs estimated */
@@ -36,6 +43,24 @@ typedef struct {
     ex_exec ex;
 } deriver;
 
+static uint64_t mono_ns(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return (uint64_t)t.tv_sec * 1000000000u + (uint64_t)t.tv_nsec; }
+/* Display timing as it arrives; the newest displayed frame anchors the vsync grid. */
+static void collect_timing(deriver *d) {
+    if (!d->window || d->npresent >= 1024) return;
+    int got = ps_present_timing(d->gpu, d->present_times + d->npresent, 1024 - d->npresent, &d->refresh_ns);
+    for (int i = 0; i < got; i++) {
+        const ps_present_time *t = &d->present_times[d->npresent + (size_t)i];
+        if (t->actual_ns && t->frame >= d->shown_frame) { d->shown_frame = t->frame; d->shown_ns = t->actual_ns; }
+        uint64_t target = d->target_ns[t->frame % 256];
+        if (target && t->actual_ns && d->refresh_ns) {
+            if (t->actual_ns > target + d->refresh_ns / 2) { d->extra_ns += 2000000; d->misses++; }
+            else if (t->margin_ns > 4000000) d->extra_ns -= d->extra_ns < 250000 ? d->extra_ns : 250000;
+            if (d->extra_ns > 2 * d->refresh_ns) d->extra_ns = 2 * d->refresh_ns;
+            d->target_ns[t->frame % 256] = 0;
+        }
+    }
+    if (got > 0) d->npresent += (size_t)got;
+}
 static size_t pow2(size_t n) { size_t p = 1; while (p < n) p <<= 1; return p; }
 
 static void attach(void *ctx) { deriver *d = ctx; JNIEnv *env; (*d->vm)->AttachCurrentThread(d->vm, (void *)&env, NULL); }
@@ -339,6 +364,7 @@ static void stats(void *arg, tr_world *w, dv_graph *g) {
     s[14] = (int64_t)atomic_load(&d->runs[3]); s[15] = (int64_t)d->frame_uploads; s[16] = (int64_t)d->frame_hits;
     s[17] = (int64_t)d->atlas.evictions; s[18] = (int64_t)d->atlas.refusals; s[19] = (int64_t)atomic_load(&d->runs[4]);
     s[20] = (int64_t)d->scroll_pauses; s[21] = d->pf_hi - d->pf_lo;
+    s[22] = (int64_t)d->extra_ns; s[23] = (int64_t)d->misses;
 }
 
 /* The newest trace records: (operator 0 layout / 1 summary / 2 scene, key, outcome, worker). */
@@ -422,6 +448,8 @@ JNIEXPORT void JNICALL CLASS(deriveWidth)(JNIEnv *env, jclass c, jlong h, jint w
 }
 JNIEXPORT void JNICALL CLASS(deriveViewport)(JNIEnv *env, jclass c, jlong h, jint anchor, jint offset, jint height) {
     (void)env; (void)c; deriver *d = (deriver *)(intptr_t)h;
+    if (anchor < 0) anchor = 0;
+    if (anchor >= d->paragraphs) anchor = d->paragraphs - 1;   /* a paragraph past the end has no node */
     call k = {d, anchor, NULL, (jsize)((offset & 0xffff) | (height & 0xffff) << 16), 0}; ex_call(&d->ex, set_viewport, &k);
 }
 /* Scroll by dy pixels: move the anchor across exact heights. A paragraph whose layout is not
@@ -442,7 +470,7 @@ static void scroll_step(void *arg, tr_world *w, dv_graph *g) {
     for (;;) {
         int64_t i = offset < 0 ? anchor - 1 : anchor;    /* the paragraph whose height decides */
         if (offset < 0 && anchor == 0) { offset = 0; break; }
-        if (offset >= 0 && anchor == d->paragraphs - 1) break;
+        if (offset >= 0 && anchor >= d->paragraphs - 1) break;
         if (dv_get(g, d->node[i], &v) || !bl_is(v) || bl_get(&d->blobs, v, &p, &n)) { sc->need = (uint32_t)i; break; }
         int64_t h = (int64_t)layout_height(p, n);
         if (offset < 0) { anchor--; offset += h; continue; }
@@ -501,19 +529,51 @@ JNIEXPORT jlong JNICALL CLASS(deriveSettle)(JNIEnv *env, jclass c, jlong h) {
  * earliest, margin) per presented frame, in ns. Empty without VK_GOOGLE_display_timing. */
 JNIEXPORT jlongArray JNICALL CLASS(derivePresentTimes)(JNIEnv *env, jclass c, jlong h) {
     (void)c; deriver *d = (deriver *)(intptr_t)h;
-    if (d->window && d->npresent < 1024) {
-        int got = ps_present_timing(d->gpu, d->present_times + d->npresent, 1024 - d->npresent, &d->refresh_ns);
-        if (got > 0) d->npresent += (size_t)got;
+    collect_timing(d);
+    jsize n = (jsize)(1 + 6 * d->npresent);
+    jlong *v = malloc(sizeof *v * (size_t)n);
+    if (!v) return NULL;
+    v[0] = (jlong)d->refresh_ns;
+    for (size_t i = 0; i < d->npresent; i++) {
+        const ps_present_time *t = &d->present_times[i];
+        jlong *e = v + 1 + 6 * i;
+        e[0] = (jlong)t->frame; e[1] = (jlong)t->desired_ns; e[2] = (jlong)t->actual_ns; e[3] = (jlong)t->earliest_ns;
+        e[4] = (jlong)t->margin_ns; e[5] = (jlong)d->frame_start[t->frame % 256];
     }
-    jsize n = (jsize)(1 + 5 * d->npresent);
     jlongArray r = (*env)->NewLongArray(env, n);
-    if (r) {
-        jlong first = (jlong)d->refresh_ns;
-        (*env)->SetLongArrayRegion(env, r, 0, 1, &first);
-        if (d->npresent) (*env)->SetLongArrayRegion(env, r, 1, n - 1, (const jlong *)(void *)d->present_times);
-    }
+    if (r) (*env)->SetLongArrayRegion(env, r, 0, n, v);
+    free(v);
     d->npresent = 0;
     return r;
+}
+/* Pacing on or off: with it, deriveFrameBegin delays a frame's start (and the input it samples)
+ * until its work estimate plus 2 ms before the vsync after the previous frame's. */
+JNIEXPORT void JNICALL CLASS(derivePace)(JNIEnv *env, jclass c, jlong h, jboolean on) {
+    (void)env; (void)c; deriver *d = (deriver *)(intptr_t)h;
+    d->pace = on;
+    if (on && !d->extra_ns) d->extra_ns = 2000000;
+}
+/* Called before a frame samples input. Returns the ns slept. The vsync grid comes from the
+ * newest displayed frame, extrapolated one refresh per frame presented since (no skips). */
+JNIEXPORT jlong JNICALL CLASS(deriveFrameBegin)(JNIEnv *env, jclass c, jlong h) {
+    (void)env; (void)c; deriver *d = (deriver *)(intptr_t)h;
+    collect_timing(d);
+    uint64_t next = d->last_number + 1, now = mono_ns(), slept = 0, r = d->refresh_ns;
+    if (d->pace && r && d->shown_ns && d->work_ns && d->last_number >= d->shown_frame) {
+        uint64_t vsync = d->shown_ns + (next - d->shown_frame) * r;   /* the previous frame's, plus one */
+        uint64_t budget = d->work_ns + 2 * d->work_dev + d->extra_ns;
+        while (vsync > now + 4 * r) vsync -= r;            /* a stale grid never sleeps more than ~3 frames */
+        d->target_ns[next % 256] = vsync;
+        if (vsync > budget && vsync - budget > now) {
+            uint64_t until = vsync - budget;
+            struct timespec ts = {(time_t)(until / 1000000000u), (long)(until % 1000000000u)};
+            clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, NULL);
+            slept = until - now;
+        }
+    }
+    d->frame_start[next % 256] = mono_ns();
+    d->slept_ns += slept;
+    return (jlong)slept;
 }
 /* Settles what is on screen (DV_VISIBLE and urgent), not the prefetch. */
 JNIEXPORT jlong JNICALL CLASS(deriveSettleVisible)(JNIEnv *env, jclass c, jlong h) {
@@ -542,11 +602,11 @@ JNIEXPORT jbyteArray JNICALL CLASS(deriveBytes)(JNIEnv *env, jclass c, jlong h, 
 }
 JNIEXPORT jlongArray JNICALL CLASS(deriveStats)(JNIEnv *env, jclass c, jlong h) {
     (void)c; deriver *d = (deriver *)(intptr_t)h;
-    int64_t s[22] = {0};
+    int64_t s[24] = {0};
     call k = {d, 0, (const jchar *)(void *)s, 0, 0};
     ex_call(&d->ex, stats, &k);
-    jlongArray r = (*env)->NewLongArray(env, 22);
-    if (r) (*env)->SetLongArrayRegion(env, r, 0, 22, (const jlong *)s);
+    jlongArray r = (*env)->NewLongArray(env, 24);
+    if (r) (*env)->SetLongArrayRegion(env, r, 0, 24, (const jlong *)s);
     return r;
 }
 JNIEXPORT jlongArray JNICALL CLASS(deriveTrace)(JNIEnv *env, jclass c, jlong h) {
@@ -676,9 +736,15 @@ JNIEXPORT jbyteArray JNICALL CLASS(deriveFrame)(JNIEnv *env, jclass c, jlong h, 
     uint64_t number;
     int presented = d->window ? ps_frame_present(d->gpu, ups, nup, staging, staged, glyphs, nglyph, pixels, &number)
                               : ps_frame_submit(d->gpu, ups, nup, staging, staged, NULL, 0, glyphs, nglyph, &number);
-    if (d->window && d->npresent < 1024) {             /* collect display timing as it arrives */
-        int got = ps_present_timing(d->gpu, d->present_times + d->npresent, 1024 - d->npresent, &d->refresh_ns);
-        if (got > 0) d->npresent += (size_t)got;
+    collect_timing(d);
+    if (!presented || presented == 1) {
+        d->last_number = number;
+        uint64_t start = d->frame_start[number % 256], now = mono_ns();
+        if (start && now > start) {                     /* work estimate: mean + 2 deviations, EWMA 1/8 */
+            uint64_t w = now - start, dev = w > d->work_ns ? w - d->work_ns : d->work_ns - w;
+            if (!d->work_ns) { d->work_ns = w; d->work_dev = w / 4; }
+            else { d->work_ns = (7 * d->work_ns + w) / 8; d->work_dev = (7 * d->work_dev + dev) / 8; }
+        }
     }
     if (presented) { at_submit(&d->atlas); ms[4] = -presented; goto done; }   /* 1: swapchain out of date */
     at_submit(&d->atlas);
