@@ -39,6 +39,11 @@ Priorities): urgent/visible/background roots, per-level poll limits, job levels 
 background capped at workers-1. Under a background flood, urgent jobs wait 0.1 ms p50 (1.9 ms
 without the reserve). Fixed a latent bug: a full poll stopped walking roots, so later roots'
 running jobs were cancelled. Pixel run of core.derive/core.exec pending (phone rebooted, Trough closed).
+Then: root list (idle poll 33 -> 0.07 us), dv_unsettled + ex_settle_at (urgent settles while
+background runs), and view prefetch (derivePrefetch, VIEW.md "Background prefetch",
+android.view prefetch_scrolls step). Bionic lib + Java compile in the VM; bundle 34936388
+published but NOT yet run on the Pixel. Next: tools/loop.sh NO_PUBLISH=1 once Trough is open;
+then android.viewsurface (needs Trough visible).
 
 DECIDED (2026-10-28): the Java/native boundary is a bionic build of the same sources, loaded
 in-process (docs/BIONIC.md). All store oracles pass as bionic programs on the Pixel; android.jni
