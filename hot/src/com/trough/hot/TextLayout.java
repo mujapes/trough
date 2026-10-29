@@ -143,6 +143,17 @@ final class TextLayout {
         return l.rtl ? last.x : last.x + last.advance;
     }
 
+    /** Whether the character at offset is right-to-left, as Layout.isRtlCharAt: the bidi level of
+     * the run holding it; past the drawn text, true only when every run on the line is RTL. */
+    boolean rtlAt(int offset) {
+        Line l = lines.get(lineOf(offset));
+        if (l.runs.isEmpty()) return l.rtl;
+        Run at = runAt(l, offset);
+        if (at != null) return (at.level & 1) != 0;
+        for (Run r : l.runs) if ((r.level & 1) == 0) return false;
+        return true;
+    }
+
     /** The offset whose primary caret is nearest x on line i (a tap), as
      * Layout.getOffsetForHorizontal: cursor positions from the line start to the line end, except
      * that a line other than the last stops before its final character (the break). Ties go to

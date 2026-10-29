@@ -1,5 +1,8 @@
 package com.trough.hot;
 
+import android.graphics.Matrix;
+import android.view.inputmethod.CursorAnchorInfo;
+
 /** TextInput's backend over the derived document (docs/INPUT.md "Document"): the IME sees the
  * paragraphs joined by '\n'. A replacement becomes paragraph edits: the paragraphs it touches
  * are rejoined with the new text and split again on '\n', so typing a newline splits a
@@ -26,6 +29,29 @@ final class DocumentText implements TextInput.Backend {
     }
 
     @Override public String slice(int start, int end) { return NativeCore.deriveSlice(deriver, start, end); }
+
+    /** CursorAnchorInfo by Editor.updateCursorAnchorInfo's rules (docs/INPUT.md "Cursor anchor"):
+     * selection, view-to-screen matrix, composing text, and the insertion marker at the caret
+     * with visibility judged like TextView.isPositionVisible against a w x h view. Coordinates are
+     * the view's; the derived nodes must be settled. A range selection has no marker yet. */
+    CursorAnchorInfo cursorAnchorInfo(Matrix viewToScreen, int w, int h) {
+        long[] s = state();
+        CursorAnchorInfo.Builder b = new CursorAnchorInfo.Builder();
+        b.setSelectionRange((int) s[1], (int) s[2]);
+        b.setMatrix(viewToScreen);
+        int cs = (int) Math.min(s[3], s[4]), ce = (int) Math.max(s[3], s[4]);
+        if (0 <= cs && cs < ce) b.setComposingText(cs, slice(cs, ce));
+        float[] m = NativeCore.deriveCursorAnchor(deriver);
+        if (m != null) {
+            boolean top = visible(m[0], m[1], w, h), bottom = visible(m[0], m[3], w, h);
+            int flags = (top || bottom ? CursorAnchorInfo.FLAG_HAS_VISIBLE_REGION : 0)
+                | (!top || !bottom ? CursorAnchorInfo.FLAG_HAS_INVISIBLE_REGION : 0)
+                | (m[4] != 0 ? CursorAnchorInfo.FLAG_IS_RTL : 0);
+            b.setInsertionMarkerLocation(m[0], m[1], m[2], m[3], flags);
+        }
+        return b.build();
+    }
+    static boolean visible(float x, float y, int w, int h) { return x >= 0 && y >= 0 && x <= w && y <= h; }
 
     /** [start, end) of the joined text becomes `text`. */
     private void replace(int start, int end, String text) {

@@ -1057,6 +1057,39 @@ JNIEXPORT jstring JNICALL CLASS(deriveSlice)(JNIEnv *env, jclass c, jlong h, jlo
     free(k.out);
     return r;
 }
+/* The insertion marker for CursorAnchorInfo (docs/INPUT.md "Cursor anchor"): the overlay's caret
+ * rectangle gives the paragraph's y in the viewport, its caret node the line box, baseline and
+ * direction. Read on the owner from settled nodes; none when the selection is a range or the
+ * caret lies outside the drawn paragraphs. Out: x, top, baseline, bottom (viewport), rtl. */
+typedef struct { deriver *d; int ok; float m[5]; } marker_call;
+static void cursor_anchor(void *arg, tr_world *w, dv_graph *g) {
+    marker_call *c = arg; deriver *d = c->d; tr_read sel, anc; uint64_t ov, cv; const void *p = NULL, *q = NULL; size_t n = 0, m = 0;
+    c->ok = 0;
+    if (tr_current(w, d->selection, &sel) != TR_OK || !sel.value) return;
+    if (tr_current(w, d->sel_anchor, &anc) == TR_OK && anc.value && anc.value != sel.value) return;
+    if (dv_get(g, d->overlay, &ov) || !bl_is(ov) || bl_get(&d->blobs, ov, &p, &n) || n < 4) return;
+    const unsigned char *b = p; uint32_t count = be32(b);
+    for (uint32_t k = 0; k < count && 4 + (size_t)(k + 1) * 20 <= n; k++) {
+        const unsigned char *r = b + 4 + (size_t)k * 20;
+        if (be32(r + 16) != 0) continue;                  /* kind 0: the caret */
+        uint64_t pos = (sel.value - 1) >> 32, id1 = owner_id(d, w, (int64_t)pos); uint32_t node;
+        if (!id1 || dv_intern(g, d->op_caret, (id1 - 1) << 32 | ((sel.value - 1) & 0xffffffffu), &node)) return;
+        if (dv_get(g, node, &cv) || !bl_is(cv) || bl_get(&d->blobs, cv, &q, &m) || m < 20) return;
+        const unsigned char *t = q; float dy = bef(r + 4) - bef(t + 4);   /* viewport y of the paragraph top */
+        c->m[0] = bef(t); c->m[1] = dy + bef(t + 4); c->m[2] = dy + bef(t + 12); c->m[3] = dy + bef(t + 8);
+        c->m[4] = (float)(be32(t + 16) & 1);
+        c->ok = 1;
+        return;
+    }
+}
+JNIEXPORT jfloatArray JNICALL CLASS(deriveCursorAnchor)(JNIEnv *env, jclass c, jlong h) {
+    (void)c; marker_call k = {(deriver *)(intptr_t)h, 0, {0}};
+    ex_call(&k.d->ex, cursor_anchor, &k);
+    if (!k.ok) return NULL;
+    jfloatArray r = (*env)->NewFloatArray(env, 5);
+    if (r) (*env)->SetFloatArrayRegion(env, r, 0, 5, k.m);
+    return r;
+}
 /* Tap at viewport (x, y): the paragraph and line under it, from the clean layouts the scene
  * read (exact heights from the anchor), then the offset by TextLayout's tap rules
  * (Layout.getOffsetForHorizontal) through Java on the calling thread. The selection becomes a

@@ -55,10 +55,56 @@ reference, because it clears its Editable. Pixel bundle `4103cb0d5100...` (SDK 3
   surrounding text are correct. An agent edit merged on the keeper thread produced exactly one
   event and one restart, with the merged text right and the caret kept.
 
+## Document
+
+2026-10-29. The IME rules above are written against `TextInput.Backend` (state, one atomic
+apply, slice), so the same code drives two text stores: `Draft` (the native draft queue) and
+`DocumentText` (the derived view's paragraphs, [VIEW.md](VIEW.md) "Paragraph identity").
+
+- The IME sees one text: the paragraphs joined by `'\n'`. Offsets map to (paragraph, offset)
+  with `deriveLocate`, clamped; `deriveSlice` and `deriveDocState` read the joined text and
+  the selection cells on the owner thread.
+- A replacement of `[start, end)` rejoins the touched paragraphs with the new text and splits
+  the result on `'\n'`. The first piece rewrites the first paragraph (`deriveText`); the other
+  touched paragraphs are removed (`deriveRemove`) and the remaining pieces inserted
+  (`deriveInsert`). Typing Enter splits a paragraph; deleting a newline merges two. Paragraphs
+  outside the range keep their ids, so their layout is reused.
+- The selection lives in the deriver's selection cells (caret and anchor), so the drawn caret
+  and highlight follow IME edits. The composing region is kept in Java in joined offsets.
+- The walks are O(paragraphs) per call until the order cells become a rope.
+
+Evidence: `android.docime` (`DocImeOracle.java`) runs android.ime's random operations, with
+newline-heavy pieces, against `BaseInputConnection` over an `Editable` holding the joined
+text. After every operation the joined document, selection and composing region must match;
+every seventh, the cursor queries too. Each seed ends by rendering: the derived scene of the
+final document must equal the flat reference scene of its paragraphs.
+
+## Cursor anchor
+
+2026-10-29. `DocumentText.cursorAnchorInfo(matrix, w, h)` follows Editor.updateCursorAnchorInfo:
+- selection range: anchor and caret in the joined text;
+- the view-to-screen matrix;
+- composing text, when the region is non-empty;
+- the insertion marker: `deriveCursorAnchor` reads it on the owner from settled nodes. The
+  overlay's caret rectangle gives the paragraph's viewport y. The caret node (now 20 bytes:
+  x, top, bottom, baseline, flags) gives the line box, the baseline and the direction
+  (TextLayout.rtlAt = Layout.isRtlCharAt). Visible and invisible flags test the top and bottom
+  points as TextView.isPositionVisible does, against the view's w x h.
+
+Not covered yet:
+- a marker for a range selection (Editor puts it at the selection start);
+- a marker for a caret in a paragraph the overlay does not walk (above the anchor or below
+  the viewport); the IME gets none;
+- character bounds for the composing text (`addCharacterBounds`).
+
+Evidence: `android.anchor` (`AnchorOracle.java`) scrolls the viewport into its anchor
+paragraph. It places 80 carets, including first and last lines clipped by the edges and RTL
+characters, and compares the marker, flags and selection against Editor's rules on
+StaticLayout. Every fifth caret it also checks a composing region across paragraphs.
+
 ## Not yet built
 
 - The view becomes the native presenter's surface view. Its touch handling, focus and
   `showSoftInput` belong to the interaction layer.
-- Cursor-anchor info (`CursorAnchorInfo`) needs text layout geometry.
 - `sendKeyEvent` for hardware keys, plus clipboard, extracted text and accessibility. Bidi
   and grapheme-aware cursor movement belong to the text layout layer.
