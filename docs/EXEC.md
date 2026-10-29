@@ -83,14 +83,38 @@ the "bounded execution / traces" step of stage 3 ([CONSTRUCTION.md](CONSTRUCTION
   alone. A cancelled job's value result is already refused by the graph, because the owner
   withdraws the job before raising the flag.
 
+## Admission
+
+2026-10-29. `ex_register_cost` gives an operator a working-memory estimate per job, taken on the
+owner when the job is issued. With `ex_set_budget(budget, bg_reserve)`:
+- a worker starts a ready job only if the running jobs' estimates plus its own fit the budget;
+  a background job must fit within budget - bg_reserve;
+- charges live in a `resources.h` ledger whose byte limit is the budget. A charge is created at
+  start, then retired and reaped when the operator returns. Freed bytes wake the waiting
+  workers;
+- jobs are admitted in priority order (level, then issue order). The first job that does not
+  fit holds back every job after it, so small jobs cannot starve a large one;
+- a job larger than the whole budget is charged the budget and runs alone;
+- a ready job already cancelled is admitted at no cost, since it skips its operator.
+
+`core.exec` "admission": 52 jobs of 5-60 units plus one of 150, background and urgent, on 4
+workers, against a budget of 100 with a background reserve of 20. Each operator checks the live
+sum on entry. Result: peak 100, background peak 80, 137 deferrals, 0 violations, and the large
+job ran alone. Without admission the same workload peaks at 210 with 44 violations.
+
+Mutants: no background reserve, no release, no clamp for oversized jobs, and no limit are all
+killed. The survivor drops the wake-up after a release. That is performance only: the worker
+that released continues and admits the next job itself.
+
 ## Not yet built
 
 - **Worker placement and energy:** the Pixel's cores are 2 X1, 2 A78 and 4 A55. Worker count and
   affinity must come from measured energy per task under concurrent load, not from this
   throughput test.
-- **Admission:** by bytes and resources (`resources.h` leases for job inputs and outputs).
-  Priorities and the background reserve are built. Preempting a running background job is
-  not: an urgent job can wait for one only when every worker runs visible work.
+- **Admission, remaining:** real operators declare no costs yet. Their working memory must be
+  measured on the phone first: layout by text length, masks by glyph size. Outputs are bounded
+  separately by the blob store's byte limit. Preempting a running background job is not built:
+  an urgent job waits for one only when every worker runs visible work.
 - **Owner cost:** each completion triggers a poll over the demanded roots (the graph's root
   list; clean roots cost O(1)). A dirty-root worklist would skip even those, but it only
   matters with thousands of roots.

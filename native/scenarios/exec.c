@@ -322,6 +322,62 @@ static void settle_levels(double *urgent_ms, int *left, double *all_ms) {
     ex_stop(&ex);
 }
 
+/* ---- admission by bytes (docs/EXEC.md "Admission") ---- */
+/* Job sizes in units: background keys 0..39 (5..60), urgent keys 100..111 (5..40), and key 50,
+ * background, larger than the whole budget. Operators check the running sum on entry. */
+enum { BUDGET = 100, BG_RESERVE = 20, ADM_BG = 40, ADM_URGENT = 12, HUGE_KEY = 50 };
+static atomic_ullong adm_running, adm_bg_running, adm_violations, adm_peak, adm_bg_peak; static atomic_int huge_ran_alone = -1;
+static uint64_t adm_size(uint64_t key) {
+    if (key == HUGE_KEY) return 150;
+    return key >= 100 ? 5 + mix(key) % 36 : 5 + mix(key + 7) % 56;
+}
+static uint64_t adm_cost(void *ctx, const dv_job *job) { (void)ctx; return adm_size(job->key); }
+static void bump_peak(atomic_ullong *peak, uint64_t v) { uint64_t p = atomic_load(peak); while (v > p && !atomic_compare_exchange_weak(peak, &p, v)) {} }
+static int adm_op(void *ctx, const dv_job *job, ex_out *out) {
+    (void)ctx;
+    uint64_t size = adm_size(job->key), charge = size < BUDGET ? size : BUDGET, bg = job->level == DV_BACKGROUND;
+    uint64_t running = atomic_fetch_add(&adm_running, charge) + charge;
+    uint64_t bgr = bg ? atomic_fetch_add(&adm_bg_running, charge) + charge : atomic_load(&adm_bg_running);
+    if (job->key == HUGE_KEY) atomic_store(&huge_ran_alone, running == charge);
+    if (running > BUDGET || (bg && bgr > BUDGET - BG_RESERVE && charge < BUDGET)) atomic_fetch_add(&adm_violations, 1);
+    bump_peak(&adm_peak, running); if (bg && charge < BUDGET) bump_peak(&adm_bg_peak, bgr);   /* the large job: checked alone */
+    int stopped = spin(job, 1500 + 40 * size);
+    if (bg) atomic_fetch_sub(&adm_bg_running, charge);
+    atomic_fetch_sub(&adm_running, charge);
+    if (stopped) return 1;
+    out->value = job->key * 3 + 1;
+    return 0;
+}
+static uint32_t adm_nodes[ADM_BG + ADM_URGENT + 1];
+static void demand_admission(void *arg, tr_world *w, dv_graph *g) {
+    (void)arg; (void)w; int k = 0;
+    for (uint64_t key = 0; key < ADM_BG; key++) { OK(dv_intern(g, op[5], key, &adm_nodes[k])); OK(dv_demand_at(g, adm_nodes[k++], DV_BACKGROUND)); }
+    OK(dv_intern(g, op[5], HUGE_KEY, &adm_nodes[k])); OK(dv_demand_at(g, adm_nodes[k++], DV_BACKGROUND));
+}
+static void demand_admission_urgent(void *arg, tr_world *w, dv_graph *g) {
+    (void)arg; (void)w; int k = ADM_BG + 1;
+    for (uint64_t key = 100; key < 100 + ADM_URGENT; key++) { OK(dv_intern(g, op[5], key, &adm_nodes[k])); OK(dv_demand_at(g, adm_nodes[k++], DV_URGENT)); }
+}
+static void admission(int enforced, uint64_t *peak, uint64_t *bg_peak, uint64_t *violations, uint64_t *deferred) {
+    setup(4);
+    ex_set_reserve(&ex, 0);                              /* bytes, not workers, limit here */
+    OK(ex_register(&ex, op[5], adm_op, NULL));
+    OK(ex_register_cost(&ex, op[5], adm_cost));
+    if (enforced) OK(ex_set_budget(&ex, BUDGET, BG_RESERVE));
+    atomic_store(&adm_running, 0); atomic_store(&adm_bg_running, 0); atomic_store(&adm_violations, 0);
+    atomic_store(&adm_peak, 0); atomic_store(&adm_bg_peak, 0); atomic_store(&huge_ran_alone, -1);
+    OK(ex_start(&ex));
+    ex_call(&ex, demand_admission, NULL);
+    struct timespec pause = {0, 4000000}; nanosleep(&pause, NULL);
+    ex_call(&ex, demand_admission_urgent, NULL);
+    CHECK(ex_settle(&ex) && !ex.error);
+    *deferred = ex.deferred;
+    ex_stop(&ex);
+    for (int k = 0; k < ADM_BG + 1 + ADM_URGENT; k++) { uint64_t v; OK(dv_get(&graph, adm_nodes[k], &v)); CHECK(v == graph.nodes[adm_nodes[k]].key * 3 + 1); }
+    *peak = atomic_load(&adm_peak); *bg_peak = atomic_load(&adm_bg_peak); *violations = atomic_load(&adm_violations);
+    if (enforced) CHECK(atomic_load(&huge_ran_alone) == 1);
+}
+
 /* ---- 4: unregistered operator ---- */
 static void demand_unknown(void *arg, tr_world *w, dv_graph *g) { (void)arg; (void)w; uint32_t n; OK(dv_intern(g, op[6], 0, &n)); OK(dv_demand(g, n)); }
 static void unregistered(void) {
@@ -355,6 +411,16 @@ int main(void) {
     settle_levels(&urgent_ms, &left, &all_ms);
     CHECK(left > BG / 2 && urgent_ms >= 20 && urgent_ms < all_ms / 3);
     printf("ok settle by level: the urgent root (a 20 ms job) settles in %.3f ms with %d of %d background jobs left; all in %.0f ms\n", urgent_ms, left, BG, all_ms);
+    uint64_t peak, bg_peak, violations, deferred, open_peak, open_bg, open_violations, open_deferred;
+    admission(1, &peak, &bg_peak, &violations, &deferred);
+    if (violations || peak > BUDGET || bg_peak > BUDGET - BG_RESERVE || !deferred) fprintf(stderr, "admission: peak %llu bg %llu violations %llu deferred %llu\n", (unsigned long long)peak, (unsigned long long)bg_peak, (unsigned long long)violations, (unsigned long long)deferred);
+    CHECK(violations == 0 && peak <= BUDGET && bg_peak <= BUDGET - BG_RESERVE && deferred > 0);
+    admission(0, &open_peak, &open_bg, &open_violations, &open_deferred);
+    CHECK(open_violations > 0);                          /* the workload does exceed the budget unadmitted */
+    printf("ok admission: %d jobs of 5-60 units and one of 150 under a %d-unit budget (background %d): peak %llu, "
+           "background peak %llu, %llu deferrals, 0 violations, the large job alone; without admission peak %llu, %llu violations\n",
+           ADM_BG + ADM_URGENT, BUDGET, BUDGET - BG_RESERVE, (unsigned long long)peak, (unsigned long long)bg_peak,
+           (unsigned long long)deferred, (unsigned long long)open_peak, (unsigned long long)open_violations);
     double flood_max, promoted;
     visible_flood(&flood_max, &promoted);
     CHECK(flood_max < 10 && promoted < 10);     /* about one running job, not the 11 queued ahead (~14 ms) */

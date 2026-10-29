@@ -33,6 +33,18 @@ void ex_on_worker(ex_exec *e, void (*start)(void *), void (*stop)(void *), void 
     e->thread_start = start; e->thread_stop = stop; e->thread_hooks = ctx;
 }
 void ex_set_reserve(ex_exec *e, size_t reserve) { e->reserve = reserve; }
+tr_status ex_register_cost(ex_exec *e, tr_id op, ex_cost cost) {
+    for (size_t o = 0; o < e->nops; o++) if (same_id(e->ops[o].op, op)) { e->ops[o].cost = cost; return TR_OK; }
+    return TR_INVALID;
+}
+tr_status ex_set_budget(ex_exec *e, uint64_t budget, uint64_t bg_reserve) {
+    if (!budget) { e->admission = 0; return TR_OK; }
+    if (bg_reserve >= budget) return TR_INVALID;
+    tr_status st = tr_resources_init(&e->ledger, e->ledger_res, EX_SLOTS, e->ledger_leases, EX_SLOTS, budget);
+    if (st) return st;
+    e->budget = budget; e->bg_reserve = bg_reserve; e->admission = 1;
+    return TR_OK;
+}
 void ex_on_settled(ex_exec *e, void (*fn)(void *, uint64_t), void *ctx) { e->on_settled = fn; e->settled_ctx = ctx; }
 
 /* ---- operator helpers ---- */
@@ -61,6 +73,42 @@ int ex_cancelled(const dv_job *job) {
     return atomic_load_explicit(&s->cancel, memory_order_relaxed);
 }
 
+/* ---- admission (under the lock) ---- */
+
+/* The next job to start: ready jobs in priority order (level, then issue order); the first one
+ * whose bytes do not fit stops the walk, so nothing after it overtakes it. Charges the ledger. */
+static int admit(ex_exec *e) {
+    int order[EX_SLOTS], n = 0;
+    for (int i = 0; i < EX_SLOTS; i++) if (e->slots[i].state == EX_READY) order[n++] = i;
+    for (int a = 1; a < n; a++)                         /* insertion sort: at most EX_SLOTS */
+        for (int b = a; b > 0; b--) {
+            const ex_slot *x = &e->slots[order[b - 1]], *y = &e->slots[order[b]];
+            if (y->level < x->level || (y->level == x->level && y->order < x->order)) { int t = order[b]; order[b] = order[b - 1]; order[b - 1] = t; }
+            else break;
+        }
+    for (int k = 0; k < n; k++) {
+        ex_slot *s = &e->slots[order[k]];
+        if (!s->bytes || atomic_load(&s->cancel)) return order[k];   /* a cancelled job skips its operator */
+        uint64_t charge = s->bytes < e->budget ? s->bytes : e->budget;   /* larger than the budget: alone */
+        uint64_t limit = s->level == DV_BACKGROUND ? e->budget - e->bg_reserve : e->budget;
+        if (e->ledger.retained_bytes + charge > limit && !(charge == e->budget && e->ledger.retained_bytes == 0)) { e->deferred++; return -1; }
+        if (tr_resource_create(&e->ledger, 1, (uint64_t)order[k], charge, &s->admitted)) { e->deferred++; return -1; }
+        s->charged = charge;
+        if (e->ledger.retained_bytes > e->peak_charged) e->peak_charged = e->ledger.retained_bytes;
+        return order[k];
+    }
+    return -1;
+}
+/* A finished job's charge leaves the ledger (retired, then reaped: no destructor to run). */
+static int unadmit(ex_exec *e, ex_slot *s) {
+    if (!s->charged) return 0;
+    tr_resource_info ticket;
+    tr_resource_retire(&e->ledger, s->admitted);
+    while (tr_reap_begin(&e->ledger, &ticket) == TR_OK) tr_reap_done(&e->ledger, ticket.id);
+    s->charged = 0;
+    return 1;
+}
+
 /* ---- workers ---- */
 
 static void *worker(void *arg) {
@@ -69,12 +117,13 @@ static void *worker(void *arg) {
     if (e->thread_start) e->thread_start(e->thread_hooks);
     pthread_mutex_lock(&e->lock);
     while (!e->stop) {
-        int found = -1;
-        for (int i = 0; i < EX_SLOTS; i++) {
-            const ex_slot *c = &e->slots[i];
-            if (c->state != EX_READY) continue;
-            if (found < 0 || c->level < e->slots[found].level || (c->level == e->slots[found].level && c->order < e->slots[found].order)) found = i;
-        }
+        int found = e->admission ? admit(e) : -1;
+        if (!e->admission)
+            for (int i = 0; i < EX_SLOTS; i++) {
+                const ex_slot *c = &e->slots[i];
+                if (c->state != EX_READY) continue;
+                if (found < 0 || c->level < e->slots[found].level || (c->level == e->slots[found].level && c->order < e->slots[found].order)) found = i;
+            }
         if (found < 0) { pthread_cond_wait(&e->worker_wake, &e->lock); continue; }
         ex_slot *s = &e->slots[found];
         s->state = EX_RUNNING; s->worker = id; s->start_ns = now_ns();   /* s->level is now fixed */
@@ -85,6 +134,7 @@ static void *worker(void *arg) {
         int stopped = atomic_load(&s->cancel) ? 1 : fn(ctx, &s->job, &s->out);
         pthread_mutex_lock(&e->lock);
         s->stopped = stopped; s->end_ns = now_ns(); s->state = EX_DONE;
+        if (unadmit(e, s)) pthread_cond_broadcast(&e->worker_wake);   /* bytes freed: others may fit now */
         pthread_cond_signal(&e->owner_wake);
     }
     pthread_mutex_unlock(&e->lock);
@@ -166,8 +216,12 @@ static dv_progress schedule(ex_exec *e) {
         s->job = jobs[k];
         e->slot_fn[index[k]] = NULL;
         for (size_t o = 0; o < e->nops; o++)
-            if (same_id(e->ops[o].op, s->job.op)) { e->slot_fn[index[k]] = e->ops[o].fn; e->slot_ctx[index[k]] = e->ops[o].ctx; }
+            if (same_id(e->ops[o].op, s->job.op)) {
+                e->slot_fn[index[k]] = e->ops[o].fn; e->slot_ctx[index[k]] = e->ops[o].ctx;
+                s->bytes = e->admission && e->ops[o].cost ? e->ops[o].cost(e->ops[o].ctx, &s->job) : 0;
+            }
         if (!e->slot_fn[index[k]]) { dv_cancel(e->graph, &s->job); e->error = TR_INVALID; continue; }
+        s->charged = 0;
         atomic_store(&s->cancel, 0); s->stopped = 0; s->queued_ns = now; s->start_ns = s->end_ns = 0;
         s->level = s->job.level; s->order = ++e->issued;
         hold(e, s, 1);

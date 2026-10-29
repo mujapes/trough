@@ -2,6 +2,7 @@
 #define TROUGH_EXEC_H
 #include "derive.h"
 #include "blobs.h"
+#include "resources.h"
 #include <pthread.h>
 #include <stdatomic.h>
 
@@ -23,6 +24,9 @@ typedef struct { uint32_t kind; uint64_t value; dv_ref refs[EX_VALUES]; size_t c
 /* An operator: a pure function of the job. Returns 0, or nonzero when it stopped because it
  * was cancelled. ctx is the registration's. */
 typedef int (*ex_operator)(void *ctx, const dv_job *, ex_out *);
+/* An operator's working memory for a job, in bytes, estimated from the job before it runs
+ * (its inputs are in the job). 0: not counted. Called on the owner thread. */
+typedef uint64_t (*ex_cost)(void *ctx, const dv_job *);
 
 typedef enum { EX_TRACE_VALUE = 1, EX_TRACE_NEED, EX_TRACE_CANCELLED, EX_TRACE_STALE, EX_TRACE_INVALID } ex_trace_outcome;
 typedef struct {
@@ -35,17 +39,22 @@ typedef struct {
     dv_job job; dv_value values[EX_VALUES]; ex_out out;
     ex_slot_state state; atomic_int cancel; int stopped;
     uint32_t worker, level; uint64_t order, queued_ns, start_ns, end_ns;   /* level: current */
+    uint64_t bytes, charged; tr_id admitted;   /* admission (ex_set_budget): estimate, ledger charge, its resource */
 } ex_slot;
 
 typedef struct ex_call_s ex_call_t;
 typedef struct { void *ex; uint32_t id; } ex_worker;
 typedef struct {
     tr_world *world; dv_graph *graph;
-    struct { tr_id op; ex_operator fn; void *ctx; } ops[32]; size_t nops;
+    struct { tr_id op; ex_operator fn; void *ctx; ex_cost cost; } ops[32]; size_t nops;
     ex_slot slots[EX_SLOTS];
     pthread_t owner, workers[EX_WORKERS]; size_t nworkers;
     ex_worker worker_ctx[EX_WORKERS];
     void *slot_ctx[EX_SLOTS]; ex_operator slot_fn[EX_SLOTS];
+    /* Admission by bytes (ex_set_budget): running jobs' working memory is charged to a resource
+     * ledger (resources.h) whose byte limit is the budget; background jobs leave bg_reserve. */
+    tr_resources ledger; tr_resource ledger_res[EX_SLOTS]; tr_lease ledger_leases[EX_SLOTS];
+    uint64_t budget, bg_reserve, peak_charged, deferred; int admission;
     pthread_mutex_t lock; pthread_cond_t owner_wake, worker_wake, settled;
     ex_call_t *calls, *calls_tail;
     int stop, idle;                  /* idle: verified at `idle_at` with nothing running */
@@ -63,6 +72,15 @@ typedef struct {
 /* Registration happens before ex_start. */
 tr_status ex_init(ex_exec *, tr_world *, dv_graph *, size_t workers);
 tr_status ex_register(ex_exec *, tr_id op, ex_operator, void *ctx);
+/* Declares op's working memory per job (after ex_register for op). */
+tr_status ex_register_cost(ex_exec *, tr_id op, ex_cost);
+/* Admission by bytes (docs/EXEC.md "Admission"): a ready job starts only while the running
+ * jobs' estimated bytes plus its own fit `budget`; background jobs only while they fit
+ * budget - bg_reserve, so urgent and visible work keeps that headroom. A job larger than the
+ * budget runs alone. Jobs are admitted in priority order: one that does not fit holds back
+ * every job after it at its level and below, so a large job cannot be starved by small ones.
+ * 0: no admission (the default). Before ex_start. */
+tr_status ex_set_budget(ex_exec *, uint64_t budget, uint64_t bg_reserve);
 /* Blob values: node values become owned by the store through graph hooks, job inputs are
  * retained until the job retires, and operators may return bytes. Before ex_start. */
 void ex_use_blobs(ex_exec *, bl_store *);
