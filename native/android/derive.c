@@ -35,6 +35,7 @@ typedef struct {
      * and compositor latch need, learned from display timing: +2 ms per miss, -0.25 ms while
      * frames are more than 4 ms early. */
     uint64_t target_ns[256], extra_ns, misses;
+    uint64_t input_ns[256];                           /* per frame: the oldest input event it consumed */
     struct vsync_src *vsync;                          /* derivePace mode 2: platform frame timelines */
     tr_world world; tr_cell *cells; tr_id driver, width, op, viewport, op_sum, op_scene; tr_id *text; int paragraphs;
     int levels; uint32_t scene;                       /* summary levels above paragraphs; the scene node */
@@ -595,21 +596,26 @@ JNIEXPORT jlong JNICALL CLASS(deriveSettle)(JNIEnv *env, jclass c, jlong h) {
 JNIEXPORT jlongArray JNICALL CLASS(derivePresentTimes)(JNIEnv *env, jclass c, jlong h) {
     (void)c; deriver *d = (deriver *)(intptr_t)h;
     collect_timing(d);
-    jsize n = (jsize)(1 + 6 * d->npresent);
+    jsize n = (jsize)(1 + 7 * d->npresent);
     jlong *v = malloc(sizeof *v * (size_t)n);
     if (!v) return NULL;
     v[0] = (jlong)d->refresh_ns;
     for (size_t i = 0; i < d->npresent; i++) {
         const ps_present_time *t = &d->present_times[i];
-        jlong *e = v + 1 + 6 * i;
+        jlong *e = v + 1 + 7 * i;
         e[0] = (jlong)t->frame; e[1] = (jlong)t->desired_ns; e[2] = (jlong)t->actual_ns; e[3] = (jlong)t->earliest_ns;
-        e[4] = (jlong)t->margin_ns; e[5] = (jlong)d->frame_start[t->frame % 256];
+        e[4] = (jlong)t->margin_ns; e[5] = (jlong)d->frame_start[t->frame % 256]; e[6] = (jlong)d->input_ns[t->frame % 256];
     }
     jlongArray r = (*env)->NewLongArray(env, n);
     if (r) (*env)->SetLongArrayRegion(env, r, 0, n, v);
     free(v);
     d->npresent = 0;
     return r;
+}
+/* The oldest input event (CLOCK_MONOTONIC ns) the frame begun by deriveFrameBegin consumes. */
+JNIEXPORT void JNICALL CLASS(deriveFrameInput)(JNIEnv *env, jclass c, jlong h, jlong event_ns) {
+    (void)env; (void)c; deriver *d = (deriver *)(intptr_t)h;
+    d->input_ns[(d->last_number + 1) % 256] = (uint64_t)event_ns;
 }
 /* Pacing on or off: with it, deriveFrameBegin delays a frame's start (and the input it samples)
  * until its work estimate plus 2 ms before the vsync after the previous frame's. */
@@ -660,6 +666,7 @@ JNIEXPORT jlong JNICALL CLASS(deriveFrameBegin)(JNIEnv *env, jclass c, jlong h) 
         }
     }
     d->frame_start[next % 256] = mono_ns();
+    d->input_ns[next % 256] = 0;
     d->slept_ns += slept;
     return (jlong)slept;
 }

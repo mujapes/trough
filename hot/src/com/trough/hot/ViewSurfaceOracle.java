@@ -140,7 +140,7 @@ final class ViewSurfaceOracle {
     /** Display timing (VK_GOOGLE_display_timing): the intervals between frames actually shown, in
      * refresh periods. An interval of 2 or more periods is a vsync where no new frame was shown. */
     static Map<String, Object> displayTiming(long[] t) {
-        final int F = 6;                                      /* frame, desired, actual, earliest, margin, start */
+        final int F = 7;                                      /* frame, desired, actual, earliest, margin, start, input */
         if (t == null || t.length < 1 + F * 2) return Json.map("available", false, "entries", t == null ? 0 : (t.length - 1) / F);
         long refresh = t[0]; int n = (t.length - 1) / F;
         int[] hist = new int[5]; int skipped = 0; long worst = 0; double marginSum = 0;
@@ -158,10 +158,18 @@ final class ViewSurfaceOracle {
             if (start > 0 && actual > start) latency[nl++] = (actual - start) / 1e6;
         }
         Arrays.sort(latency, 0, nl);
+        double[] touch = new double[n]; int nt = 0;              /* oldest input event -> on the display */
+        for (int i = 0; i < n; i++) {
+            long input = t[1 + F * i + 6], actual = t[1 + F * i + 2];
+            if (input > 0 && actual > input) touch[nt++] = (actual - input) / 1e6;
+        }
+        Arrays.sort(touch, 0, nt);
         return Json.map("available", true, "refresh_ms", refresh / 1e6, "frames", n, "periods_hist", Arrays.toString(hist),
             "skipped_vsyncs", skipped, "worst_interval_ms", worst / 1e6, "avg_margin_ms", marginSum / n / 1e6,
             "latency_p50_ms", nl > 0 ? latency[nl / 2] : -1, "latency_p90_ms", nl > 0 ? latency[nl * 9 / 10] : -1,
-            "latency_max_ms", nl > 0 ? latency[nl - 1] : -1, "first_frame", t[1], "last_frame", t[1 + F * (n - 1)]);
+            "latency_max_ms", nl > 0 ? latency[nl - 1] : -1,
+            "input_frames", nt, "input_latency_p50_ms", nt > 0 ? touch[nt / 2] : -1, "input_latency_p90_ms", nt > 0 ? touch[nt * 9 / 10] : -1,
+            "input_latency_max_ms", nt > 0 ? touch[nt - 1] : -1, "first_frame", t[1], "last_frame", t[1 + F * (n - 1)]);
     }
 
     static byte[] reference(byte[] scene, int w, int h) {

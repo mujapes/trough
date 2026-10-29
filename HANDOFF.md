@@ -48,8 +48,10 @@ Then (2026-10-29 morning, all on the Pixel): display timing (VK_GOOGLE_display_t
 oracle (prefetch flings skip 0 vsyncs), frame pacing (derivePace 1 learned grid / 2 choreographer
 deadlines; input-to-display 75 -> 28-35 ms p50, VIEW.md "Frame pacing"). An out-of-range anchor hung
 the scroll walk once: deriveViewport clamps now.
-Next: start mode 2's slack at one refresh; touch-driven scroll (real MotionEvents -> deriveScroll
-with fling velocity, paced); then selection/caret on the derived scene.
+Mode 2 slack now starts at 1.5 refreshes. DerivedView + android.touch: real MotionEvents drag and
+fling the paced view; touch-to-display is 46.6 ms p50, and the position equals the reference
+(VIEW.md "Touch"). Next: selection/caret on the derived scene (TextLayout carets + taps on
+DerivedView), then IME editing in the derived view.
 
 DECIDED (2026-10-28): the Java/native boundary is a bionic build of the same sources, loaded
 in-process (docs/BIONIC.md). All store oracles pass as bionic programs on the Pixel; android.jni

@@ -215,3 +215,23 @@ candidate: its median is similar and its tails are bounded.
 The first run of this oracle hung the scenario thread. A fling started past the last paragraph,
 and `scroll_step` read a node index out of range. `deriveViewport` now clamps the anchor, and
 the scroll walk stops at or past the last paragraph.
+
+## Touch
+
+`DerivedView` (hot/src/.../DerivedView.java) is the document view as a component: a SurfaceView,
+a render thread and touch input. The UI thread only accumulates a pending pixel delta and the
+time of the oldest unshown event, plus a release velocity from `VelocityTracker`. The render
+thread owns an `OverScroller` and the deriver's frame calls. Each frame runs
+`deriveFrameBegin` (paced), takes all input that has arrived, then calls `deriveFrameInput`
+(the event time), `deriveScroll`, `deriveSettleVisible` and `deriveFrame`. When no input is
+pending and no fling runs, it makes no frames.
+
+`android.touch` dispatches real MotionEvents through the view: DOWN, then 30 MOVEs of 24 px
+8 ms apart, then UP, so the view flings. It runs with prefetch (8/32) and pace mode 2. Pixel
+bundle `662358b66638`, first run:
+- the final position (191, 104) equals an exact-height walk of every consumed pixel: 720 px
+  of drag plus 556 px of fling over 616 ms. The scene equals the reference;
+- 50 frames, 0 skipped vsyncs, 0 pace misses, 0 layout pauses, 0 frames after idle;
+- frame start to display: 31.6 ms p50, 33.4 ms max. Touch to display, from the oldest event a
+  frame consumes: 46.6 / 49.0 / 49.9 ms (p50/p90/max), over 17 input frames. Moves 8 ms apart
+  are batched into 16.65 ms frames, and an event waits up to one frame for the next paced start.

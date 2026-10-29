@@ -44,6 +44,7 @@ final class NativeCore {
     static native long[] derivePresentTimes(long deriver);
     static native int derivePace(long deriver, int mode);
     static native long deriveFrameBegin(long deriver);
+    static native void deriveFrameInput(long deriver, long eventNanos);
     static native long deriveValue(long deriver, int paragraph);
     static native byte[] deriveBytes(long deriver, int paragraph);
     static native long[] deriveStats(long deriver);
