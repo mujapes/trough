@@ -186,7 +186,7 @@ final class LayoutDeriveOracle {
     /** Mixed-script paragraphs of varying length; every 8th repeats an earlier one exactly. */
     static List<String> corpus(int n) {
         String[] words = {"layout", "derivation", "Trough", "office", "affluent", "שלום", "עברית", "مرحبا", "بالعالم",
-            "हिन्दी", "पाठ", "中文", "日本語", "12345", "Ελληνικά", "fjord", "quick", "brown", "fox", "—", "text,", "lines."};
+            "हिन्दी", "पाठ", "中文", "日本語", "12345", "Ελληνικά", "fjord", "quick", "brown", "fox", "—", "text,", "lines.", "😀", "👍🏽"};
         Random r = new Random(42);
         List<String> out = new ArrayList<>();
         for (int i = 0; i < n; i++) {

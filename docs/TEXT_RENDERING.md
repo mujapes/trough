@@ -69,9 +69,27 @@ with a per-run `getOffsetForAdvance` and a "paragraph-direction run wins" caret,
 2132 carets and 113 of 7653 taps: at the שלום boundaries, at a line starting with עברית, and at
 the layout's last line end. Bundle `fc978451ba7c...`: 0 of 2132 and 0 of 7653.
 
+## Colour glyphs
+
+2026-10-29. Emoji were drawn as coverage masks: one-colour silhouettes.
+- **Detection:** a face is a colour face when its font file has a colour glyph table: CBDT, COLR,
+  sbix or SVG. `DeriveLayout.colorFace` reads the face's own table directory (inside a
+  collection, the face's offset) once per face.
+- **Rasterising:** colour glyphs go into `ARGB_8888`, whose pixels copy out as premultiplied
+  R, G, B, A. The mask record marks them with the width's top bit.
+- **Drawing:** the renderer has a second atlas, RGBA8, beside the R8 coverage atlas, plus a
+  per-glyph kind. A colour glyph draws as texel * colour.a, so only opacity applies. Frames
+  upload into either atlas (`ps_upload.color`). `deriveFrame` keeps a separate residency for
+  each atlas, with the same fence retirement.
+
+Evidence: the glyph oracle (`core_scene.sh` on lavapipe, `android.glyphs` on Mali) draws a
+third of its glyphs as random premultiplied RGBA images. On lavapipe there are 1993 colour
+glyphs and 0 bad pixels. A shader that ignores the kind gives 199k bad pixels. The shared
+layout corpus now includes 😀 and 👍🏽, so `android.view`'s frames compare emoji against the
+platform drawing them.
+
 ## Not yet built
 
 Subpixel glyph positioning on the GPU path (positions are snapped to pixels there, while
-`TextLayout` keeps exact positions); hyphen edits; colour glyphs such as emoji,
-which need an RGBA atlas; atlas eviction and luminance-bucket keys; caret movement by keyboard (visual left/right across bidi runs) and selection highlights; and scaling with display density and
+`TextLayout` keeps exact positions); hyphen edits; atlas eviction and luminance-bucket keys; caret movement by keyboard (visual left/right across bidi runs) and selection highlights; and scaling with display density and
 font scale.

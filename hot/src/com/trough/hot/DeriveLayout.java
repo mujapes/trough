@@ -65,8 +65,11 @@ final class DeriveLayout {
         return id;
     }
 
-    /** One glyph's coverage mask, as the platform rasterises it in black at TEXT_SIZE:
-     * width, height, left, top (ints), then width*height coverage bytes. Empty glyphs are 0x0. */
+    /** One glyph's image, as the platform rasterises it in black at TEXT_SIZE: width, height,
+     * left, top (ints), then the pixels. A coverage glyph has width*height coverage bytes. A glyph
+     * of a colour font (emoji) has the width's top bit set and width*height premultiplied RGBA
+     * texels (docs/TEXT_RENDERING.md "Colour glyphs"). Empty glyphs are 0x0. */
+    static final int COLOR_GLYPH = 0x80000000;
     static byte[] mask(int faceId, int glyph) {
         Font font = face(faceId);
         Paint p = PAINT.get();
@@ -77,15 +80,41 @@ final class DeriveLayout {
         if (b.isEmpty()) { out = java.nio.ByteBuffer.allocate(16); out.putInt(0).putInt(0).putInt(0).putInt(0); return out.array(); }
         int left = (int) Math.floor(b.left) - 2, top = (int) Math.floor(b.top) - 2;
         int w = (int) Math.ceil(b.right) + 2 - left, h = (int) Math.ceil(b.bottom) + 2 - top;
-        android.graphics.Bitmap m = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ALPHA_8);
+        boolean color = colorFace(faceId);
+        int bpp = color ? 4 : 1;
+        android.graphics.Bitmap m = android.graphics.Bitmap.createBitmap(w, h, color ? android.graphics.Bitmap.Config.ARGB_8888 : android.graphics.Bitmap.Config.ALPHA_8);
         new android.graphics.Canvas(m).drawGlyphs(new int[]{glyph}, 0, new float[]{-left, -top}, 0, 1, font, p);
         java.nio.ByteBuffer px = java.nio.ByteBuffer.allocate(m.getRowBytes() * h);
-        m.copyPixelsToBuffer(px);
+        m.copyPixelsToBuffer(px);                     /* ARGB_8888 copies as premultiplied R, G, B, A bytes */
         m.recycle();
-        out = java.nio.ByteBuffer.allocate(16 + w * h);
-        out.putInt(w).putInt(h).putInt(left).putInt(top);
-        for (int y = 0; y < h; y++) out.put(px.array(), y * (px.capacity() / h), w);
+        out = java.nio.ByteBuffer.allocate(16 + w * h * bpp);
+        out.putInt(color ? w | COLOR_GLYPH : w).putInt(h).putInt(left).putInt(top);
+        for (int y = 0; y < h; y++) out.put(px.array(), y * (px.capacity() / h), w * bpp);
         return out.array();
+    }
+
+    /** Whether a face draws its own colours: its font file has colour glyph tables (CBDT bitmaps,
+     * COLR layers, sbix, SVG). Read once per face from the font's own table directory. */
+    private static final Map<Integer, Boolean> COLOR_FACES = new HashMap<>();
+    static boolean colorFace(int faceId) {
+        synchronized (COLOR_FACES) {
+            Boolean known = COLOR_FACES.get(faceId);
+            if (known != null) return known;
+        }
+        boolean color = false;
+        try {
+            Font font = face(faceId);
+            java.nio.ByteBuffer f = font.getBuffer().duplicate().order(java.nio.ByteOrder.BIG_ENDIAN);
+            int base = 0;
+            if (f.getInt(0) == 0x74746366) base = f.getInt(12 + 4 * font.getTtcIndex());   /* 'ttcf': this face's offset */
+            int tables = f.getShort(base + 4) & 0xffff;
+            for (int t = 0; t < tables; t++) {
+                int tag = f.getInt(base + 12 + 16 * t);
+                if (tag == 0x43424454 || tag == 0x434f4c52 || tag == 0x73626978 || tag == 0x53564720) color = true;   /* CBDT COLR sbix 'SVG ' */
+            }
+        } catch (RuntimeException e) { color = false; }
+        synchronized (COLOR_FACES) { COLOR_FACES.put(faceId, color); }
+        return color;
     }
 
     /** A Font object for a face id (for rasterising its glyphs). */

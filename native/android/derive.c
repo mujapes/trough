@@ -34,6 +34,7 @@ typedef struct {
     /* The view's frames (deriveFrameOpen): GPU frame ring and atlas residency, used only by the
      * thread that calls deriveFrame. */
     ps_gpu *gpu; ANativeWindow *window; at_atlas atlas; at_cell *atlas_cells; uint32_t *atlas_index; int32_t atlas_pages[64];
+    at_atlas catlas; at_cell *catlas_cells; uint32_t *catlas_index; int32_t catlas_pages[64];   /* colour glyphs (RGBA8) */
     uint32_t fw, fh; uint64_t frame_uploads, frame_hits;
     ps_present_time present_times[1024]; size_t npresent; uint64_t refresh_ns;   /* derivePresentTimes */
     /* Frame pacing (deriveFrameBegin): the newest displayed frame, each frame's start time (when
@@ -650,7 +651,7 @@ static void destroy(deriver *d) {
     vs_close(d->vsync);
     if (d->gpu) ps_close(d->gpu);
     if (d->window) ANativeWindow_release(d->window);
-    free(d->atlas_cells); free(d->atlas_index);
+    free(d->atlas_cells); free(d->atlas_index); free(d->catlas_cells); free(d->catlas_index);
     free(d->onodes); free(d->ofree); free(d->ochanged); free(d->oparent); free(d->oleaf); free(d->omarked); free(d->oused); free(d->ocell);
     free(d->free_ids); free(d->pf_ids);
     free(d->cells); free(d->text); free(d->nodes); free(d->blocks); free(d->table); free(d->path); free(d->node);
@@ -1312,7 +1313,10 @@ static int atlas_open(deriver *d, jint aw, jint ah) {
     size_t cells = (size_t)(aw / 16) * (ah / 16), index = 1; while (index < 2 * cells) index <<= 1;
     if ((size_t)(aw / 256) * (ah / 256) > 64) return -1;
     d->atlas_cells = calloc(cells, sizeof *d->atlas_cells); d->atlas_index = calloc(index, sizeof *d->atlas_index);
-    if (!d->atlas_cells || !d->atlas_index) return -2;
+    d->catlas_cells = calloc(cells, sizeof *d->catlas_cells); d->catlas_index = calloc(index, sizeof *d->catlas_index);
+    if (!d->atlas_cells || !d->atlas_index || !d->catlas_cells || !d->catlas_index) return -2;
+    /* Coverage and colour glyphs have their own residency over same-sized atlases (ps_frames_init). */
+    if (at_init(&d->catlas, (uint32_t)aw, (uint32_t)ah, 256, d->catlas_cells, cells, d->catlas_index, index, d->catlas_pages)) return -3;
     return at_init(&d->atlas, (uint32_t)aw, (uint32_t)ah, 256, d->atlas_cells, cells, d->atlas_index, index, d->atlas_pages) ? -3 : 0;
 }
 /* Frames presented to an Android Surface instead of offscreen targets. */
@@ -1381,23 +1385,27 @@ JNIEXPORT jbyteArray JNICALL CLASS(deriveFrame)(JNIEnv *env, jclass c, jlong h, 
     for (uint32_t k = 0; k < count; k++) {
         const unsigned char *q = sc.bytes + 4 + (size_t)k * 16, *m = bytes[k];
         uint32_t w = be32(m), hh = be32(m + 4); int32_t left = (int32_t)be32(m + 8), top = (int32_t)be32(m + 12);
+        int color = (w & 0x80000000u) != 0;            /* a colour glyph: premultiplied RGBA texels */
+        w &= 0x7fffffffu;
         if (!w || !hh) continue;                       /* empty glyph */
+        size_t size = (size_t)w * hh * (color ? 4 : 1);
         at_rect r;
-        tr_status s = at_use(&d->atlas, handles[k], (uint16_t)w, (uint16_t)hh, &r);
+        tr_status s = at_use(color ? &d->catlas : &d->atlas, handles[k], (uint16_t)w, (uint16_t)hh, &r);
         if (s == TR_CAPACITY) continue;                /* refused: drawn next frame (counted) */
         if (s == TR_STALE) {
-            if (staged + (size_t)w * hh > cap) {
-                cap = (staged + (size_t)w * hh) * 2 + 65536;
+            if (staged + size > cap) {
+                cap = (staged + size) * 2 + 65536;
                 unsigned char *grown = realloc(staging, cap);
                 if (!grown) goto done;
                 staging = grown;
             }
-            memcpy(staging + staged, m + 16, (size_t)w * hh);
-            ups[nup++] = (ps_upload){r.x, r.y, (uint16_t)w, (uint16_t)hh, (uint32_t)staged, 0};
-            staged += (size_t)w * hh; d->frame_uploads++;
+            memcpy(staging + staged, m + 16, size);
+            ups[nup++] = (ps_upload){r.x, r.y, (uint16_t)w, (uint16_t)hh, (uint32_t)staged, (uint32_t)color};
+            staged += size; d->frame_uploads++;
         } else d->frame_hits++;
         float x = floorf(bef(q + 8) + 0.5f) + (float)left, y = floorf(bef(q + 12) + 0.5f) + (float)top;
-        glyphs[nglyph++] = (ps_glyph){x, y, x + (float)w, y + (float)hh, r.x, r.y, 0, 0, -1e6f, -1e6f, 1e6f, 1e6f, 0, 0, 0, 1};
+        glyphs[nglyph++] = (ps_glyph){x, y, x + (float)w, y + (float)hh, r.x, r.y, color ? PS_GLYPH_COLOR : PS_GLYPH_COVERAGE, 0,
+                                      -1e6f, -1e6f, 1e6f, 1e6f, 0, 0, 0, 1};
     }
     uint64_t number;
     int presented = d->window ? ps_frame_present(d->gpu, ups, nup, staging, staged, rects, nrect, glyphs, nglyph, pixels, &number)
@@ -1412,8 +1420,8 @@ JNIEXPORT jbyteArray JNICALL CLASS(deriveFrame)(JNIEnv *env, jclass c, jlong h, 
             else { d->work_ns = (7 * d->work_ns + w) / 8; d->work_dev = (7 * d->work_dev + dev) / 8; }
         }
     }
-    if (presented) { at_submit(&d->atlas); ms[4] = -presented; goto done; }   /* 1: swapchain out of date */
-    at_submit(&d->atlas);
+    if (presented) { at_submit(&d->atlas); at_submit(&d->catlas); ms[4] = -presented; goto done; }   /* 1: swapchain out of date */
+    at_submit(&d->atlas); at_submit(&d->catlas);
     clock_gettime(CLOCK_MONOTONIC, &t2);
     if (pixels) {
         if (ps_frames_wait(d->gpu, number)) goto done;
@@ -1423,7 +1431,8 @@ JNIEXPORT jbyteArray JNICALL CLASS(deriveFrame)(JNIEnv *env, jclass c, jlong h, 
             (*env)->SetByteArrayRegion(env, result, 0, (jsize)bytes_px, (const jbyte *)rgba);
         free(rgba);
     }
-    at_retire(&d->atlas, ps_frames_retired(d->gpu));
+    uint64_t retired = ps_frames_retired(d->gpu);
+    at_retire(&d->atlas, retired); at_retire(&d->catlas, retired);
     clock_gettime(CLOCK_MONOTONIC, &t3);
     ms[0] = (t1.tv_sec - t0.tv_sec) * 1e3 + (t1.tv_nsec - t0.tv_nsec) / 1e6;
     ms[1] = (t2.tv_sec - t1.tv_sec) * 1e3 + (t2.tv_nsec - t1.tv_nsec) / 1e6;
