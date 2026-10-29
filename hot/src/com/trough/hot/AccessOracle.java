@@ -25,7 +25,7 @@ final class AccessOracle {
         List<Object> failures = new ArrayList<>();
         long d = NativeCore.deriveOpen(1, n);
         if (d < 0) return Json.map("ok", false, "error", "deriveOpen " + d);
-        int nodes = 0, actions = 0, lineMismatch = 0;
+        int nodes = 0, actions = 0, lineMismatch = 0, textEvents = 0;
         int[] byGranularity = new int[5];
         try {
             NativeCore.deriveWidth(d, W);
@@ -103,12 +103,38 @@ final class AccessOracle {
                     }
                 }
             }
+            /* Text-change events (TextView.sendAccessibilityEventTypeViewTextChanged): an insertion,
+             * a deletion and a replacement inside a paragraph come from its node with TextView's
+             * fields; a newline split is a subtree change (no event). */
+            int p = positions.get(1), id = idOf(provider, p);
+            String before = corpus.get(p);
+            TextInput input = new TextInput(host, host.doc);
+            long base = 0;
+            for (int i = 0; i < p; i++) base += corpus.get(i).length() + 1;
+            Object[][] edits = {{3, 3, "xy"}, {2, 5, ""}, {1, 4, "Q"}};
+            for (Object[] e : edits) {
+                int a = (Integer) e[0], b = (Integer) e[1]; String t = (String) e[2];
+                input.setSelection((int) base + a, (int) base + b);
+                input.commitText(t, 1);
+                android.view.accessibility.AccessibilityEvent ev = host.textChangedEvent(host.doc.lastChange);
+                String after = before.substring(0, a) + t + before.substring(b);
+                textEvents++;
+                if (ev == null || ev.getFromIndex() != a || ev.getRemovedCount() != b - a || ev.getAddedCount() != t.length()
+                        || !before.contentEquals(ev.getBeforeText()) || ev.getText().isEmpty() || !after.contentEquals(ev.getText().get(0))
+                        || ev.getEventType() != android.view.accessibility.AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED)
+                    failures.add(Json.map("text_changed", Arrays.asList(a, b, t), "got", ev == null ? null : Arrays.asList(ev.getFromIndex(), ev.getRemovedCount(), ev.getAddedCount())));
+                before = after;
+            }
+            if (idOf(provider, p) != id) failures.add(Json.map("id_moved", p));
+            input.setSelection((int) base + 2, (int) base + 2);
+            input.commitText("\n", 1);
+            if (host.textChangedEvent(host.doc.lastChange) != null) failures.add(Json.map("split_event", "expected a subtree change"));
         } finally {
             NativeCore.deriveClose(d);
         }
         return Json.map("ok", failures.isEmpty() && nodes > 0 && actions > 0 && lineMismatch == 0, "nodes", nodes, "actions", actions,
             "by_granularity", Arrays.asList(byGranularity[0], byGranularity[1], byGranularity[2], byGranularity[3]),
-            "line_mismatch_paragraphs", lineMismatch, "failures", failures);
+            "line_mismatch_paragraphs", lineMismatch, "text_events", textEvents, "failures", failures);
     }
 
     private static int idOf(DocumentAccessibility provider, int position) {

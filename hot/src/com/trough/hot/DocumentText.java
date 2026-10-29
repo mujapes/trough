@@ -20,8 +20,25 @@ final class DocumentText implements TextInput.Backend {
         return new long[]{s[0], s[1], s[2], composingStart, composingEnd};
     }
 
+    /** The last apply's text change, for accessibility (TYPE_VIEW_TEXT_CHANGED): within one
+     * paragraph (position, its text before, from, removed, added), or `whole` when it split,
+     * merged or touched several ranges. Null when apply changed no text. */
+    static final class Change { int position, from, removed, added; String before; boolean whole; }
+    volatile Change lastChange;
+
     @Override public void apply(int[] ranges, String[] texts, int anchor, int caret, int cs, int ce) {
+        Change change = null;
+        if (texts.length == 1) {
+            long s = NativeCore.deriveLocate(deriver, ranges[0]), e = NativeCore.deriveLocate(deriver, ranges[1]);
+            change = new Change();
+            change.position = (int) (s >> 32);
+            change.whole = (s >> 32) != (e >> 32) || texts[0].indexOf('\n') >= 0;
+            change.before = paragraph(change.position);
+            change.from = (int) (s & 0xffffffffL); change.removed = (int) ((e & 0xffffffffL) - change.from); change.added = texts[0].length();
+            if (!change.whole && change.removed == 0 && change.added == 0) change = null;
+        } else if (texts.length > 1) { change = new Change(); change.whole = true; }
         for (int k = 0; k < texts.length; k++) replace(ranges[2 * k], ranges[2 * k + 1], texts[k]);
+        if (texts.length > 0) lastChange = change;
         long a = NativeCore.deriveLocate(deriver, anchor), c = NativeCore.deriveLocate(deriver, caret);
         if (a == c) NativeCore.deriveSelect(deriver, (int) (c >> 32), (int) (c & 0xffffffffL));
         else NativeCore.deriveSelectRange(deriver, (int) (a >> 32), (int) (a & 0xffffffffL), (int) (c >> 32), (int) (c & 0xffffffffL));

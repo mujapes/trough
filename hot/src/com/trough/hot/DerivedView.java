@@ -87,6 +87,26 @@ final class DerivedView extends SurfaceView implements SurfaceHolder.Callback {
         AccessibilityManager am = (AccessibilityManager) getContext().getSystemService(Context.ACCESSIBILITY_SERVICE);
         return am != null && am.isEnabled();
     }
+    /** TextView's TYPE_VIEW_TEXT_CHANGED for a change inside one paragraph, from that paragraph's
+     * virtual node (TalkBack echoes typing from it); null for splits and merges, which are
+     * reported as a subtree change. */
+    android.view.accessibility.AccessibilityEvent textChangedEvent(DocumentText.Change c) {
+        if (c == null || c.whole) return null;
+        String after = NativeCore.deriveParagraph(deriver, c.position);
+        int id = NativeCore.deriveId(deriver, c.position);
+        if (after == null || id < 0) return null;
+        AccessibilityEvent e = AccessibilityEvent.obtain(AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED);
+        e.setSource(this, id);
+        e.setClassName("android.widget.EditText");
+        e.setPackageName(getContext().getPackageName());
+        e.setFromIndex(c.from);
+        e.setRemovedCount(c.removed);
+        e.setAddedCount(c.added);
+        e.setBeforeText(c.before);
+        e.getText().add(after);
+        e.setItemCount(after.length());
+        return e;
+    }
     /** UI thread: what accessibility services see changed (scroll, edit, selection). */
     void reportAccessibility(boolean scrolled, boolean edited) {
         if (!accessible()) return;
@@ -121,7 +141,13 @@ final class DerivedView extends SurfaceView implements SurfaceHolder.Callback {
         System.arraycopy(new long[]{v[1], v[2], v[3], v[4]}, 0, reported, 0, 4);
         TextInput input = new TextInput(this, doc);
         input.host = new TextInput.Host() {
-            @Override public void changed() { contentChanged(); reportSelection(); }
+            @Override public void changed() {
+                contentChanged(); reportSelection();
+                if (accessible()) {
+                    AccessibilityEvent e = textChangedEvent(doc.lastChange);
+                    if (e != null && getParent() != null) getParent().requestSendAccessibilityEvent(DerivedView.this, e);
+                }
+            }
             @Override public boolean cursorUpdates(int mode) {
                 cursorMonitor = (mode & InputConnection.CURSOR_UPDATE_MONITOR) != 0;
                 if ((mode & InputConnection.CURSOR_UPDATE_IMMEDIATE) != 0) { cursorImmediate = true; post(new Runnable() { public void run() { reportCursor(); } }); }

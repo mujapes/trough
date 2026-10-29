@@ -1149,6 +1149,14 @@ static void position_of(void *arg, tr_world *w, dv_graph *g) {
     (void)w; (void)g; doc_call *c = arg; uint64_t pos;
     c->n = c->global >= 0 && or_position(&c->d->order, (uint32_t)c->global, &pos) == TR_OK ? (int64_t)pos : -1;
 }
+static void id_of(void *arg, tr_world *w, dv_graph *g) {
+    (void)g; doc_call *c = arg; c->n = (int64_t)owner_id(c->d, w, c->global) - 1;
+}
+JNIEXPORT jint JNICALL CLASS(deriveId)(JNIEnv *env, jclass c, jlong h, jint position) {   /* the id at position, or -1 */
+    (void)env; (void)c; deriver *d = (deriver *)(intptr_t)h; doc_call k = {d, position, 0, 0, {0}, NULL, 0, 0, 0};
+    ex_call(&d->ex, id_of, &k);
+    return (jint)k.n;
+}
 JNIEXPORT jint JNICALL CLASS(derivePosition)(JNIEnv *env, jclass c, jlong h, jint id) {
     (void)env; (void)c; deriver *d = (deriver *)(intptr_t)h; doc_call k = {d, id, 0, 0, {0}, NULL, 0, 0, 0};
     ex_call(&d->ex, position_of, &k);

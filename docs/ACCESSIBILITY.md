@@ -33,6 +33,12 @@ A paragraph node behaves as a TextView holding that paragraph:
 - Click places the caret at the paragraph's end. Accessibility focus is tracked per id.
 
 Events, sent only while accessibility is enabled:
+- `TYPE_VIEW_TEXT_CHANGED` from the edited paragraph's node, with TextView's fields: from
+  index, removed and added counts, before text and the text after. TalkBack echoes typing
+  from these. `DocumentText.lastChange` records each apply that stays inside one paragraph.
+  Splits, merges and multi-range edits are reported as subtree changes instead. The node's
+  id comes from the order tree (`deriveId`), because the edited paragraph's layout is not
+  clean yet;
 - `TYPE_VIEW_TEXT_SELECTION_CHANGED` with each selection report to the IME;
 - `TYPE_VIEW_SCROLLED` after scroll frames;
 - `TYPE_WINDOW_CONTENT_CHANGED` (subtree, plus text after edits) after scroll or edit frames.
@@ -43,6 +49,10 @@ Events, sent only while accessibility is enabled:
 paragraph and checks:
 - the host's children are the shown paragraphs, in order;
 - each node's text, bounds (against a flat StaticLayout height walk) and granularities.
+
+It then checks text-change events for an insertion, a deletion and a replacement inside one
+paragraph (fields as TextView sets them, and the node id unchanged), and that a newline split
+sends none.
 
 Then, for each shown paragraph, an EditText holding the same text with the same width, text
 size and line breaking is the reference. The oracle first checks that its lines equal
