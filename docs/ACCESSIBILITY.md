@@ -55,4 +55,3 @@ the resulting selection must match after each action.
 - Paragraph nodes for text outside the viewport, and traversal that continues into the next
   paragraph (TalkBack moves to the next node).
 - Text-editing actions on nodes (`ACTION_SET_TEXT`, cut/copy/paste) and `ACTION_IME_ENTER`.
-- `derivePosition` walks all paragraphs (O(n)); it is only used for ids no longer shown.

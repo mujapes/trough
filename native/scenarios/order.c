@@ -15,8 +15,9 @@
 
 #define CHECK(c) do { if (!(c)) { fprintf(stderr, "%s:%d check failed: %s\n", __FILE__, __LINE__, #c); abort(); } } while (0)
 
-enum { CAP = 4096, MAXN = 12000 };
-static or_node nodes[CAP]; static uint32_t freel[CAP], changed[CAP]; static uint8_t marked[CAP], used[CAP];
+enum { CAP = 4096, MAXN = 12000, IDS = 60000 };
+static or_node nodes[CAP]; static uint32_t freel[CAP], changed[CAP], parents[CAP], leafs[IDS]; static uint8_t marked[CAP], used[CAP];
+static uint32_t removed_id;
 static unsigned char published[CAP][OR_ENCODED_MAX]; static size_t published_n[CAP];
 static uint32_t ids[MAXN]; static uint64_t units[MAXN]; static uint64_t n;
 static uint64_t rng = 0x9e3779b97f4a7c15ULL;
@@ -83,8 +84,9 @@ static int verify(or_tree *t) {
             slot = child;
         }
         CHECK(child == ids[i]);
-        uint32_t entries;
+        uint32_t entries; uint64_t at;
         CHECK(or_leaf_entries(t, i, &entries) == TR_OK && entries == t->nodes[slot_of_leaf(i)].n);
+        CHECK(or_position(t, ids[i], &at) == TR_OK && at == i);   /* id -> position through parent links */
         if (next() % 4 == 0 || i + 1 == n) {       /* locate: inside, at the end, on the separator */
             uint64_t q = units[i] ? next() % (units[i] + 1) : 0;
             CHECK(or_locate(t, g + q, &p, &o) == TR_OK && p == i && o == q);
@@ -92,8 +94,9 @@ static int verify(or_tree *t) {
         }
         g += units[i] + 1;
     }
-    uint64_t end;
+    uint64_t end, gone;
     CHECK(or_offset(t, n, &end) == TR_OK && end == g);
+    if (removed_id) CHECK(or_position(t, removed_id, &gone) == TR_INVALID);
     if (n) {                                        /* past the end clamps to the last paragraph's end */
         uint64_t p, o;
         CHECK(or_locate(t, g + 50, &p, &o) == TR_OK && p == n - 1 && o == units[n - 1]);
@@ -109,7 +112,7 @@ int main(int argc, char **argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
     int rounds = argc > 1 ? atoi(argv[1]) : 40000;
     or_tree t;
-    CHECK(or_init(&t, nodes, CAP, freel, changed, marked, used) == TR_OK);
+    CHECK(or_init(&t, nodes, CAP, freel, changed, marked, used, parents, leafs, IDS) == TR_OK);
     uint32_t republished; publish(&t, &republished);
     uint32_t next_id = 1, max_republished = 0, max_depth = 0; uint64_t max_n = 0, total_republished = 0, ops = 0;
     uint64_t counts[3] = {0};
@@ -132,6 +135,7 @@ int main(int argc, char **argv) {
             if (pos >= n) pos = n - 1;
             uint32_t id;
             CHECK(or_remove(&t, pos, &id) == TR_OK && id == ids[pos]);
+            removed_id = id;
             memmove(&ids[pos], &ids[pos + 1], (n - pos - 1) * sizeof ids[0]);
             memmove(&units[pos], &units[pos + 1], (n - pos - 1) * sizeof units[0]);
             n--;
@@ -160,9 +164,9 @@ int main(int argc, char **argv) {
            (unsigned long long)max_n, max_depth, max_republished, (double)total_republished / (double)ops, secs);
 
     /* Capacity: a store with no room refuses insertion and leaves the tree as it was. */
-    static or_node small_nodes[8]; static uint32_t sf[8], sc[8]; static uint8_t sm[8], su[8];
+    static or_node small_nodes[8]; static uint32_t sf[8], sc[8], sp[8], sl[IDS]; static uint8_t sm[8], su[8];
     or_tree s;
-    CHECK(or_init(&s, small_nodes, 8, sf, sc, sm, su) == TR_OK);
+    CHECK(or_init(&s, small_nodes, 8, sf, sc, sm, su, sp, sl, IDS) == TR_OK);
     uint64_t inserted = 0; tr_status st = TR_OK;
     while ((st = or_insert(&s, inserted, (uint32_t)inserted + 1, 1)) == TR_OK) inserted++;
     CHECK(st == TR_CAPACITY && inserted >= OR_FAN);
@@ -171,9 +175,9 @@ int main(int argc, char **argv) {
     printf("ok capacity: 8 slots hold %llu paragraphs, then insertion is refused with the tree unchanged\n", (unsigned long long)inserted);
 
     /* Scale: per-operation cost does not grow with the document. */
-    static or_node big[40000]; static uint32_t bf[40000], bc[40000]; static uint8_t bm[40000], bu[40000];
+    static or_node big[40000]; static uint32_t bf[40000], bc[40000], bp[40000], bl[100000]; static uint8_t bm[40000], bu[40000];
     or_tree b;
-    CHECK(or_init(&b, big, 40000, bf, bc, bm, bu) == TR_OK);
+    CHECK(or_init(&b, big, 40000, bf, bc, bm, bu, bp, bl, 100000) == TR_OK);
     struct timespec t0, t1;
     clock_gettime(CLOCK_MONOTONIC, &t0);
     for (uint32_t i = 0; i < 100000; i++) { CHECK(or_insert(&b, next() % (i + 1), i, next() % 200) == TR_OK); or_take_changed(&b, bc, 40000); }
@@ -184,8 +188,12 @@ int main(int argc, char **argv) {
     for (int i = 0; i < 100000; i++) { CHECK(or_locate(&b, next() % total, &p, &o) == TR_OK); sink += p; }
     clock_gettime(CLOCK_MONOTONIC, &t1);
     double locate_us = ((t1.tv_sec - t0.tv_sec) * 1e9 + (t1.tv_nsec - t0.tv_nsec)) / 1e3 / 100000;
-    printf("ok scale: 100000 paragraphs; insert %.3f us, locate %.3f us (%llu)\n", insert_us, locate_us, (unsigned long long)(sink % 7));
-    printf("{\"ok\":true,\"ops\":%llu,\"max_paragraphs\":%llu,\"max_depth\":%u,\"max_republished\":%u,\"insert_us\":%.3f,\"locate_us\":%.3f}\n",
-           (unsigned long long)ops, (unsigned long long)max_n, max_depth, max_republished, insert_us, locate_us);
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    for (int i = 0; i < 100000; i++) { CHECK(or_position(&b, (uint32_t)(next() % 100000), &p) == TR_OK); sink += p; }
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    double position_us = ((t1.tv_sec - t0.tv_sec) * 1e9 + (t1.tv_nsec - t0.tv_nsec)) / 1e3 / 100000;
+    printf("ok scale: 100000 paragraphs; insert %.3f us, locate %.3f us, position of an id %.3f us (%llu)\n", insert_us, locate_us, position_us, (unsigned long long)(sink % 7));
+    printf("{\"ok\":true,\"ops\":%llu,\"max_paragraphs\":%llu,\"max_depth\":%u,\"max_republished\":%u,\"insert_us\":%.3f,\"locate_us\":%.3f,\"position_us\":%.3f}\n",
+           (unsigned long long)ops, (unsigned long long)max_n, max_depth, max_republished, insert_us, locate_us, position_us);
     return 0;
 }

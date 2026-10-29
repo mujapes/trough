@@ -22,6 +22,15 @@ makes all of these O(log n).
 - Owner-serialised. Insertion checks for room (one slot per level plus two) before changing
   anything, so `TR_CAPACITY` leaves the tree as it was.
 
+## Identity to position
+
+Each slot records its parent, and each id the leaf holding it, wherever entries land (insert,
+split, borrow, merge, root split and collapse). `or_position(id)` walks up from the leaf,
+adding the counts before each node: O(log n), 0.38 us at 100000 paragraphs in the VM. A
+removed id's leaf no longer holds it, so it is reported absent. Accessibility uses this:
+nodes are named by id (`derivePosition`). Nine further mutants each drop one ownership
+update or the absence check; all are killed.
+
 ## Publication
 
 The derivation graph cannot read the owner's tree. Each node has a published form

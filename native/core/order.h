@@ -22,11 +22,15 @@ typedef struct {
     uint32_t *changed; uint32_t nchanged;           /* slots to republish, each once */
     uint8_t *marked;                                /* per slot: in changed[] */
     uint8_t *used;                                  /* per slot: holds a node */
+    uint32_t *parent;                               /* per slot: the internal node holding it */
+    uint32_t *leaf_of; uint32_t ids;                /* per id (< ids): the leaf holding it */
 } or_tree;
 
-/* nodes, free, changed, marked and used each hold capacity entries. A tree of n paragraphs
- * needs at most 2 * n / (OR_FAN / 2) + 8 slots. Starts empty, root marked. */
-tr_status or_init(or_tree *, or_node *nodes, uint32_t capacity, uint32_t *free, uint32_t *changed, uint8_t *marked, uint8_t *used);
+/* nodes, free, changed, marked, used and parent each hold capacity entries; leaf_of holds ids
+ * entries (paragraph ids are below ids). A tree of n paragraphs needs at most
+ * 2 * n / (OR_FAN / 2) + 8 slots. Starts empty, root marked. */
+tr_status or_init(or_tree *, or_node *nodes, uint32_t capacity, uint32_t *free, uint32_t *changed, uint8_t *marked, uint8_t *used,
+                  uint32_t *parent, uint32_t *leaf_of, uint32_t ids);
 uint64_t or_count(const or_tree *);
 uint64_t or_units(const or_tree *);                 /* the joined text: units + count - 1 separators */
 /* Insert id (with its units) so it becomes position pos (0..count). TR_CAPACITY: no slot. */
@@ -40,6 +44,8 @@ tr_status or_offset(const or_tree *, uint64_t pos, uint64_t *offset);
 /* The paragraph holding joined offset g and the offset within it, clamped to the document; a
  * separator belongs to the end of the paragraph before it. */
 tr_status or_locate(const or_tree *, uint64_t g, uint64_t *pos, uint64_t *off);
+/* The position of paragraph id, through parent links: O(log n). TR_INVALID when absent. */
+tr_status or_position(const or_tree *, uint32_t id, uint64_t *pos);
 /* Entries in the leaf holding pos (how many paragraphs one leaf summary estimates). */
 tr_status or_leaf_entries(const or_tree *, uint64_t pos, uint32_t *entries);
 /* Published changes: copies up to max slots and clears them. */

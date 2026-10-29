@@ -51,7 +51,7 @@ typedef struct {
      * (docs/ORDER.md); each tree slot's published form lives in ocell[slot], and operators walk
      * those from slot 0. Inserting or removing republishes O(log n) slots, never a layout.
      * count mirrors the number of paragraphs (written by the owner thread only). */
-    or_tree order; or_node *onodes; uint32_t *ofree, *ochanged; uint8_t *omarked, *oused; tr_id *ocell; uint32_t oslots;
+    or_tree order; or_node *onodes; uint32_t *ofree, *ochanged, *oparent, *oleaf; uint8_t *omarked, *oused; tr_id *ocell; uint32_t oslots;
     atomic_int count; uint32_t *free_ids; int nfree;
     uint32_t scene;                                   /* the scene node */
     atomic_ullong runs[8];                            /* invocations: layout, summary, scene, mask; [4] paragraphs estimated; caret, overlay */
@@ -651,7 +651,7 @@ static void destroy(deriver *d) {
     if (d->gpu) ps_close(d->gpu);
     if (d->window) ANativeWindow_release(d->window);
     free(d->atlas_cells); free(d->atlas_index);
-    free(d->onodes); free(d->ofree); free(d->ochanged); free(d->omarked); free(d->oused); free(d->ocell);
+    free(d->onodes); free(d->ofree); free(d->ochanged); free(d->oparent); free(d->oleaf); free(d->omarked); free(d->oused); free(d->ocell);
     free(d->free_ids); free(d->pf_ids);
     free(d->cells); free(d->text); free(d->nodes); free(d->blocks); free(d->table); free(d->path); free(d->node);
     free(d->entries); free(d->index); free(d);
@@ -671,13 +671,14 @@ JNIEXPORT jlong JNICALL CLASS(deriveOpen)(JNIEnv *env, jclass c, jint workers, j
     d->cells = calloc(cellc, sizeof *d->cells); d->text = calloc(n, sizeof *d->text);
     d->onodes = calloc(slots, sizeof *d->onodes); d->ofree = calloc(slots, sizeof *d->ofree); d->ochanged = calloc(slots, sizeof *d->ochanged);
     d->omarked = calloc(slots, 1); d->oused = calloc(slots, 1); d->ocell = calloc(slots, sizeof *d->ocell);
+    d->oparent = calloc(slots, sizeof *d->oparent); d->oleaf = calloc(n, sizeof *d->oleaf);
     d->free_ids = calloc(n, sizeof *d->free_ids); d->pf_ids = calloc(n, sizeof *d->pf_ids);
     d->nodes = calloc(nodec, sizeof *d->nodes); d->blocks = calloc(nodec, sizeof *d->blocks);
     d->table = calloc(pow2(2 * nodec), sizeof *d->table); d->path = calloc(nodec, sizeof *d->path);
     d->node = calloc(n, sizeof *d->node);
     d->entries = calloc(blobc, sizeof *d->entries); d->index = calloc(pow2(2 * blobc), sizeof *d->index);
     jclass cls = (*env)->FindClass(env, "com/trough/hot/DeriveLayout");
-    if (!d->onodes || !d->ofree || !d->ochanged || !d->omarked || !d->oused || !d->ocell || !d->free_ids || !d->pf_ids || !d->cells || !d->text || !d->nodes || !d->blocks || !d->table || !d->path || !d->node || !d->entries || !d->index || !cls) {
+    if (!d->onodes || !d->ofree || !d->ochanged || !d->oparent || !d->oleaf || !d->omarked || !d->oused || !d->ocell || !d->free_ids || !d->pf_ids || !d->cells || !d->text || !d->nodes || !d->blocks || !d->table || !d->path || !d->node || !d->entries || !d->index || !cls) {
         if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
         destroy(d); return -2;
     }
@@ -699,7 +700,7 @@ JNIEXPORT jlong JNICALL CLASS(deriveOpen)(JNIEnv *env, jclass c, jint workers, j
     for (size_t i = 0; i < slots; i++) tr_create(&d->world, 0, &d->ocell[i]);
     for (size_t i = n; i > (size_t)paragraphs; i--) d->free_ids[d->nfree++] = (uint32_t)(i - 1);
     bl_init(&d->blobs, d->entries, blobc, d->index, pow2(2 * blobc), 1ULL << 30);
-    or_init(&d->order, d->onodes, (uint32_t)slots, d->ofree, d->ochanged, d->omarked, d->oused);
+    or_init(&d->order, d->onodes, (uint32_t)slots, d->ofree, d->ochanged, d->omarked, d->oused, d->oparent, d->oleaf, (uint32_t)n);
     for (int i = 0; i < paragraphs; i++) or_insert(&d->order, (uint64_t)i, (uint32_t)i, 0);   /* id i at position i, empty */
     publish_order(d);
     dv_init(&d->graph, &d->world, d->nodes, nodec, d->blocks, nodec, d->table, pow2(2 * nodec), d->path);
@@ -1142,11 +1143,11 @@ JNIEXPORT jlongArray JNICALL CLASS(deriveVisible)(JNIEnv *env, jclass c, jlong h
     if (r) (*env)->SetLongArrayRegion(env, r, 0, (jsize)(1 + 4 * k.n), (const jlong *)rows);
     return r;
 }
-/* Position of paragraph id (accessibility nodes are named by id), or -1: O(paragraphs) walk. */
+/* Position of paragraph id (accessibility nodes are named by id), or -1: O(log n) through the
+ * order tree's parent links (docs/ORDER.md). */
 static void position_of(void *arg, tr_world *w, dv_graph *g) {
-    (void)g; doc_call *c = arg; int count = atomic_load(&c->d->count);
-    c->n = -1;
-    for (int i = 0; i < count; i++) if ((int64_t)owner_id(c->d, w, i) == c->global + 1) { c->n = i; return; }
+    (void)w; (void)g; doc_call *c = arg; uint64_t pos;
+    c->n = c->global >= 0 && or_position(&c->d->order, (uint32_t)c->global, &pos) == TR_OK ? (int64_t)pos : -1;
 }
 JNIEXPORT jint JNICALL CLASS(derivePosition)(JNIEnv *env, jclass c, jlong h, jint id) {
     (void)env; (void)c; deriver *d = (deriver *)(intptr_t)h; doc_call k = {d, id, 0, 0, {0}, NULL, 0, 0, 0};

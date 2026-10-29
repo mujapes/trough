@@ -24,6 +24,14 @@ static void release(or_tree *t, uint32_t s) {
     t->free[t->nfree++] = s;
     mark(t, s);                                     /* republished as nothing */
 }
+/* Entries [from, n) of slot s now live in s: their leaf_of (leaf) or parent (internal) says so. */
+static void own(or_tree *t, uint32_t s, uint32_t from) {
+    const or_node *x = &t->nodes[s];
+    for (uint32_t k = from; k < x->n; k++) {
+        if (x->leaf) { if (x->child[k] < t->ids) t->leaf_of[x->child[k]] = s; }
+        else t->parent[x->child[k]] = s;
+    }
+}
 static void entry_insert(or_node *x, uint32_t k, uint32_t child, uint64_t count, uint64_t units) {
     memmove(&x->child[k + 1], &x->child[k], (x->n - k) * sizeof x->child[0]);
     memmove(&x->count[k + 1], &x->count[k], (x->n - k) * sizeof x->count[0]);
@@ -42,9 +50,11 @@ static void move_tail(or_node *a, uint32_t from, or_node *b) {
     a->n = from;
 }
 
-tr_status or_init(or_tree *t, or_node *nodes, uint32_t capacity, uint32_t *free, uint32_t *changed, uint8_t *marked, uint8_t *used) {
-    if (!t || !nodes || capacity < 1 || !free || !changed || !marked || !used) return TR_INVALID;
-    *t = (or_tree){nodes, capacity, free, 0, changed, 0, marked, used};
+tr_status or_init(or_tree *t, or_node *nodes, uint32_t capacity, uint32_t *free, uint32_t *changed, uint8_t *marked, uint8_t *used,
+                  uint32_t *parent, uint32_t *leaf_of, uint32_t ids) {
+    if (!t || !nodes || capacity < 1 || !free || !changed || !marked || !used || !parent || !leaf_of) return TR_INVALID;
+    *t = (or_tree){nodes, capacity, free, 0, changed, 0, marked, used, parent, leaf_of, ids};
+    memset(parent, 0, capacity * sizeof *parent);
     memset(marked, 0, capacity); memset(used, 0, capacity);
     for (uint32_t s = capacity; s > 1; s--) free[t->nfree++] = s - 1;
     used[0] = 1;
@@ -71,13 +81,14 @@ static int split(or_tree *t, uint32_t s, uint32_t *right) {
     or_node *a = &t->nodes[s], *b = &t->nodes[*right];
     b->leaf = a->leaf;
     move_tail(a, a->n / 2, b);
+    own(t, *right, 0);
     mark(t, s);
     return 1;
 }
 
 static tr_status insert_at(or_tree *t, uint32_t s, uint64_t pos, uint32_t id, uint64_t units) {
     or_node *x = &t->nodes[s];
-    if (x->leaf) { entry_insert(x, (uint32_t)pos, id, 1, units); mark(t, s); return TR_OK; }
+    if (x->leaf) { entry_insert(x, (uint32_t)pos, id, 1, units); if (id < t->ids) t->leaf_of[id] = s; mark(t, s); return TR_OK; }
     uint32_t k = find(x, &pos, 1);
     uint32_t c = x->child[k];
     tr_status st = insert_at(t, c, pos, id, units);
@@ -88,6 +99,7 @@ static tr_status insert_at(or_tree *t, uint32_t s, uint64_t pos, uint32_t id, ui
         if (!split(t, c, &r)) return TR_CAPACITY;
         x = &t->nodes[s];
         entry_insert(x, k + 1, r, sum_count(&t->nodes[r]), sum_units(&t->nodes[r]));
+        t->parent[r] = s;
     }
     x->count[k] = sum_count(&t->nodes[c]); x->units[k] = sum_units(&t->nodes[c]);
     mark(t, s);
@@ -113,6 +125,7 @@ tr_status or_insert(or_tree *t, uint64_t pos, uint32_t id, uint64_t units) {
         root->n = 0; root->leaf = 0;
         entry_insert(root, 0, a, sum_count(&t->nodes[a]), sum_units(&t->nodes[a]));
         entry_insert(root, 1, b, sum_count(&t->nodes[b]), sum_units(&t->nodes[b]));
+        own(t, a, 0); own(t, b, 0); own(t, 0, 0);
         mark(t, 0);
     }
     return TR_OK;
@@ -128,17 +141,21 @@ static void rebalance(or_tree *t, uint32_t s, uint32_t k) {
         uint32_t l = x->child[k - 1]; or_node *b = &t->nodes[l];
         entry_insert(a, 0, b->child[b->n - 1], b->count[b->n - 1], b->units[b->n - 1]);
         b->n--;
+        own(t, c, 0);
         x->count[k - 1] = sum_count(b); x->units[k - 1] = sum_units(b);
         mark(t, l);
     } else if (k + 1 < x->n && t->nodes[x->child[k + 1]].n > MIN) {   /* the right sibling's first */
         uint32_t r = x->child[k + 1]; or_node *b = &t->nodes[r];
         entry_insert(a, a->n, b->child[0], b->count[0], b->units[0]);
         entry_remove(b, 0);
+        own(t, c, a->n - 1);
         x->count[k + 1] = sum_count(b); x->units[k + 1] = sum_units(b);
         mark(t, r);
     } else if (x->n > 1) {                                       /* merge into the left one of a pair */
         uint32_t left = k > 0 ? k - 1 : k, ls = x->child[left], rs = x->child[left + 1];
+        uint32_t from = t->nodes[ls].n;
         move_tail(&t->nodes[rs], 0, &t->nodes[ls]);
+        own(t, ls, from);
         entry_remove(x, left + 1);
         release(t, rs);
         x->count[left] = sum_count(&t->nodes[ls]); x->units[left] = sum_units(&t->nodes[ls]);
@@ -171,6 +188,7 @@ tr_status or_remove(or_tree *t, uint64_t pos, uint32_t *id) {
     if (!root->leaf && root->n == 1) {               /* one child left: it becomes the root */
         uint32_t c = root->child[0];
         *root = t->nodes[c];
+        own(t, 0, 0);
         release(t, c);
         mark(t, 0);
     }
@@ -230,6 +248,27 @@ tr_status or_locate(const or_tree *t, uint64_t g, uint64_t *pos, uint64_t *off) 
     while (k + 1 < x->n && g > x->units[k]) { g -= x->units[k] + 1; k++; }
     *pos = p + k;
     *off = g < x->units[k] ? g : x->units[k];
+    return TR_OK;
+}
+
+tr_status or_position(const or_tree *t, uint32_t id, uint64_t *pos) {
+    if (id >= t->ids) return TR_INVALID;
+    uint32_t s = t->leaf_of[id];
+    if (s >= t->capacity || !t->used[s]) return TR_INVALID;
+    const or_node *x = &t->nodes[s];
+    uint32_t k = 0;
+    while (k < x->n && x->child[k] != id) k++;
+    if (k == x->n) return TR_INVALID;               /* removed: its leaf no longer holds it */
+    uint64_t p = k;
+    for (int guard = 0; s != 0 && guard < 64; guard++) {   /* up: add the counts before s in its parent */
+        uint32_t up = t->parent[s];
+        const or_node *y = &t->nodes[up];
+        uint32_t j = 0;
+        while (j < y->n && y->child[j] != s) { p += y->count[j]; j++; }
+        if (j == y->n) return TR_INVALID;
+        s = up;
+    }
+    *pos = p;
     return TR_OK;
 }
 
