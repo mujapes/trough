@@ -36,6 +36,9 @@ final class PresentOracle {
             Map<String, Object> out = new LinkedHashMap<>();
             for (Iterator<String> it = o.keys(); it.hasNext();) { String k = it.next(); out.put(k, o.get(k)); }
             out.put("refresh_hz", activity.getWindowManager().getDefaultDisplay().getRefreshRate());
+            /* VK_ERROR_SURFACE_LOST_KHR mid-run: the window went away (Trough hidden or resized), as
+             * on bundle 039653916966 after 163 frames. Not a device result: needs the app visible. */
+            if (o.optInt("vk_result") == -1000000000) { out.put("ok", false); out.put("needs_visible_app", true); }
             return out;
         } finally {
             ui(activity, new Callable<Void>() { public Void call() { if (view[0] != null) root.removeView(view[0]); return null; }});
