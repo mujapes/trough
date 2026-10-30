@@ -35,7 +35,8 @@ not in the VM; the two talk through Download/trough (bundles, signed control cha
 
 **Next, in order** (docs/CONSTRUCTION.md "OS layer"):
 1. After the user installs the APK: device checks above; fix anything the host gets wrong.
-2. Bundle `Main.boot` (headless start) + `detach` + `intent` routing + a `dispatch` table.
+2. Bundle `Main.boot` (headless start) + `replace` (seamless takeover via `Vault`, no cleared
+   screen; docs/HOT_RELOAD.md "The Forge lesson") + `detach` + `intent` routing + a `dispatch` table.
 3. Complete Debian filesystem (DESIGN.md "The Linux filesystem"): layered path virtualisation.
 4. Native text: build the branch, write `android.shape` vs TextRunShaper, then line breaking.
 5. Then hardware ladder adapters, Lift (dex first), guest apps, browser, user-built software.
