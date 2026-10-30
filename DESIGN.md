@@ -343,11 +343,24 @@ until then C11 and Java remain the implementation languages.
 Trough runs any model CLI as a first-class agent backend: Claude Code, Codex, Gemini CLI,
 Antigravity's agent and any other, plus Trough's own loop over provider APIs (TroughAgent).
 All share Trough's task, tool, permission and artifact semantics (DESIGN.md "Complete experience").
-Beyond hosting them, Trough builds its own harness infrastructure for maximal model control:
-tools, context, memory and permissions are hot-reloadable components the models can inspect
-and edit, so a model can redesign its own capabilities inside Trough under the same build ->
-oracle -> activate protocol (and the user's permission). Compute stays small; this is a
-direction within Trough, not a bid for unbounded self-improvement.
+Beyond hosting them, Trough builds its own harness infrastructure for maximal model control.
+
+**Harness self-improvement (user direction, 2026-10-30: the highest-value part of Trough).**
+Models running in Trough can improve their own scaffolding as close to source as access allows:
+- what is editable: Trough's own harness (TroughAgent: loop, tools, context assembly, memory,
+  prompts) fully; open-source CLIs (Codex, Gemini CLI) rebuilt from source on the device and
+  hot-swapped; closed CLIs (Claude Code) through their supported extension points (plugins,
+  hooks, skills, settings). Model weights are out of reach and out of scope;
+- how: a model proposes a change to a harness component; it is built and evaluated against
+  pinned task suites and oracles (does it do the work better, at what cost); the result,
+  diff and evidence are shown to the user, who approves activation; every change is a revision
+  with provenance and one-step rollback. Evaluations are records, so improvement is measured;
+- **the oversight layer is never model-editable:** permission and approval gates, the
+  no-unwatched-turns rule, capability scopes, the change log and evaluation records, and the
+  host. A model cannot widen its own permissions, approve its own changes, or hide a change.
+  Changes to that layer come only from the user (or a builder the user directs, as code review).
+Compute stays small; the aim is improvement that stays visible and under human control, not
+speed of self-improvement.
 
 ### Continuous improvement without patchwork
 
