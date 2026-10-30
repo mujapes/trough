@@ -109,6 +109,11 @@ code that *owned* state, so the state died with it. Trough generalises the CSS c
 - **Acceptance oracle (one per change class):** snapshot the observable state and the presented
   frames before and after a reload under load (typing, scrolling, media playing, an agent turn
   streaming); fail on any reset field, any frame missing content, or any input lost or reordered.
+Host mechanism (docs/HOST.md, 2026-10-30): a bundle with `replace(...)` takes over from the
+running one with no stop and no cleared screen; `Vault.objects` carries platform-typed objects
+across generations. Large native state should live in a library loaded once per process with
+`dlopen` (a C ABI, outside any class loader), so a reload swaps only the thin JNI layer: the
+JNI library itself is bound to one class loader and cannot be shared between generations.
 Today's chat console (hot/.../Chat.java) violates this: each reload rebuilds its views and feed
 (drafts survive, scroll does not). It is a development instrument; the product surface on the
 derived view/scene path must pass the oracle above, and the console should be retired onto it.

@@ -23,6 +23,7 @@ signs with a CI key, so a CI APK cannot update the phone's install. Sign with
 | `TroughActivity` | singleTask. Shows `loader.root()`, reports attach/detach/visibility, forwards every Intent. |
 | `TroughService` | Foreground service (sticky, `stopWithTask=false`), notification with Open and Quit. Quit stops the bundle and kills the process. |
 | `Components` | Every other declared component, as forwarding shims (below). |
+| `Vault` | `Vault.objects`, a process-lifetime `ConcurrentHashMap<String, Object>` for handing platform-typed objects (views, surfaces, fds, buffers, native handles as Long) between bundle generations, whose own classes differ per class loader. |
 | `Slot` | Sixteen process slots `:p0`..`:p15`, each with Activities in every launch mode (`A` standard, `T` singleTop, `K` singleTask, `I` singleInstance, `L` translucent), a Service (`S`) and a ContentProvider (`P`, authority `t.t.slot<n>`). They load the last settled bundle themselves. |
 
 ## Bundle entry points
@@ -32,6 +33,7 @@ public static methods. All are optional except one of `boot`/`start`. Missing on
 
 | Method | Called | Fallback when absent |
 | --- | --- | --- |
+| `replace(Context app, FrameLayout root, File dir, Class<?> previous, Activity a)` | a new bundle while one runs: **seamless replacement**. The host neither stops the running bundle nor clears `root`; the new one prepares beside it, takes its state (via `Vault` and `previous`'s methods), swaps `root`'s content in one frame and retires `previous` (calls its `stop`, or a finer protocol). Throwing keeps the old bundle running and marks the new one bad. Events go to the old bundle until it returns. | stop + clear + `boot`/`start` (a visible cut) |
 | `boot(Context app, FrameLayout root, File dir)` | at activation, with or without a window (v2) | use `start` (v1) |
 | `start(Activity, FrameLayout root, File dir)` | v1: at activation once an Activity exists | (bundle waits for a window) |
 | `attach(Activity)` | a new Activity shows `root` while the bundle keeps running; throw to refuse | v1: the bundle is stopped with its Activity and restarted on the next |

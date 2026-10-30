@@ -43,6 +43,10 @@ import java.util.zip.ZipInputStream;
  * the VM, public half in assets/hot-pubkey.der -- shared storage is writable by other apps, so
  * nothing unsigned ever runs). The zip holds classes.dex, bin/* (native executables) and
  * manifest.json {"entry": "<class>"}. The entry class exposes (docs/HOST.md, all optional but one start):
+ *     public static void replace(Context app, FrameLayout root, File dir, Class<?> previous, Activity a)
+ *                                             seamless replacement: the running bundle is NOT stopped or
+ *                                             cleared; the new one prepares beside it, takes its state (Vault),
+ *                                             swaps root's content in one frame and retires it. Throw = keep the old.
  *     public static void boot(Context app, FrameLayout root, File bundleDir)   v2: process-level, no Activity needed
  *     public static void start(Activity, FrameLayout root, File bundleDir)     v1: waits for an Activity
  *     public static void attach(Activity)     a new Activity shows root (the bundle keeps running)
@@ -193,6 +197,25 @@ final class HotLoader {
         DexClassLoader loader = new DexClassLoader(new File(dir, "classes.dex").getPath(),
             app.getCodeCacheDir().getPath(), new File(dir, "bin").getPath(), getClass().getClassLoader());
         Class<?> entry = loader.loadClass(manifest.getString("entry"));
+        Method replace = method(entry, "replace", Context.class, FrameLayout.class, File.class, Class.class, Activity.class);
+        if (replace != null && current != null) {   // seamless: the new bundle takes over from the running one
+            write(new File(state, "starting"), sha + " " + android.os.Process.myPid());
+            try { replace.invoke(null, app, root, dir, current, activity); }
+            catch (Throwable t) {   // the running bundle keeps running; this one is never tried again
+                new File(state, "starting").delete();
+                write(new File(new File(state, "bad"), sha), "replace failed: " + cause(t));
+                status = "bundle " + sha.substring(0, 8) + " could not replace " + currentSha.substring(0, 8) + ": " + cause(t);
+                return;
+            }
+            current = entry;
+            dispatch = method(entry, "dispatch", Object.class, String.class, Object[].class);
+            currentSha = sha;
+            currentDir = dir;
+            status = "running bundle " + sha.substring(0, 8);
+            main.postDelayed(new Runnable() { @Override public void run() { settle(sha); } }, SETTLE_MS);
+            flushIntents();
+            return;
+        }
         stopCurrent();
         root.removeAllViews();
         currentSha = sha;
