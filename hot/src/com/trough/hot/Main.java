@@ -24,7 +24,7 @@ public final class Main {
     private static Development development;
 
     // Boot state (signed-bundle copy only): what is running now, so it can be stopped or replaced.
-    private static Method runningStop;
+    private static Method runningStop, runningAttached;
     // Set when HotLoader replaces this bundle. Boot and reload threads that finish afterwards
     // must not enter: a superseded bundle starting late would run beside its successor.
     private static boolean superseded, stoppingRun;
@@ -160,6 +160,7 @@ public final class Main {
             entry.getMethod("run", Activity.class, FrameLayout.class, File.class, JSONObject.class, Runnable.class)
                 .invoke(null, bootActivity, bootRoot, bootDir, boot, RELOAD);
             runningStop = entry.getMethod("stop");
+            try { runningAttached = entry.getMethod("attached", Activity.class); } catch (NoSuchMethodException e) { runningAttached = null; }
         } catch (Throwable e) {
             Throwable cause = e.getCause() != null ? e.getCause() : e;
             put(boot, "enter_error", String.valueOf(cause));
@@ -168,9 +169,28 @@ public final class Main {
         }
     }
 
+    /**
+     * Called by HotLoader on the boot copy when a new Activity took the root view (the old one was
+     * swiped from Recents or recreated) while this bundle kept running. Throws when what runs
+     * cannot move, so the host stops it and starts a bundle on the new Activity instead.
+     */
+    public static void attach(Activity activity) throws Exception {
+        bootActivity = activity;
+        if (runningStop == null) return;   // still booting: enter() uses bootActivity
+        if (runningAttached == null) throw new UnsupportedOperationException("running build has no attached()");
+        runningAttached.invoke(null, activity);
+    }
+
+    /** The running copy's half of attach. */
+    public static void attached(Activity activity) {
+        if (chat != null) chat.attach(activity);
+        if (development != null) development.attach(activity);
+    }
+
     private static void stopRunning() {
         Method m = runningStop;
         runningStop = null;   // first: when run is the boot's own copy, its stop lands back here
+        runningAttached = null;
         stoppingRun = true;
         if (m != null) try { m.invoke(null); } catch (Throwable ignored) {}
         stoppingRun = false;

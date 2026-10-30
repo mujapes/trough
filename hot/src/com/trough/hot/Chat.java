@@ -33,7 +33,7 @@ final class Chat implements Agent.Listener {
     private static final int BG = 0xFF0B0F0D, FG = 0xFFE8EFE6, DIM = 0xFF8FA394, USER = 0xFF9FD3A8,
         TOOL = 0xFF7FA7C9, WARN = 0xFFE0B26A, PANEL = 0xFF151B18;
 
-    private final Activity a;
+    private Activity a;   // the current one: attach() replaces it, the views stay
     private final File home;
     private final Runnable reload;   // the boot's: rebuild Trough from files/src and swap it in
     private final LinearLayout feed;
@@ -215,6 +215,13 @@ final class Chat implements Agent.Listener {
             @Override public void onExit(int code, String err) { if (live()) c.onExit(code, err); }
             @Override public void onAuth(String url, String code) { if (live()) c.onAuth(url, code); }
         };
+    }
+
+    /** A new Activity took over Trough's root view (the old one was swiped away or recreated). */
+    void attach(Activity na) {
+        a = na;
+        a.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+        Power.attach(na);
     }
 
     void close() {

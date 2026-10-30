@@ -9,6 +9,7 @@ import android.graphics.Typeface;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.view.ViewGroup;
 import android.widget.FrameLayout;
 import android.widget.TextView;
 
@@ -17,6 +18,7 @@ import android.widget.TextView;
  * Checks for a new bundle for as long as the activity lives (one stat when nothing changed):
  * every second while visible, every five seconds behind another app, so the development loop
  * (docs/AUTONOMOUS_DEVELOPMENT.md) never depends on Trough having focus.
+ * The loader and root view belong to the process (HotLoader.process), not to this Activity.
  */
 public class TroughActivity extends Activity {
     private static final long POLL_MS = 1000, HIDDEN_POLL_MS = 5000;
@@ -36,16 +38,29 @@ public class TroughActivity extends Activity {
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
-        root = new FrameLayout(this);
-        root.setBackgroundColor(Color.BLACK);
-        setContentView(root);
         startForegroundService(new Intent(this, TroughService.class));
-        try {
-            loader = new HotLoader(this, root);
-            // Newest verified bundle first; the last good one only when that cannot start.
-            // Never both: a bundle replaced mid-boot cannot be relied on to stay stopped.
-            if (loader.check() || loader.resume()) settleLater();
-        } catch (Exception e) { showStatus("loader: " + e); }
+        loader = HotLoader.process;
+        if (loader != null) {
+            // Same process, new Activity (swiped from Recents, finished, recreated): the bundle
+            // may still be running; it gets this Activity and keeps its views and sessions.
+            root = loader.root();
+            if (root.getParent() != null) ((ViewGroup) root.getParent()).removeView(root);
+            setContentView(root);
+            if (!(loader.attachable() && loader.attach(this))) {
+                loader.rebind(this);
+                if (loader.check() || loader.resume()) settleLater();
+            }
+        } else {
+            root = new FrameLayout(this);
+            root.setBackgroundColor(Color.BLACK);
+            setContentView(root);
+            try {
+                loader = HotLoader.process = new HotLoader(this, root);
+                // Newest verified bundle first; the last good one only when that cannot start.
+                // Never both: a bundle replaced mid-boot cannot be relied on to stay stopped.
+                if (loader.check() || loader.resume()) settleLater();
+            } catch (Exception e) { showStatus("loader: " + e); }
+        }
         if (checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED)
             requestPermissions(new String[]{Manifest.permission.READ_EXTERNAL_STORAGE,
                 Manifest.permission.WRITE_EXTERNAL_STORAGE}, 1);
@@ -71,7 +86,9 @@ public class TroughActivity extends Activity {
 
     @Override protected void onDestroy() {
         handler.removeCallbacksAndMessages(null);
-        if (loader != null) loader.stopCurrent();
+        // An attachable bundle keeps running in the process until the next Activity takes it.
+        if (loader != null && !loader.attachable()) loader.stopCurrent();
+        if (root.getParent() != null) ((ViewGroup) root.getParent()).removeView(root);
         super.onDestroy();
     }
 

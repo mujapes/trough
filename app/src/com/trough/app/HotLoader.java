@@ -46,7 +46,10 @@ import java.util.zip.ZipInputStream;
  */
 final class HotLoader {
     static final long SETTLE_MS = 15000;
-    private final Activity activity;
+    /** One per process: a bundle with attach(Activity) outlives its Activity (TroughService
+     *  keeps the process) and is handed each new one with the same root view. */
+    static HotLoader process;
+    private Activity activity;
     private final FrameLayout root;
     private final PublicKey key;
     private final File state;
@@ -151,6 +154,25 @@ final class HotLoader {
     }
 
     String currentSha() { return currentSha; }
+
+    FrameLayout root() { return root; }
+
+    /** Whether the running bundle can move to a new Activity (public static void attach(Activity)). */
+    boolean attachable() {
+        if (current == null) return false;
+        try { current.getMethod("attach", Activity.class); return true; } catch (Throwable t) { return false; }
+    }
+
+    /** Hands the running bundle a new Activity, whose content view is already root. False: it
+     *  could not take it and was stopped; the caller starts a bundle the usual way. */
+    boolean attach(Activity a) {
+        activity = a;
+        try { current.getMethod("attach", Activity.class).invoke(null, a); return true; }
+        catch (Throwable t) { status = "attach failed: " + cause(t); stopCurrent(); root.removeAllViews(); return false; }
+    }
+
+    /** A bundle without attach() stops with its Activity, as before; the next one restarts it here. */
+    void rebind(Activity a) { activity = a; }
 
     void stopCurrent() {
         if (current == null) return;

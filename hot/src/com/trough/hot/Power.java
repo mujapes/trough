@@ -34,7 +34,7 @@ import java.util.Map;
  * Also asks once for the battery-optimisation exemption (Doze would cut network and timers).
  * One owner per bundle: start() in Chat's constructor, stop() in Chat.close() before the
  * successor starts, so wake locks and the window callback never stack across reloads.
- * Still lost: swiping Trough out of Recents destroys the Activity, and the host stops the bundle.
+ * Swiping Trough out of Recents keeps it running: the host hands the next Activity to attach().
  */
 final class Power {
     private static final String[] KEYS = {"screen", "cpu", "back"};
@@ -52,6 +52,13 @@ final class Power {
             write(s);
             requestBattery();
         }
+    }
+
+    /** The window is new: flags and the Back callback go on it; the wake lock is kept. */
+    static synchronized void attach(Activity activity) {
+        if (a == null) return;
+        a = activity;
+        apply();
     }
 
     static synchronized void stop() {
@@ -88,7 +95,7 @@ final class Power {
             + "back keeps Trough running: " + on(s, "back") + "\n"
             + "battery optimisation exempt: " + (batteryExempt() ? "yes" : "NO (/awake battery)") + "\n"
             + "child process restrictions: " + ("false".equals(phantom) ? "disabled" : "ACTIVE (/awake child)") + "\n"
-            + "Swiping Trough out of Recents still stops it.";
+            + "Swiping from Recents keeps Trough running with an updated APK; the notification's Quit ends it.";
     }
 
     private static String on(Map<String, Object> s, String k) { return enabled(s, k) ? "on" : "off"; }

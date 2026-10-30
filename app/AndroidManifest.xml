@@ -331,10 +331,17 @@
         tools:ignore="HardcodedDebugMode">
         <activity android:name="com.trough.app.TroughActivity" android:exported="true"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection"
-            android:resizeableActivity="true">
+            android:resizeableActivity="true" android:launchMode="singleTask">
+            <!-- singleTask: one Activity at a time owns the process-wide root view (HotLoader.process). -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- Trough can be chosen as the home app (Settings > Apps > Default apps); inert until then. -->
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
         <service android:name="com.trough.app.TroughService" android:exported="false"

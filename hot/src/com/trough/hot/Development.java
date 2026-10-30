@@ -12,7 +12,7 @@ import java.util.concurrent.*;
  * Polling belongs to the VM/shared-storage adapter, not the eventual product's work graph.
  */
 final class Development implements AutoCloseable, ScenarioProtocol.Handler {
-    private final Activity activity;
+    private volatile Activity activity;   // replaced by attach() when the Activity is recreated
     private final FrameLayout root;
     private final File bundle;
     private final String runtime;
@@ -24,6 +24,7 @@ final class Development implements AutoCloseable, ScenarioProtocol.Handler {
         worker.setDaemon(true); worker.start();
     }
     public void close() { closed=true; worker.interrupt(); }
+    void attach(Activity a) { activity=a; }
     /** Store oracles that take a data directory; each is also built against bionic (android.*). */
     private static final List<String> STORE=Arrays.asList("store","documents","streams","tasks","workspace","drafts","text","keeper");
     private List<String> scenarios() {
