@@ -91,6 +91,28 @@ changes. This is one necessary reload law, not the entire activation or resource
 implementation. The resource lease manager and module coordinator are the next dependencies
 before product components use it.
 
+## The Forge lesson: every change should feel like a CSS edit
+
+User observation, 2026-10-30: in Forge a CSS change went live imperceptibly ("just boom, new
+feature"), but a JS change made the screen flicker and reset to default states, which does not
+scale. The difference is structural. CSS only restyled state that stayed alive; JS replaced the
+code that *owned* state, so the state died with it. Trough generalises the CSS case to every change:
+- **State is never owned by replaceable code.** Everything the user can perceive (scroll
+  anchors, focus, selection, IME composition, expanded/collapsed and in-progress UI state, media
+  position, in-flight turns, form input) lives in records owned by the runtime (store, scene,
+  drafts). New code re-derives its outputs from the same records; it does not rebuild them.
+- **No frame without content.** The old scene stays presented until the new revision's first
+  complete frame is ready; then one publication swaps them. A reload never shows a blank,
+  partial or default-state frame.
+- **Identity is stable across revisions.** Records, scene nodes and view regions keep their IDs
+  across code revisions, so anchors, focus and animations continue rather than restart.
+- **Acceptance oracle (one per change class):** snapshot the observable state and the presented
+  frames before and after a reload under load (typing, scrolling, media playing, an agent turn
+  streaming); fail on any reset field, any frame missing content, or any input lost or reordered.
+Today's chat console (hot/.../Chat.java) violates this: each reload rebuilds its views and feed
+(drafts survive, scroll does not). It is a development instrument; the product surface on the
+derived view/scene path must pass the oracle above, and the console should be retired onto it.
+
 ## Different changes need different scope
 
 | Change | Replacement scope | Preserved when compatible |

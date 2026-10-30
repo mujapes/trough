@@ -377,7 +377,9 @@ cleanly at the most fundamental level:
 - **Consolidation is normal work:** when patches accumulate around a contract, the next step
   is a redesign of that contract with migration, measured by contract size, special cases and
   oracle coverage, not a further patch. Code that contradicts DESIGN.md is a bug in one of them.
-- Hot replacement keeps all of this seamless for the user: improvement never needs a restart.
+- Hot replacement keeps all of this seamless for the user: improvement never needs a restart,
+  and every change, not only styling, must feel like Forge's live CSS edits did (no flicker,
+  no reset state; docs/HOT_RELOAD.md "The Forge lesson").
 
 ### Workarounds before sacrifices
 
