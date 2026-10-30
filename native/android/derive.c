@@ -177,6 +177,30 @@ static int layout_op(void *ctx, const dv_job *job, ex_out *out) {
     return 0;
 }
 
+/* Working memory per job for executor admission (docs/EXEC.md "Operator costs"), measured on
+ * the Pixel by android.cost: per call, the Java bytes the worker allocates plus the native heap's
+ * growth (mostly shaping objects' native peers, freed when the GC runs). Layout: ~20 KiB plus
+ * ~750 B per UTF-16 unit, from 16 to 16384 units; the model leaves 14-140% headroom. A layout
+ * job issued before it has read its text (its first, restarting run) only asks for it. */
+#define LAYOUT_COST_BASE 24576u
+#define LAYOUT_COST_UNIT 896u
+#define MASK_COST 65536u
+static uint64_t layout_cost_units(uint64_t units) { return LAYOUT_COST_BASE + LAYOUT_COST_UNIT * units; }
+static uint64_t layout_cost(void *ctx, const dv_job *job) {
+    deriver *d = ctx;
+    for (size_t k = 0; k < job->count; k++) {
+        const dv_value *v = &job->values[k];
+        if (v->ref.kind != DV_CELL || v->ref.id.slot != d->text[job->key].slot || v->ref.id.generation != d->text[job->key].generation) continue;
+        size_t length = 0; const void *units;
+        if (bl_is(v->value) && bl_get(&d->blobs, v->value, &units, &length) != TR_OK) length = 0;
+        return layout_cost_units(length / 2);
+    }
+    return 0;
+}
+static uint64_t mask_cost(void *ctx, const dv_job *job) { (void)ctx; (void)job; return MASK_COST; }
+/* Process-wide admission for derivers opened after deriveAdmission (0: none). */
+static _Atomic uint64_t admission_budget, admission_reserve;
+
 /* Mask (face << 32 | glyph): the platform's coverage for one glyph. No dependencies: valid until
  * the operator changes. */
 static int mask_op(void *ctx, const dv_job *job, ex_out *out) {
@@ -632,6 +656,7 @@ static void stats(void *arg, tr_world *w, dv_graph *g) {
     s[20] = (int64_t)d->scroll_pauses; s[21] = d->pf_hi - d->pf_lo;
     s[22] = (int64_t)d->extra_ns; s[23] = (int64_t)d->misses;
     s[24] = (int64_t)atomic_load(&d->runs[5]); s[25] = (int64_t)atomic_load(&d->runs[6]); s[26] = (int64_t)atomic_load(&d->runs[7]);
+    s[27] = (int64_t)d->ex.peak_charged; s[28] = (int64_t)d->ex.deferred; s[29] = (int64_t)d->ex.budget;
 }
 
 /* The newest trace records: (operator 0 layout / 1 summary / 2 scene, key, outcome, worker). */
@@ -716,6 +741,9 @@ JNIEXPORT jlong JNICALL CLASS(deriveOpen)(JNIEnv *env, jclass c, jint workers, j
     ex_register(&d->ex, d->op_sum, sum_op, d);
     ex_register(&d->ex, d->op_scene, scene_op, d);
     ex_register(&d->ex, d->op_mask, mask_op, d);
+    ex_register_cost(&d->ex, d->op, layout_cost);
+    ex_register_cost(&d->ex, d->op_mask, mask_cost);
+    if (atomic_load(&admission_budget)) ex_set_budget(&d->ex, atomic_load(&admission_budget), atomic_load(&admission_reserve));
     dv_set_static(&d->graph, d->op_caret);            /* text and width */
     ex_register(&d->ex, d->op_caret, caret_op, d);
     ex_register(&d->ex, d->op_overlay, overlay_op, d);
@@ -1252,12 +1280,23 @@ JNIEXPORT jbyteArray JNICALL CLASS(deriveBytes)(JNIEnv *env, jclass c, jlong h, 
 }
 JNIEXPORT jlongArray JNICALL CLASS(deriveStats)(JNIEnv *env, jclass c, jlong h) {
     (void)c; deriver *d = (deriver *)(intptr_t)h;
-    int64_t s[28] = {0};
+    int64_t s[30] = {0};
     call k = {d, 0, (const jchar *)(void *)s, 0, 0};
     ex_call(&d->ex, stats, &k);
-    jlongArray r = (*env)->NewLongArray(env, 28);
-    if (r) (*env)->SetLongArrayRegion(env, r, 0, 28, (const jlong *)s);
+    jlongArray r = (*env)->NewLongArray(env, 30);
+    if (r) (*env)->SetLongArrayRegion(env, r, 0, 30, (const jlong *)s);
     return r;
+}
+/* Admission for derivers opened from now on (docs/EXEC.md "Operator costs"); 0 turns it off. */
+JNIEXPORT void JNICALL CLASS(deriveAdmission)(JNIEnv *env, jclass c, jlong budget, jlong reserve) {
+    (void)env; (void)c;
+    atomic_store(&admission_budget, budget > 0 ? (uint64_t)budget : 0);
+    atomic_store(&admission_reserve, reserve > 0 ? (uint64_t)reserve : 0);
+}
+/* The admission model: kind 0 layout of `units` UTF-16 units, 1 a glyph mask. */
+JNIEXPORT jlong JNICALL CLASS(deriveCost)(JNIEnv *env, jclass c, jint kind, jint units) {
+    (void)env; (void)c;
+    return kind == 0 ? (jlong)layout_cost_units(units > 0 ? (uint64_t)units : 0) : (jlong)MASK_COST;
 }
 JNIEXPORT jlongArray JNICALL CLASS(deriveTrace)(JNIEnv *env, jclass c, jlong h) {
     (void)c; deriver *d = (deriver *)(intptr_t)h;

@@ -31,6 +31,10 @@ final class NativeCore {
     static native void surfaceClose(long presenter);
     /** Paragraph layout as a derivation operator on executor workers (native/android/derive.c). */
     static native long deriveOpen(int workers, int paragraphs);
+    /** Executor admission by bytes for derivers opened from now on; 0 turns it off. */
+    static native void deriveAdmission(long budget, long reserve);
+    /** The admission model: kind 0 layout of `units` UTF-16 units, 1 a glyph mask. */
+    static native long deriveCost(int kind, int units);
     static native int deriveText(long deriver, int paragraph, String text);
     static native void deriveWidth(long deriver, int width);
     static native int deriveDemand(long deriver, int paragraph, boolean on);
@@ -80,8 +84,13 @@ final class NativeCore {
         long t = System.nanoTime();
         System.load(new File(bundle, "lib/libtrough-android.so").getAbsolutePath());
         loaded = true;
+        deriveAdmission(admissionBudget(), admissionBudget() / 4);
         return System.nanoTime() - t;
     }
+    /** Derivation working memory: a quarter of the Java heap limit. Layout's measured cost is
+     * about a quarter Java heap and three quarters native peers (docs/EXEC.md "Operator costs"),
+     * so this keeps concurrent layouts' Java share near a sixteenth of the heap. */
+    static long admissionBudget() { return Runtime.getRuntime().maxMemory() / 4; }
     private static long check(long v, String what) {
         if (v < 0) throw new IllegalStateException(what + " failed: ts_status " + (-v));
         return v;

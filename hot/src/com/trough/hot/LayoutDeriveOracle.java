@@ -172,7 +172,7 @@ final class LayoutDeriveOracle {
         return r;
     }
 
-    private static int compare(long d, List<String> corpus, int width, List<Object> failures) {
+    static int compare(long d, List<String> corpus, int width, List<Object> failures) {
         int equal = 0;
         for (int i = 0; i < corpus.size(); i++) {
             byte[] got = NativeCore.deriveBytes(d, i), want = DeriveLayout.layout(corpus.get(i), width);

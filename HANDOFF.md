@@ -91,6 +91,17 @@ Loop timing measured 2026-10-29: tools/hot.sh 69 s (native/build.sh 51 s, Java 1
 scenarios = 176 s of work, 348 s wall (~4 s control-channel overhead each; build.native 51 s). Prefer
 publishing with NO_SCENARIOS=1 tools/loop.sh, then tools/scenario.py <name> for the affected ones.
 
+Done (2026-10-30): admission verified on the Pixel (core.exec: peak 100/100, 0 violations; 202
+and 42 without). Operator costs (EXEC.md "Operator costs", android.cost): layout ~20 KB + ~750
+B/unit (Java ~180 + native peers ~565, freed only by GC), masks <= 31 KB; model 24 KiB + 896
+B/unit and 64 KiB per mask covers every sample (>= 14% headroom). Every deriver now admits
+by bytes (budget maxMemory/4, reserve 1/4). android.anchor had failed since emoji joined the
+corpus: trailing whitespace takes the paragraph's direction (UAX #9 L1), fixed in rtlAt.
+Bundle 361ee3ad5d74: cost, derive, view, frames, paragraphs, caret, selection, docime, anchor,
+access, keys pass. User 2026-10-30: stay in C (no Rust). Next candidate: native shaping
+(HarfBuzz) to drop the GC-held native peers, proven pixel-identical by the existing oracles;
+or budget from memory pressure (onTrimMemory) shared with atlas leases.
+
 DECIDED (2026-10-28): the Java/native boundary is a bionic build of the same sources, loaded
 in-process (docs/BIONIC.md). All store oracles pass as bionic programs on the Pixel; android.jni
 types 3000 edits from Java at 10.9 us p50 per call. Self-hosted: the phone's clang rebuilds all

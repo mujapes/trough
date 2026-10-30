@@ -32,7 +32,7 @@ final class Development implements AutoCloseable, ScenarioProtocol.Handler {
         all.add("core.processes"); all.add("build.native");
         if(new File(bundle,"lib/libtrough-android.so").isFile()) {
             for(String s:STORE) all.add("android."+s);
-            all.add("android.jni"); all.add("android.ime"); all.add("android.editor"); all.add("android.vulkan"); all.add("android.scene"); all.add("android.glyphs"); all.add("android.text"); all.add("android.surface"); all.add("android.layout"); all.add("android.derive"); all.add("android.view"); all.add("android.frames"); all.add("android.viewsurface"); all.add("android.touch"); all.add("android.caret"); all.add("android.selection"); all.add("android.paragraphs"); all.add("android.docime"); all.add("android.anchor"); all.add("android.access"); all.add("android.keys");
+            all.add("android.jni"); all.add("android.ime"); all.add("android.editor"); all.add("android.vulkan"); all.add("android.scene"); all.add("android.glyphs"); all.add("android.text"); all.add("android.surface"); all.add("android.layout"); all.add("android.derive"); all.add("android.view"); all.add("android.frames"); all.add("android.viewsurface"); all.add("android.touch"); all.add("android.caret"); all.add("android.selection"); all.add("android.paragraphs"); all.add("android.docime"); all.add("android.anchor"); all.add("android.access"); all.add("android.keys"); all.add("android.cost");
             all.add("android.retire.setup"); all.add("android.retire.check");
         }
         return all;
@@ -63,6 +63,7 @@ final class Development implements AutoCloseable, ScenarioProtocol.Handler {
         if("android.surface".equals(name)) return SurfaceOracle.run(activity,root,bundle);
         if("android.layout".equals(name)) return LayoutOracle.run();
         if("android.derive".equals(name)) return LayoutDeriveOracle.run(bundle);
+        if("android.cost".equals(name)) return CostOracle.run(bundle);
         if("android.view".equals(name)) return ViewOracle.run(bundle);
         if("android.viewsurface".equals(name)) return ViewSurfaceOracle.run(activity,root,bundle);
         if("android.touch".equals(name)) return TouchOracle.run(activity,root,bundle);

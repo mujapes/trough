@@ -106,14 +106,39 @@ Mutants: no background reserve, no release, no clamp for oversized jobs, and no 
 killed. The survivor drops the wake-up after a release. That is performance only: the worker
 that released continues and admits the next job itself.
 
+## Operator costs
+
+2026-10-30. The derived view's platform operators declare working memory
+(`native/android/derive.c`, `layout_cost` / `mask_cost`), measured on the Pixel by `android.cost`.
+A call's cost is the Java bytes its thread allocates (ART's per-thread counter) plus the native
+heap's growth over the call. The native part is mostly shaping objects' native peers, which stay
+until the GC runs. Medians of 5 warm calls:
+
+| operator | measured | model |
+|---|---|---|
+| layout, 16 units | 16-22 KB | 24 KiB + 896 B/unit |
+| layout, 1024 units | 735-765 KB (~180 B/unit Java, ~565 native) | 942 KB |
+| layout, 16384 units | 11.9-12.9 MB | 14.7 MB |
+| mask, mono (73 glyphs) | 0.1-12 KB | 64 KiB |
+| mask, colour (2) | 31 KB | 64 KiB |
+
+A layout job issued before it has read its text costs 0: that run only asks for the text. Hot
+bundles call `deriveAdmission(maxMemory / 4, budget / 4)` when the library loads. `android.cost`
+gates on the model covering every sample, then runs 12 paragraphs of 16000 units on 4 workers
+with a budget of 2.5 layouts (35.9 MB). The charged peak was 28.7 MB, with 21-34 deferrals. The
+settle took 463-489 ms, against 417-476 ms without admission, and every layout equalled the
+direct one. The process native heap is no peak signal here: GC frees of earlier garbage
+dominate it.
+
 ## Not yet built
 
 - **Worker placement and energy:** the Pixel's cores are 2 X1, 2 A78 and 4 A55. Worker count and
   affinity must come from measured energy per task under concurrent load, not from this
   throughput test.
-- **Admission, remaining:** real operators declare no costs yet. Their working memory must be
-  measured on the phone first: layout by text length, masks by glyph size. Outputs are bounded
-  separately by the blob store's byte limit. Preempting a running background job is not built:
+- **Admission, remaining:** the budget is a fraction of the Java heap limit, not yet derived
+  from the device's memory pressure (onTrimMemory, available RAM) or from other owners' leases
+  (atlas, decoders). Caret, selection and scene operators are uncounted (small, bounded by the
+  viewport). Outputs are bounded separately by the blob store's byte limit. Preempting a running background job is not built:
   an urgent job waits for one only when every worker runs visible work.
 - **Owner cost:** each completion triggers a poll over the demanded roots (the graph's root
   list; clean roots cost O(1)). A dirty-root worklist would skip even those, but it only

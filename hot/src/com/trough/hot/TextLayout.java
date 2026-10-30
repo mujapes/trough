@@ -144,14 +144,12 @@ final class TextLayout {
     }
 
     /** Whether the character at offset is right-to-left, as Layout.isRtlCharAt: the bidi level of
-     * the run holding it; past the drawn text, true only when every run on the line is RTL. */
+     * the run holding it. Past the drawn text (a line's trailing whitespace) the level is the
+     * paragraph's (UAX #9 rule L1, which StaticLayout's line directions follow). */
     boolean rtlAt(int offset) {
         Line l = lines.get(lineOf(offset));
-        if (l.runs.isEmpty()) return l.rtl;
-        Run at = runAt(l, offset);
-        if (at != null) return (at.level & 1) != 0;
-        for (Run r : l.runs) if ((r.level & 1) == 0) return false;
-        return true;
+        Run at = l.runs.isEmpty() ? null : runAt(l, offset);
+        return at != null ? (at.level & 1) != 0 : l.rtl;
     }
 
     /** Character bounds for [start, end), as Layout.fillCharacterBounds: left, top, right, bottom

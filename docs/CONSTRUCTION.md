@@ -252,7 +252,8 @@ Salsa-style red-green verification, early cutoff, dynamic dependencies by restar
 snapshot jobs, cancellation and bounded storage ([contract](DERIVE.md)). No real operator uses
 it yet. `native/core/exec` runs it: one owner thread, a fixed worker pool, cooperative
 cancellation when demand drops, settling and a job trace ring ([contract](EXEC.md)). Admission
-by bytes, leases, priorities and measured worker placement remain stage-3 work.
+by bytes (with layout and mask costs measured on the Pixel) and priorities exist; leases across
+owners and measured worker placement remain stage-3 work.
 `native/core/blobs` interns immutable byte values under a byte limit. Handles are canonical,
 so early cutoff covers large outputs. The graph and the executor retain values across memo
 replacement and job lifetimes ([contract](BLOBS.md)). The first real operator, platform
