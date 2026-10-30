@@ -6,6 +6,10 @@
 #                   pinned by SHA-256), so they travel with the sources.
 #   SQLITE_SRC:     Debian's sqlite3 3.46.1-7+deb13u2 source with Debian's patches applied, the
 #                   same release the root's libsqlite3 comes from, amalgamated by its own Makefile.
+#   HARFBUZZ_SRC:   HarfBuzz 10.2.0 (MIT), the release AOSP main ships, from Debian's pool
+#                   (pinned by SHA-256); built as C++ without its runtime (docs/NATIVE_TEXT.md).
+#   ICU headers:    the NDK's ICU4C headers (libicu, API 31+) from AOSP external/icu at a pinned
+#                   commit, checked by a hash over the extracted files; in BIONIC_INCLUDE.
 # Needs: curl, dpkg-dev (dpkg-source), tclsh, make, cc; clang and lld (19) for the build itself.
 set -eu
 C=${TROUGH_CACHE:-$HOME/.cache/trough-sysroot}
@@ -49,6 +53,24 @@ if [ ! -f "$C/include/vulkan/vulkan_core.h" ]; then
     cp -r "$C/vk/usr/include/vulkan" "$C/vk/usr/include/vk_video" "$C/include/"
 fi
 echo "$VULKAN_CORE_SHA  $C/include/vulkan/vulkan_core.h" | sha256sum -c - >&2
+HB_TAR=harfbuzz_10.2.0.orig.tar.xz
+HB_SHA=620e3468faec2ea8685d32c46a58469b850ef63040b3565cde05959825b48227
+if [ ! -f "$C/harfbuzz-10.2.0/src/harfbuzz.cc" ]; then
+    mkdir -p "$C/deb" && cd "$C/deb"
+    [ -f "$HB_TAR" ] || curl -fsSLO "https://deb.debian.org/debian/pool/main/h/harfbuzz/$HB_TAR"
+    echo "$HB_SHA  $HB_TAR" | sha256sum -c - >&2
+    rm -rf "$C/harfbuzz-10.2.0" && tar xJf "$HB_TAR" -C "$C"
+fi
+ICU_COMMIT=474ba9832e41cc4ee44b20a9ee07ec6d573ce1a4
+ICU_TREE_SHA=1c2fbce4d20c94214b01df38076609c146d375287c2417ec348eaf57f7c3097c
+icu_tree() { (cd "$C/icu" && find . -type f | LC_ALL=C sort | xargs sha256sum | sha256sum | cut -d' ' -f1); }
+if [ ! -f "$C/icu/unicode/ubidi.h" ] || [ "$(icu_tree)" != "$ICU_TREE_SHA" ]; then
+    rm -rf "$C/icu" && mkdir -p "$C/icu"
+    curl -fsSL "https://android.googlesource.com/platform/external/icu/+archive/$ICU_COMMIT/libicu/ndk_headers.tar.gz" | tar xz -C "$C/icu"
+fi
+[ "$(icu_tree)" = "$ICU_TREE_SHA" ] || { echo "ICU headers: tree hash mismatch" >&2; exit 1; }
+rm -rf "$C/include/unicode" && cp -r "$C/icu/unicode" "$C/icu/uconfig_local.h" "$C/include/"
 echo "BIONIC_INCLUDE=$C/include"
+echo "HARFBUZZ_SRC=$C/harfbuzz-10.2.0/src"
 echo "BIONIC_SYSROOT=$C/x/data/data/com.termux/files"
 echo "SQLITE_SRC=$A"

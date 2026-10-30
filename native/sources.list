@@ -4,6 +4,7 @@ outputs-bionic.list
 android/jni.c
 android/present.c
 android/derive.c
+android/text.c
 present/scene.c
 present/scene.h
 present/oracle.c
@@ -77,3 +78,5 @@ scenarios/atlas.c
 scenarios/order.c
 scenarios/fixtures/api.h
 scenarios/fixtures/implementation.c
+text/shape.c
+text/shape.h
