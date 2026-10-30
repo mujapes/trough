@@ -207,6 +207,24 @@ Kernel and driver modification stays out of scope (no root, no unlocked bootload
 Anything Android forbids an app (SELinux, seccomp, hidden APIs) is met with workarounds first
 (below), and a recorded limit only after they fail.
 
+### Remote compute as an execution target (user direction, 2026-10-30)
+
+Cloud and other remote compute extend the device's hardware first-class, not as a separate
+service. Derivations already capture exact, content-addressed inputs and code identity, which
+is what remote execution needs (prior art: Bazel Remote Execution API, Buildbarn, distcc,
+ccache remote storage). A remote executor is one more placement target beside CPU, GPU and
+codecs: the planner sends a job there when measured cost says so (radio energy and latency vs
+local CPU, thermal headroom, deadline), and the result returns as an ordinary publication.
+- Candidates: builds and Lift of large artifacts, test suites, inference, media transcodes,
+  pre-rendering and prefetch of web content.
+- Inputs leave the device only with the user's permission, per scope; secrets never do.
+  Everything keeps working offline; remote results are verified like local ones (oracles, or
+  reproducible content identities).
+- Compute must be the user's own or rented for this purpose: their machines, cloud VMs or
+  containers, cloud agent sessions. GitHub Actions minutes on the public repo are for building
+  and testing Trough itself (CI), which their terms allow; Actions is not a general compute
+  backend for the OS.
+
 ### The Linux filesystem: complete Debian, not a subset
 
 User direction, 2026-10-30: the Linux side is a fully developed Debian, never a half-built,
