@@ -125,6 +125,51 @@ requirements override the old Forge document's implementation prescriptions.
 - Source editing, building and safe activation are capabilities of the running application.
   Self-hosting is part of the same ownership/revision system, not a second development daemon.
 
+### Fluid, co-evolving surface (user direction, 2026-10-30)
+
+The user still wants Forge's original idea: a UI that co-evolves with them. The whole app acts
+as a heuristic, so the surface feels fluid and anything can be handled directly. Eventually
+data from any website, app or source can be reached and connected fluidly, with physical
+(physics-like) interaction. The system should predict the user's next actions well from very
+little data. This is not a concrete build direction. It is a freedom-maximising bias: where
+the construction order allows, prefer designs that keep it open.
+- Every interactable thing is a record with provenance in the one scene, so any of them can
+  be grabbed, linked or composed. No feature should own a surface others cannot reach into.
+- Interaction physics (drag, fling, spring and connection) belongs to the scene/input owner
+  as one model with derived state, not to per-widget animation.
+- Prediction is a local consumer of the same records and interaction history. It may
+  prefetch, pre-layout and order, but it never acts or sends anything. No unwatched model
+  turns, and nothing leaves the device without the user's permission.
+
+### Trough as the operating system (user direction, 2026-10-30)
+
+Trough is never closed. It is the user's whole environment, an OS running inside one app, and
+Android is reduced to the hardware layer beneath it. The filesystem (the Debian root) and the
+browser are the bulk of it. The rest is built in:
+- **Decompile/recompile is a first-class component of the whole system**, not a tool. It lifts any
+  artifact into Trough's records and lowers it back: dex, ELF, wasm, web pages, data formats.
+  It is the path by which outside software joins the fluid, co-evolving surface: lifted things
+  can be inspected, linked, specialised and rebuilt like Trough's own code.
+- **Android apps run inside Trough** through it. Trough already runs on ART, so guest dex
+  compiles to native code like any installed app. The hard part is the framework contract
+  (package identity, Context, Activities, resources, data dir, permissions). Recompiling redirects
+  it to Trough shims, so guest UI lands in Trough's scene instead of separate windows. Prior art:
+  VirtualApp, DroidPlugin, Parallel Space (runtime binder proxies); dexlib2/smali (rewriting). Guests that
+  need isolation run in the host's process slots (app/src/.../Slot.java, `:p0`..`:p7`, declared up front).
+  High-security apps (hardware-backed Play Integrity over the original signature) may need the
+  real app; keep looking for ways in rather than conceding early.
+- **No accessibility service or other reach into other apps' UI.** Trough does not need
+  Android's storage or other apps; it owns its own. Effort goes into **direct hardware access**
+  through what an app may use: Vulkan (in use), AHardwareBuffer, AAudio MMAP, NDK camera,
+  sensor direct channels, USB host (userspace drivers over device fds), Bluetooth/NFC sockets.
+  Get as close to kernel and drivers as workarounds allow; that is where speed comes from.
+- **The browser is built in as a first-class component**, specialised to this device and
+  environment and drawing on existing engines. It is not a WebView. It is large, but closer than
+  a human-team estimate suggests, and it is required for fluidity and co-evolution, so it is not rushed.
+- Trough can hold the Android roles that make it the face of the device (HOME declared; others
+  as needed). Lifetime: the bundle outlives its Activity (HotLoader.process + attach), and Quit
+  in the notification is the only intended exit.
+
 ## Semantic substrate
 
 ### Identity and revisions
@@ -333,6 +378,18 @@ boundary exchanges batches/handles; no per-draw reflective calls. (2026-10-28: n
 Java calls in-process is built against bionic as well as glibc; see docs/BIONIC.md.) An Android text-input adapter
 preserves IME composition, selection, bidi, clipboard and accessibility contracts even when
 the text itself is rendered by Trough.
+
+(2026-10-30, user decision: native text.) Shaping and line layout move into native code
+under Trough's ownership: system font fallback through the NDK's `AFontMatcher`, HarfBuzz
+shaping (MIT, built as C++ without its runtime), bidi and break iteration from the system ICU
+(NDK `libicu`, API 31+), and the line breaker ported from AOSP Minikin (Apache-2.0). The reason
+is measured: about three quarters of a platform layout's working memory is native memory held by
+Java peers until the GC runs (docs/EXEC.md "Operator costs"). Native layout frees when its job
+retires, needs no JNI on the executor's workers, and runs under admission like any operator.
+The platform stack stays as the differential oracle: native layout must match TextRunShaper,
+LineBreaker and StaticLayout before it replaces them (docs/NATIVE_TEXT.md). Glyph masks stay
+with the platform rasteriser for now, because each glyph is rasterised once and then cached.
+The core stays C11 (user, 2026-10-30: no Rust rewrite).
 
 Visible-range layout and indexed text/stream storage make presentation cost depend on what is
 visible and changed, not all historical items. Scrolling primarily changes transforms/clip

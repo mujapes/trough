@@ -346,5 +346,38 @@
         </activity>
         <service android:name="com.trough.app.TroughService" android:exported="false"
  />
+        <!-- Process slots (Slot.java): isolated processes a bundle can run guests or work in. -->
+        <activity android:name="com.trough.app.Slot$A0" android:process=":p0" android:exported="false"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection"
+            android:resizeableActivity="true" />
+        <service android:name="com.trough.app.Slot$S0" android:process=":p0" android:exported="false" />
+        <activity android:name="com.trough.app.Slot$A1" android:process=":p1" android:exported="false"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection"
+            android:resizeableActivity="true" />
+        <service android:name="com.trough.app.Slot$S1" android:process=":p1" android:exported="false" />
+        <activity android:name="com.trough.app.Slot$A2" android:process=":p2" android:exported="false"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection"
+            android:resizeableActivity="true" />
+        <service android:name="com.trough.app.Slot$S2" android:process=":p2" android:exported="false" />
+        <activity android:name="com.trough.app.Slot$A3" android:process=":p3" android:exported="false"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection"
+            android:resizeableActivity="true" />
+        <service android:name="com.trough.app.Slot$S3" android:process=":p3" android:exported="false" />
+        <activity android:name="com.trough.app.Slot$A4" android:process=":p4" android:exported="false"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection"
+            android:resizeableActivity="true" />
+        <service android:name="com.trough.app.Slot$S4" android:process=":p4" android:exported="false" />
+        <activity android:name="com.trough.app.Slot$A5" android:process=":p5" android:exported="false"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection"
+            android:resizeableActivity="true" />
+        <service android:name="com.trough.app.Slot$S5" android:process=":p5" android:exported="false" />
+        <activity android:name="com.trough.app.Slot$A6" android:process=":p6" android:exported="false"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection"
+            android:resizeableActivity="true" />
+        <service android:name="com.trough.app.Slot$S6" android:process=":p6" android:exported="false" />
+        <activity android:name="com.trough.app.Slot$A7" android:process=":p7" android:exported="false"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection"
+            android:resizeableActivity="true" />
+        <service android:name="com.trough.app.Slot$S7" android:process=":p7" android:exported="false" />
     </application>
 </manifest>
