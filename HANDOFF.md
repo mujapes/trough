@@ -1,4 +1,57 @@
-# Current handoff: autonomous construction, 2026-10-28
+# Current handoff: Trough as the OS, 2026-10-30
+
+## Start here (any model: Claude, GPT/Codex, others)
+
+**What Trough is now.** The user's operating system, inside one Android app that is never
+closed (DESIGN.md, redesigned 2026-10-30: read "Intent" and "The OS layer" first). The user may
+switch between models (Claude and GPT) to build it; this file is the live state. Update this
+"Start here" block whenever the state changes, and commit early: the phone that hosts the VM
+crashes or powers off semi-regularly, and a context window is not memory.
+
+**Where you are running.** A Debian arm64 VM (Android's Linux Terminal) on the user's Pixel 7.
+The phone's shared storage is `/mnt/shared` (`/mnt/shared/Download/trough/` = the phone's
+`Download/trough/`). The VM's `/tmp` is RAM: keep big files out. Trough itself runs on the phone,
+not in the VM; the two talk through Download/trough (bundles, signed control channel, evidence).
+
+**State on 2026-10-30 evening (Claude Opus 5.5):**
+- Host APK rewritten to be final (docs/HOST.md, commit c6b364e): process-owned loader
+  (TroughApp/HotLoader.process), bundle contract v2 (`boot`/`attach`/`detach`/`intent`/
+  `dispatch`), every component and role declared as forwarding shims (Components.java), process
+  slots, isolated sandboxes, revive job, boot receiver, 371 permissions. Built, not yet installed:
+  **the user must install `Download/trough/trough-os.apk`** (same signing key, data kept). Nothing in
+  it has run on a device yet: after install, verify launch, Recents swipe -> reopen keeps the
+  agent session, Back -> background, notification Quit, and a process kill -> revive.
+- Hot bundle `061fd2ce` published (Power: `/awake`, screen on while visible, partial wake lock,
+  Back to background, battery-exemption request; Main/Chat/Development `attach`). It is a v1
+  bundle (`start`, no `boot`): with the new host it waits for a window, then keeps running across
+  windows.
+- DESIGN.md redesigned for the OS pivot; docs/CONSTRUCTION.md "OS layer" gives the build order.
+- Native text (HarfBuzz shaping, Minikin-style) is on branch `native-text-wip`: written, never
+  built or verified, no `android.shape` oracle yet. Its DESIGN.md decision text is on master.
+- `tools/hot.sh` now touches the published files: shared storage kept the old mtime across
+  rename, so the phone missed a bundle.
+
+**Next, in order** (docs/CONSTRUCTION.md "OS layer"):
+1. After the user installs the APK: device checks above; fix anything the host gets wrong.
+2. Bundle `Main.boot` (headless start) + `detach` + `intent` routing + a `dispatch` table.
+3. Complete Debian filesystem (DESIGN.md "The Linux filesystem"): layered path virtualisation.
+4. Native text: build the branch, write `android.shape` vs TextRunShaper, then line breaking.
+5. Then hardware ladder adapters, Lift (dex first), guest apps, browser, user-built software.
+The user also wants to discuss programming languages for the OS (DESIGN.md "Languages", open).
+
+**How to build, publish and verify.** AGENTS.md "Layout". Bundles: `tools/hot.sh` (signs with
+~/.trough/hot-key.pem). Scenarios on the phone: `tools/loop.sh` (needs Trough's Activity alive;
+visible-only scenarios SKIP when Trough is hidden; ask the user to bring Trough to the front
+when you need them). New scenarios go in hot/.../Development.java AND tools/scenario.py's choices.
+Phone results: `/mnt/shared/Download/trough/{status,bench,crash}-*.json|txt`, `evidence/<sha>/`.
+
+**The user's standing preferences.** Full autonomy, including moving credentials. Keep going
+past milestones unless there is a real question. Slow, oracle-first work is fine after an honest
+estimate. Workarounds before sacrifices. No unwatched model turns. No accessibility service.
+No WebView. Short, direct messages; the user types fast and without spaces; read intent, not
+spelling. Do not target the user's employer's devices or software (2026-10-30: they build their own).
+
+# Previous handoff: autonomous construction, 2026-10-28
 
 ## Active continuation (2026-10-28)
 

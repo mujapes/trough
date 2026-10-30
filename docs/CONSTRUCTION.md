@@ -137,6 +137,30 @@ never auto-submit migrated drafts. Switch the product surface only when the acce
 passes. Retire debug-only plumbing deliberately, preserving a recovery path outside the
 replaceable runtime. No UI reorganisation is used to cover an incomplete ownership model.
 
+### OS layer (added 2026-10-30, DESIGN.md "The OS layer")
+
+These build on stages 1-5 and run beside them; each is a consumer of the same substrate, not a
+separate product. Order by dependency:
+1. **Host adoption (bundle side, no APK change):** `Main.boot(Context, root, dir)` so the bundle
+   runs headless at process start (boot receiver, revive job, after a kill); `detach`;
+   `intent(Intent)` routed into records (links, shares, files); a `dispatch` table registering
+   component handlers. Oracle: a scenario that kills and revives the process and checks the
+   bundle and its sessions resume without a window; intents arrive exactly once.
+2. **Complete Debian filesystem:** layered path virtualisation (patched glibc wrappers ->
+   seccomp SIGSYS rewriting in texec -> execmap/fakechroot), ownership table, broad base
+   package set, daemon supervision. Oracle: tests/phonefs.sh widened to static/Go/musl binaries
+   and runtime /etc opens; Debian packages' own tests.
+3. **Hardware ladder adapters:** AHardwareBuffer exchange, AAudio MMAP, NDK camera, sensor
+   direct channels, USB host fds, Bluetooth sockets, VPN tun, each with a device oracle.
+4. **Lift:** dex/APK lifting and lowering first (dexlib2/smali in the self-hosted build), with
+   round-trip and differential-execution oracles; then ELF/wasm/web formats as consumers appear.
+5. **Guest apps:** a lifted Android app running in a slot process with its framework calls on
+   Trough shims and its UI in Trough's scene; the app's own behaviour is the oracle.
+6. **User-built software:** the module system as the user's app platform, proven by the
+   delivery-round reference case (DESIGN.md "Building the user's own software").
+The browser (stage 5 content) and native text (stage 4) proceed in parallel; native text is on
+branch `native-text-wip`.
+
 ## Concrete seams that must never become patchwork
 
 | Trigger | Work that should change | Work that should remain valid |

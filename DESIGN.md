@@ -1,30 +1,46 @@
-# Trough: one coherent machine
+# Trough: an operating system in one app
 
-Current architectural contract, 2026-10-27. Read this before implementing any subsystem.
-[Historical decisions and device evidence](docs/IMPLEMENTATION_HISTORY.md) preserve the earlier
-investigations; they are not a second specification. [Construction plan](docs/CONSTRUCTION.md)
-records the dependency order, proof obligations and actual implementation status.
-[Hot replacement](docs/HOT_RELOAD.md) defines the founding lifecycle contract and how the
-working Opus loader evolves without being discarded.
+Current architectural contract, redesigned 2026-10-30 around the user's direction that Trough
+is the operating system (it was "one coherent machine", 2026-10-27; the substrate sections
+below carry over). Read this before implementing any subsystem.
+[Host contract](docs/HOST.md) defines the fixed APK and the bundle entry points.
+[Construction plan](docs/CONSTRUCTION.md) records dependency order and status.
+[Hot replacement](docs/HOT_RELOAD.md) defines the lifecycle contract.
+[Historical decisions and device evidence](docs/IMPLEMENTATION_HISTORY.md) are not a second specification.
+[HANDOFF.md](HANDOFF.md) is the live state for whichever model is building (Claude, GPT/Codex, others).
 
 ## Intent
 
-Trough is one self-hosting Android application: a continuous place to consume, think, browse,
-create and direct agents. It replaces Forge's VM/daemon/client arrangement. Its shape comes
-from the final Forge interaction design; its internal organisation is designed afresh.
+Trough is the user's whole computing environment: an operating system that runs inside one
+sideloaded Android app and is never closed. Android is reduced to the hardware, driver and
+radio layer beneath it. Everything the user does (browsing, files, writing, thinking, media,
+agents, apps, building Trough itself) happens inside Trough, in one fluid, co-evolving surface.
+It replaces Forge's VM/daemon/client arrangement, which the phone kept killing.
 
-The user's clarification is fundamental: **parallelisation means harmony**, not merely more
-threads. The system should exploit agreements between its parts: the same fact need not be
-rediscovered, the same result need not be represented repeatedly, independent changes need not
-interfere, and work should reach the relevant hardware without unnecessary intervening work.
-A faster collection of separately assembled features would miss the objective.
+What an OS is, and where each part comes from:
+
+| OS part | In Trough |
+| --- | --- |
+| Kernel interface, drivers, radios | Android/Linux beneath the app, reached as directly as an app can (Hardware access) |
+| Process and lifetime management | the host's process model: main process, slots, isolated sandboxes; never closed (Lifetime) |
+| Filesystem and userland | the Debian root under /data/data/t.t, native arm64 (texec, patched glibc, apt/dpkg) |
+| Shell, windowing, input | Trough's own scene, renderer (Vulkan) and input/IME ownership |
+| Browser | Trough's own engine, first-class; no WebView |
+| Applications | Trough modules, Linux programs, web apps, and Android apps run inside Trough via Lift |
+| App store | Lift + the module system: install, specialise, rebuild, roll back |
+| Self-modification | hot replacement and on-device self-build, owned by the running system |
+
+The user's clarification remains fundamental: **parallelisation means harmony**, not merely
+more threads. The system should exploit agreements between its parts: the same fact need not
+be rediscovered, the same result need not be represented repeatedly, independent changes need
+not interfere, and work should reach the relevant hardware without unnecessary intervening
+work. An OS assembled from separately designed features would miss the objective.
 
 We design the complete system first and construct its actual internals in dependency order.
 There is no succession of temporary chat apps, fallback web shells or user-tested demos.
-The existing debug console remains a development instrument, not the product being polished.
+The existing chat console remains a development instrument, not the product being polished.
 Automated tests, differential oracles and device measurements are the builder's work; the user
-is not asked to operate the phone or approve each intermediate subsystem. One integrated
-product is exposed when its complete experience satisfies the acceptance contract.
+is not asked to operate the phone or approve each intermediate subsystem.
 
 A design can eliminate structural mistakes, not guarantee unknown hardware behaviour or
 arbitrary-web compatibility. Measurements can change an implementation inside a contract.
@@ -33,46 +49,25 @@ an exception behind another adapter and call the architecture complete.
 
 ## Construction is part of the architecture
 
-User clarification, 2026-10-27: acknowledge the full scale rather than reducing scope to make
-an intermediate demo look complete. The target includes a ground-up Android browser, a native
-filesystem/workspace implementation or suitable port, first-class hot replacement and autonomous
-build/test/refinement loops, all governed by the same design. Hardware modification is out of
-scope. Near-hardware-limit efficiency is an objective to investigate and measure across complete
-paths, not a performance claim or a reason to omit semantics.
+User clarifications, 2026-10-27 and 2026-10-30: acknowledge the full scale (an OS: browser
+engine, filesystem, app runtime, decompile/recompile, hardware access, hot replacement and
+autonomous build/test loops) rather than reducing scope to make a demo look complete. Hardware
+modification is out of scope. Near-hardware-limit efficiency is an objective to investigate
+and measure across complete paths. "Humans would take years" is not a reason to cut scope:
+the builder specialises to this exact device and environment, and borrows from existing
+implementations wherever they are good, but does not rush.
 
-The user remains in the existing VM-hosted environment until Trough is substantially complete.
-Both apps will be kept open in Android split view. The builder must control, exercise, observe,
-build and refactor Trough without asking the user to supply taps, screenshots, test execution or
-repetitive judgements. Split view is a development arrangement, not the final architecture or
-evidence that all control/observation capabilities already exist.
+The user stays in the VM-hosted environment until Trough is substantially complete; both apps
+run in split view. The builder controls, exercises, observes, builds and refactors Trough
+without asking the user for taps, screenshots, test runs or repetitive judgements. The
+development loop is a first-class consumer of the same action, observation, effect, build and
+activation contracts as the finished product: initially the VM orchestrates it (tools/loop.sh,
+signed scenario channel), finally Trough owns it. See [AUTONOMOUS_DEVELOPMENT.md](docs/AUTONOMOUS_DEVELOPMENT.md).
 
-The development loop is a first-class consumer of the same action, observation, effect, build
-and activation contracts as the finished product. Initially the VM orchestrates it through a
-narrow development adapter. Finally Trough owns the orchestrator, source, toolchain, cases,
-evidence, activation and recovery. That transition moves ownership of one loop; it does not
-require inventing a second automation system or retaining a hidden VM dependency.
-
-Plan, implementation and end state must stay aligned: each architectural invariant names its
-implementing contract and automated evidence; implementation findings update the affected
-end-to-end design, not a growing list of exceptions. Define cases -> implement/refactor ->
-verify -> widen coverage -> repeat within the authorised scope. The user supplies direction
-and initial constraints; their attention is not a dependency of ordinary construction.
-See [AUTONOMOUS_DEVELOPMENT.md](docs/AUTONOMOUS_DEVELOPMENT.md).
-
-### Workarounds before sacrifices
-
-User direction, 2026-10-27: when a platform limit blocks something, search hard for a workaround
-before accepting any sacrifice: dropping a capability, pinning or skipping updates, narrowing
-scope, or settling for a slower or less complete path. Search existing practice first (Debian,
-Termux, mmdebstrap, upstream tools and their documentation), then compose or build a mechanism.
-A sacrifice is a last resort, recorded with the workarounds tried and why each failed.
-
-Example: Android has no app mount namespace, so Debian maintainer scripts could not write their
-absolute /etc paths. Neither reverting the openjdk security update (its older version has the
-same script) nor holding updates was the answer. Debian's own fakechroot, which mmdebstrap uses
-for unprivileged installs, was the answer. It is scoped to maintainer scripts (native/execmap).
-Earlier narrow-scope notes in code are judgements to revisit when a workaround needs them, not
-prohibitions.
+Plan, implementation and end state stay aligned: each invariant names its implementing
+contract and automated evidence; implementation findings update the affected design, not a
+growing list of exceptions. Several models build Trough in turn (Claude, GPT/Codex); the
+repository is their shared memory: DESIGN.md (what), docs/ (contracts), HANDOFF.md (now).
 
 ## The governing idea
 
@@ -101,11 +96,10 @@ can move a page without reshaping it. Those are architectural wins before instru
 
 ## Complete experience
 
-The reference is Forge's final deck/Flow interaction language, including the unified pad,
+The interaction reference is Forge's final deck/Flow language, including the unified pad,
 stream and resident source specified in `forge/docs/forge-next-design.md` and the study in
 `forge/forge-ui/design/flow-next.html`. Copy their interaction intent and final visual layout,
-not their DOM, timers, transport or old host assumptions. Trough's explicit native/no-WebView
-requirements override the old Forge document's implementation prescriptions.
+not their DOM, timers, transport or old host assumptions.
 
 - A resident writing surface preserves draft, selection, composition and scroll anchor.
   Writing is local; an explicit Ask captures a particular revision and any attached sources.
@@ -125,6 +119,10 @@ requirements override the old Forge document's implementation prescriptions.
 - Source editing, building and safe activation are capabilities of the running application.
   Self-hosting is part of the same ownership/revision system, not a second development daemon.
 
+- Apps are not separate worlds. A Trough module, a Linux program, a web app and a lifted
+  Android app all present through the same scene, records and action contracts, so the user
+  (and prediction) can grab, link and compose anything on screen with anything else.
+
 ### Fluid, co-evolving surface (user direction, 2026-10-30)
 
 The user still wants Forge's original idea: a UI that co-evolves with them. The whole app acts
@@ -141,34 +139,176 @@ the construction order allows, prefer designs that keep it open.
   prefetch, pre-layout and order, but it never acts or sends anything. No unwatched model
   turns, and nothing leaves the device without the user's permission.
 
-### Trough as the operating system (user direction, 2026-10-30)
+## The OS layer
 
-Trough is never closed. It is the user's whole environment, an OS running inside one app, and
-Android is reduced to the hardware layer beneath it. The filesystem (the Debian root) and the
-browser are the bulk of it. The rest is built in:
-- **Decompile/recompile is a first-class component of the whole system**, not a tool. It lifts any
-  artifact into Trough's records and lowers it back: dex, ELF, wasm, web pages, data formats.
-  It is the path by which outside software joins the fluid, co-evolving surface: lifted things
-  can be inspected, linked, specialised and rebuilt like Trough's own code.
-- **Android apps run inside Trough** through it. Trough already runs on ART, so guest dex
-  compiles to native code like any installed app. The hard part is the framework contract
-  (package identity, Context, Activities, resources, data dir, permissions). Recompiling redirects
-  it to Trough shims, so guest UI lands in Trough's scene instead of separate windows. Prior art:
-  VirtualApp, DroidPlugin, Parallel Space (runtime binder proxies); dexlib2/smali (rewriting). Guests that
-  need isolation run in the host's process slots (app/src/.../Slot.java, `:p0`..`:p7`, declared up front).
-  High-security apps (hardware-backed Play Integrity over the original signature) may need the
-  real app; keep looking for ways in rather than conceding early.
-- **No accessibility service or other reach into other apps' UI.** Trough does not need
-  Android's storage or other apps; it owns its own. Effort goes into **direct hardware access**
-  through what an app may use: Vulkan (in use), AHardwareBuffer, AAudio MMAP, NDK camera,
-  sensor direct channels, USB host (userspace drivers over device fds), Bluetooth/NFC sockets.
-  Get as close to kernel and drivers as workarounds allow; that is where speed comes from.
-- **The browser is built in as a first-class component**, specialised to this device and
-  environment and drawing on existing engines. It is not a WebView. It is large, but closer than
-  a human-team estimate suggests, and it is required for fluidity and co-evolution, so it is not rushed.
-- Trough can hold the Android roles that make it the face of the device (HOME declared; others
-  as needed). Lifetime: the bundle outlives its Activity (HotLoader.process + attach), and Quit
-  in the notification is the only intended exit.
+### The host: a fixed APK holding every mechanism
+
+The APK is the host: the only part that needs reinstalling, so it is designed to be final.
+It declares, once, every permission, component and role an OS-in-an-app may need, and forwards
+each to the running bundle. It holds mechanism, never policy (docs/HOST.md):
+- **Bundle entry points:** `boot` (process-level, no window needed), `attach`/`detach` (a window
+  comes and goes), `intent` (every Intent Trough receives), `dispatch` (every component callback),
+  `stop`. v1 bundles (`start(Activity, ...)`) still run, tied to a window.
+- **Components, inert until a bundle implements them and the user grants them:** input method,
+  notification listener, VPN (Trough's own network layer), default-dialer/SMS/call-screening/
+  self-managed-call services, assistant (voice interaction + recognition), quick-settings tile,
+  screensaver, live wallpaper, media browser, autofill, credential provider (passwords, passkeys),
+  NFC card emulation, device admin, a documents provider (Trough's filesystem in Android's picker),
+  a file provider, a revive job, boot/package/SMS receivers, eight process slots, isolated sandboxes.
+- **One Activity** (singleTask) receives HOME, launcher, browser links, every file/share/text
+  intent, dial/SMS/camera/alarm/search/assist intents, USB attach and NFC discovery.
+- **Permissions:** Forge's 315, every grantable one in the Android 14 framework, later ones by
+  name, and the development permissions `pm grant` can give over adb.
+
+Not declared, by user decision (2026-10-30): an accessibility service. Reaching into other
+apps' UI is not the direction; Trough brings software inside instead (Lift).
+
+### Lifetime: never closed
+
+Trough's main process lives as long as the device allows. The bundle belongs to the process
+(HotLoader.process), not to a window: swiping Trough from Recents, Back, rotation or a crash of
+the window does not stop it; the next window re-attaches to the running bundle. TroughService
+is a foreground service (sticky, not stopped with the task); a partial wake lock keeps work
+running with the screen off (Power, `/awake`); the battery-optimisation exemption is requested;
+a persisted 15-minute job and the boot receiver bring the process back if Android kills it;
+the user disables Android 14+'s child-process restrictions once. As the HOME app, Trough is
+the first thing the device shows. Quit in the notification is the only intended exit.
+
+### Process model
+
+| Process | What runs there | Privileges |
+| --- | --- | --- |
+| main (`t.t`) | loader, bundle, stores, scene, renderer, agents, userland exec | everything granted to the app |
+| slots `:p0`..`:p7` | guest apps or isolated trusted work a bundle places there (Slot.java) | the app's, separately killable, own heap |
+| sandboxes (`isolatedProcess`) | untrusted parsing/scripting/layout: web content, unverified guest code | none: no files, network or permissions; code arrives as dex over a binder |
+| userland children | Linux programs (claude, codex, compilers, servers) under texec | the app's uid; seccomp-filtered |
+
+Process placement is a policy of the replaceable program, constrained by privilege boundaries.
+
+### Hardware access: as close to the kernel as an app can get
+
+Speed comes from reaching the hardware without intervening layers. Ladder, from most direct:
+1. **Native NDK paths in-process:** Vulkan (in use, Mali-G710), AHardwareBuffer (zero-copy
+   between camera, codec, GPU and CPU), AAudio with MMAP exclusive mode, NDK camera,
+   AImageDecoder/AMediaCodec, ASensorManager direct channels (high-rate sensors into shared
+   memory), ADPF performance hints, thermal API, the system ICU and font matcher.
+2. **Device file descriptors Android hands to apps:** USB host (`UsbDeviceConnection` gives a
+   raw fd: userspace drivers for any USB device, libusb-style), USB accessory, Bluetooth
+   (L2CAP/RFCOMM sockets), NFC tags and card emulation, the VPN tun fd (every packet), the
+   camera and media surfaces.
+3. **Shell-uid bridge:** Android's own wireless debugging, paired from inside Trough to the same
+   device (prior art: LADB, Shizuku), gives adb/shell-uid capabilities: `pm grant` of
+   development permissions, input injection, screen capture, settings, dumpsys, process stats.
+   Opt-in by the user once; Trough must work without it.
+4. **Device owner** (optional; set over adb on a device without accounts): lock-task (Trough
+   cannot be left), silent app installs, policy control. Recorded as a possibility, not a requirement.
+
+Kernel and driver modification stays out of scope (no root, no unlocked bootloader assumed).
+Anything Android forbids an app (SELinux, seccomp, hidden APIs) is met with workarounds first
+(below), and a recorded limit only after they fail.
+
+### The Linux filesystem: complete Debian, not a subset
+
+User direction, 2026-10-30: the Linux side is a fully developed Debian, never a half-built,
+limited-capability workaround. A few GB of downloads and storage are affordable.
+- **Complete distribution:** a dpkg/apt-owned Debian root (today `/data/data/t.t/d`) where any
+  Debian package installs and works with its normal maintainer scripts, updates and alternatives.
+  Preinstall a broad base: build-essential, clang/LLVM, Python, Node, a JDK, git, man pages,
+  locales, fonts, ffmpeg and the libraries Trough itself builds against. The package list grows
+  by use, never by excluding things that are hard.
+- **Normal paths for every program:** each process sees a standard FHS (`/etc`, `/usr`, `/var`,
+  `/home`, `/tmp`, `/run`, `/dev/shm`, `/proc`, `/sys` where Android allows) with the root's files
+  in place, without root or mount namespaces (USER_NS is compiled out on this kernel). Layered
+  path virtualisation, fastest layer first:
+  1. Trough's patched glibc maps paths at its syscall wrappers (open, stat, exec, readlink, ...),
+     covering every dynamically linked glibc program at near-zero cost;
+  2. texec installs a seccomp filter that traps the path syscalls glibc did not map (static
+     binaries, Go, musl, raw `syscall`) to an in-process SIGSYS handler that rewrites them
+     (prior art: gVisor systrap, zpoline/lazypoline, proot's rewriting without ptrace's cost);
+  3. execmap and Debian's fakechroot remain for maintainer scripts and exec mapping.
+  Host paths Android owns (`/system`, `/data`, `/proc` entries, `/dev` nodes) pass through.
+- **Identity:** one Android uid, presented as root inside the root to dpkg and tools, with a
+  persistent ownership/mode table (fakeroot semantics) so packages that chown keep working.
+- **Services:** Trough supervises long-running userland daemons itself (no systemd PID 1):
+  start, restart, logs and resource limits as Trough tasks, so servers and databases run normally.
+- **Shared with the OS:** the root is Trough's filesystem. The documents provider shows it in
+  Android's file picker, Lift reads and writes it, and modules store large artifacts in it.
+- Evidence decides "works": each layer has an oracle (tests/execmap.sh, phone filesystem tests,
+  Debian packages' own test suites where they run without root).
+
+### Lift: decompile/recompile as a first-class OS component
+
+User direction, 2026-10-30: decompile/recompile is a component of the whole OS, not a tool.
+**Lift** turns external artifacts into Trough's records and lowers them back:
+- formats: dex/APK, ELF, wasm, JS/HTML/CSS (the browser's input), fonts, media containers,
+  documents and data formats;
+- lifted programs are records with provenance and revisions like Trough's own code: they can
+  be inspected, linked, specialised to this device, rebuilt and hot-replaced;
+- this is how outside software joins the fluid, co-evolving surface, and how the app store works:
+  installing is lifting plus a build; updating is re-lifting; rolling back is a revision.
+
+Lift reuses existing decompilers/assemblers (dexlib2/smali/baksmali, d8/r8, LLVM tools,
+wasm tools) as dependencies of the self-hosted build, chosen by fidelity and licence.
+
+### Android apps inside Trough
+
+Trough already runs on ART, so a guest app's dex compiles to native code exactly as an installed
+app's would: native speed is the starting point, not a goal. The work is the framework contract
+the app expects: its own package identity, Context, resources, data directory, Activities,
+Services, permissions and binder calls to system services. Two known approaches, combinable:
+- **runtime virtualisation** (VirtualApp, DroidPlugin, Parallel Space): stub components in the
+  host, proxied system-service binders, the guest's classes loaded in a slot process;
+- **recompilation** (Lift): rewrite the guest's dex so its framework calls land in Trough
+  shims, and its UI renders into Trough's scene instead of separate Android windows. This is
+  the preferred path: the guest becomes part of the fluid surface.
+
+High-security apps that check hardware-backed attestation of their own signature (banking)
+may need the real installed app; keep looking for ways in rather than conceding early.
+Browsers matter more to the user than APKs; APKs are the last hurdle, not the first.
+
+### Building the user's own software
+
+User direction, 2026-10-30: Trough is where the user builds their own software, not only where
+they run other people's. The module system is the app platform: a user-built app is a module
+(schemas, derivations, actions, scene semantics, effect adapters) that Trough builds on the
+device, hot-replaces while it runs, and that co-evolves with its user like the rest of the surface.
+Agents build it with the user, inside Trough, with the same build -> oracle -> activate loop.
+
+Reference case: the user's own delivery-round software for their milk-round job, written from
+scratch rather than taken from the existing handheld's software. It sets concrete requirements
+for the platform, all of which belong to the OS rather than to that one app:
+- offline-first records (customers, rounds, orders, deliveries, payments) in the one store,
+  with history, and export/sync when a network is available;
+- camera barcode/QR scanning on the native camera path, with no round trip through Java;
+- location, maps and route order (location, offline map data, routing as derivations);
+- peripherals through the hardware ladder: Bluetooth and USB printers and scanners;
+- one-hand, glanceable, fast interaction in a moving vehicle and in daylight;
+- reliability: a delivery recorded is durable before it is shown as recorded.
+
+### Workarounds before sacrifices
+
+User direction, 2026-10-27: when a platform limit blocks something, search hard for a workaround
+before accepting any sacrifice: dropping a capability, pinning or skipping updates, narrowing
+scope, or settling for a slower or less complete path. Search existing practice first (Debian,
+Termux, mmdebstrap, upstream tools and their documentation), then compose or build a mechanism.
+A sacrifice is a last resort, recorded with the workarounds tried and why each failed.
+
+Example: Android has no app mount namespace, so Debian maintainer scripts could not write their
+absolute /etc paths. Neither reverting the openjdk security update (its older version has the
+same script) nor holding updates was the answer. Debian's own fakechroot, which mmdebstrap uses
+for unprivileged installs, was the answer. It is scoped to maintainer scripts (native/execmap).
+Earlier narrow-scope notes in code are judgements to revisit when a workaround needs them, not
+prohibitions.
+
+### Languages (open for discussion with the user, 2026-10-30)
+
+Decided so far: the trusted core is C11 (user, 2026-10-30: no Rust rewrite); Java 8 source on
+ART for the Android-facing layer (host and hot bundle); shell for build glue; C++ only where a
+dependency requires it (HarfBuzz, built without its runtime). Open: the language(s) for the
+browser engine, Lift, and the long-term module language for the co-evolving surface (one that
+Trough can itself parse, specialise and hot-replace). Choose by measured cost on this device,
+memory safety at untrusted boundaries, self-hostability on the phone and how well Lift can
+reason about it. Do not add a toolchain speculatively.
 
 ## Semantic substrate
 
@@ -360,7 +500,7 @@ must name the actual boundary; GPU sampling, tiling, colour conversion and compo
 consume bandwidth. A required conversion is placed once at the narrowest compatible boundary.
 
 The first trusted commit kernel is C11 because it is supported by the verified phone toolchain
-and can have a small explicit ABI. It handles trusted validated metadata, never raw web input.
+and can have a small explicit ABI (language choice for the rest: "Languages" below). It handles trusted validated metadata, never raw web input.
 Memory-safe parsing/engine components are a separate boundary requirement; C is not a reason
 to admit untrusted bytes into this kernel. Add toolchains intentionally to the self-hosted build
 when their consumers are selected, not as speculative dependencies.
@@ -406,7 +546,7 @@ queue. Choreographer supplies timing input, not a complete low-latency presentat
 An unchanged scene produces no voluntary render loop. Media and active animations retain
 only their own clocks and demands.
 
-## Arbitrary web, site specialisation and security
+## The browser: arbitrary web, site specialisation and security
 
 There is **no WebView fallback**, including for arbitrary pages. The final product includes
 Trough's document/JS engine, with native-site and component specialisations using the same
@@ -426,8 +566,9 @@ Untrusted parsing, scripting and layout belong in isolated content domains witho
 keys, app-private files, userland exec or privileged Android bridges. One shared process for
 all sites is **not** stronger isolation than Chrome. Process partitioning must respect origin
 and privilege boundaries; process reuse is a resource policy constrained by that boundary.
-The exact Android isolated-service pool and lifecycle must be proven in the actual manifest
-and device before claiming containment. Platform sandboxing is necessary but does not replace
+The host declares isolated sandboxes (`Components$Sandbox0/1`, `android:isolatedProcess`;
+`bindIsolatedService` gives one process per instance name, docs/HOST.md). Their lifecycle and
+containment must still be proven on the device before claiming it. Platform sandboxing is necessary but does not replace
 origin isolation, IPC validation, resource quotas or capability checks.
 
 The trusted compositor accepts validated resource descriptors, bounded display packets and
@@ -461,15 +602,16 @@ Database rows do not become universal runtime objects; loaded working sets have 
 compact layouts. File saves use explicit conflict and durability semantics. Recovery preserves
 unfinished text and uncertain external outcomes. Kept artifacts are not evicted like thumbnails.
 
-Userland is a peripheral capability with native execution, not the application host. Preserve
-the verified t.t/texec/patched-glibc environment, apt/dpkg ownership and source-build facilities.
-The evidence establishes working tools, not a general Linux kernel or universal hardcoded-path
-compatibility. Namespace/root prerequisites remain as documented in the historical evidence.
+Userland (the Debian root) is Trough's filesystem and tool layer, run natively ("The Linux
+filesystem" above); it is not the application host. Preserve the verified t.t/texec/
+patched-glibc environment, apt/dpkg ownership and source-build facilities. Today's evidence
+establishes working tools, not yet universal path compatibility; that is the layered path
+virtualisation's job, not a reason to narrow the package set.
 Provider and CLI adapters translate at entry/exit; no localhost daemon, HTTP UI server, SSE
 internal bus or copied Forge plumbing. Network SSE remains a provider's external protocol.
 
-The fixed APK declares actual platform components and capabilities; permission declaration is
-not runtime consent or an ability to bypass Android restrictions. Platform adapters hold
+The fixed APK (the host, docs/HOST.md) declares actual platform components and capabilities;
+permission declaration is not runtime consent or an ability to bypass Android restrictions. Platform adapters hold
 mechanism; replaceable modules own app policy. Native modules can hold policy when they are
 part of the replaceable program. "Native code never holds policy" is not a literal restriction
 that would force the planned native application back through scripts for every decision.
@@ -543,22 +685,22 @@ stable semantics and real device oracles. No claim that its benefit is a fixed p
 
 ## Completion contract
 
-The finished product runs independently of the Forge VM and presents the full unified surface.
-Typing, history, media, gaze, arbitrary document interaction, agents, files and self-modification
-obey the same revision/ownership laws. Reliable actions survive contention and recovery;
-replaceable work does not accumulate behind the user. Focus, Back, audio, model permissions,
-origin isolation and saved-state acknowledgements agree across the whole experience.
+The finished product is the user's operating system: it runs independently of the Forge VM,
+is never closed, and presents the full unified surface. Typing, history, media, gaze, the
+browser, files, apps (native, Linux, web, lifted Android), agents and self-modification obey
+the same revision/ownership laws. Reliable actions survive contention, process death and
+recovery; replaceable work does not accumulate behind the user. Focus, Back, audio, model
+permissions, origin isolation and saved-state acknowledgements agree across the whole experience.
 
-Automated scenario oracles exercise the complete paths above, including delayed IO, out-of-order
+Automated scenario oracles exercise the complete paths, including delayed IO, out-of-order
 completion, stale observations, reload while jobs are live, process death, storage failure,
 thermal pressure, IME composition and incompatible code/schema changes. Engine conformance uses
 pinned test262/WPT coverage; rendering uses reference geometry, text and golden screenshots;
-full-screen/device evidence verifies real presentation, including separately composed media.
-View.draw into a bitmap alone does not prove SurfaceView/video composition.
+Lift uses round-trip and differential execution against the original artifact; guest apps use
+their own behaviour as the oracle. Full-screen device evidence verifies real presentation.
 
 No milestone is called the product because one chat screen boots. Internal construction stages
-exist to make the complete design mechanically defensible. They are not alternate product
-architectures to be shipped and patched together later.
+exist to make the complete design mechanically defensible.
 
 ## Research behind these decisions
 
@@ -580,3 +722,10 @@ These sources inform the design; they are not benchmarks of Trough.
   the earlier doc's default NNAPI/TPU path was an unverified assumption.
 - [Linux false sharing](https://www.kernel.org/doc/html/latest/kernel-hacking/false-sharing.html):
   ownership and access patterns matter; extra parallel writers can create cache traffic.
+- [VirtualApp](https://github.com/asLody/VirtualApp), DroidPlugin, Parallel Space: running
+  unmodified APKs inside a host app (stub components, binder proxies).
+- [smali/baksmali, dexlib2](https://github.com/JesusFreke/smali): dex disassembly and rewriting.
+- [Shizuku](https://github.com/RikkaApps/Shizuku), [LADB](https://github.com/tytydraco/LADB):
+  shell-uid access from an app via the device's own wireless debugging.
+- [Termux](https://github.com/termux/termux-app): long-lived userland in an app (foreground
+  service, wake lock, documents provider for its home).

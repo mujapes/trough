@@ -119,4 +119,5 @@ cp "$B/bundle.sig" "$PUBLISH/.bundle.sig.tmp"
 mv -f "$PUBLISH/.bundle.sig.tmp" "$PUBLISH/bundle.sig"
 cp "$B/bundle.zip" "$PUBLISH/.bundle.zip.tmp"
 mv -f "$PUBLISH/.bundle.zip.tmp" "$PUBLISH/bundle.zip"
+touch "$PUBLISH/bundle.zip" "$PUBLISH/bundle.sig"   # shared storage keeps the replaced file's mtime across rename; the phone polls mtime
 echo "published $(sha256sum "$PUBLISH/bundle.zip" | cut -c1-8) ($(stat -c %s "$PUBLISH/bundle.zip") bytes) -> $PUBLISH"

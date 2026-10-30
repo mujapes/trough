@@ -1,5 +1,14 @@
 # Trough -- instructions for any coding agent (Codex, Claude, others)
 
+Trough is the user's operating system, running inside one Android app that is never closed
+(DESIGN.md, redesigned 2026-10-30). Several models build it in turn; the repository is the
+shared memory. Start here, in this order:
+1. [HANDOFF.md](HANDOFF.md) "Start here": what is running, what is verified, what is next.
+2. [DESIGN.md](DESIGN.md): what Trough is and every decision so far, with dates.
+3. [docs/HOST.md](docs/HOST.md): the fixed APK and the bundle entry points.
+4. [docs/CONSTRUCTION.md](docs/CONSTRUCTION.md): build order and status; the docs/ contract for
+   whatever subsystem you touch.
+
 **Read [DESIGN.md](DESIGN.md) before changing anything.** It is the source of truth for what
 Trough is and every decision made so far, with dates. If your change contradicts it, either
 stop and ask, or update DESIGN.md in the same commit and say why.
@@ -32,10 +41,14 @@ Current cross-model handoff: read [HANDOFF.md](HANDOFF.md). The current construc
   primitive, debug screen or self-hosted build works.
 
 ## Ground rules
-- Trough is ONE Android app replacing the Forge VM. Target device: Pixel (Tensor G2, arm64,
-  Android 17), sideloaded, targetSdk 28 (needed to exec binaries from app storage).
-- The fixed APK exposes platform mechanisms; replaceable modules own policy (including native
-  modules). Manifest declarations do not replace runtime grants or Android restrictions.
+- Trough is the OS, in ONE Android app replacing the Forge VM. Target device: Pixel 7 (Tensor G2,
+  arm64, Mali-G710, Android 17), sideloaded, targetSdk 28 (needed to exec binaries from app storage).
+- The fixed APK (the host) exposes platform mechanisms; replaceable modules own policy (including
+  native modules). Manifest declarations do not replace runtime grants or Android restrictions.
+  The host is meant to be final: prefer a bundle-side solution; change the host only for a new
+  declaration or lifecycle hook, and say so in HANDOFF.md (the user must install the APK).
+- No unwatched model turns: automation, tests and prediction never start a model turn unless the
+  user is watching (Trough visible) or explicitly asked. Never auto-approve model actions in tests.
 - Optimise for energy per task, measured on the device (see DESIGN.md "Measurement").
   Never claim a speedup without numbers from tools/ or bench output.
 - Every engine/port change is gated on its oracle (test262, web-platform-tests, golden
@@ -43,8 +56,14 @@ Current cross-model handoff: read [HANDOFF.md](HANDOFF.md). The current construc
 - Never commit secrets, tokens, keystores or personal email addresses.
 
 ## Layout
-- `app/` -- Android app (Java, no Gradle). Build: `tools/build.sh` -> `out/trough.apk`.
-- `native/` -- C/asm built as static arm64 executables, shipped as lib*.so and exec'd.
+- `app/` -- the host APK (Java, no Gradle). Build in the VM:
+  `FRAMEWORK_RES=/usr/share/android-framework-res/framework-res.apk tools/build.sh` -> `out/trough.apk`
+  (docs/HOST.md). Copy it to `/mnt/shared/Download/trough/trough-os.apk` for the user to install.
+- `hot/` -- the bundle's Java (Java 8 source: no lambdas or method references). Publish with
+  `tools/hot.sh`; the phone activates it within seconds. `tools/loop.sh` runs every scenario.
+- `native/` -- C11 core (store, derive, exec, blobs, atlas, order, present), built for glibc
+  (userland executables) and bionic (`libtrough-android.so`, loaded in-process via JNI).
+- `tests/` -- oracles; see each docs/ contract for which applies.
 - `.github/workflows/` -- CI on GitHub's free runners (repo is public: unlimited minutes).
 
 ## Results from the phone
