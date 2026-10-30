@@ -4,104 +4,53 @@ import android.Manifest;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.PackageManager;
-import android.graphics.Color;
-import android.graphics.Typeface;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
-import android.widget.TextView;
 
 /**
- * Host only: a root view and a HotLoader. Every visible behaviour comes from the bundle.
- * Checks for a new bundle for as long as the activity lives (one stat when nothing changed):
- * every second while visible, every five seconds behind another app, so the development loop
- * (docs/AUTONOMOUS_DEVELOPMENT.md) never depends on Trough having focus.
- * The loader and root view belong to the process (HotLoader.process), not to this Activity.
+ * Host only: shows the process's root view (HotLoader.process) and tells the loader when this
+ * window comes and goes. Every visible behaviour comes from the bundle. Every Intent Trough is
+ * declared to handle (launcher, HOME, links, shares, files, calls, USB, NFC, ...) lands here
+ * and goes to the bundle's intent(Intent). singleTask: at most one Activity owns root.
  */
 public class TroughActivity extends Activity {
-    private static final long POLL_MS = 1000, HIDDEN_POLL_MS = 5000;
-    private final Handler handler = new Handler(Looper.getMainLooper());
-    private FrameLayout root;
     private HotLoader loader;
-    private boolean visible;
-
-    private final Runnable poll = new Runnable() {
-        @Override public void run() {
-            if (loader == null) return;
-            if (loader.check()) settleLater();
-            else if (root.getChildCount() == 0 || root.findViewWithTag("trough-status") != null) showStatus(loader.status);
-            handler.postDelayed(this, visible ? POLL_MS : HIDDEN_POLL_MS);
-        }
-    };
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
         startForegroundService(new Intent(this, TroughService.class));
+        HotLoader.init(getApplicationContext());
         loader = HotLoader.process;
-        if (loader != null) {
-            // Same process, new Activity (swiped from Recents, finished, recreated): the bundle
-            // may still be running; it gets this Activity and keeps its views and sessions.
-            root = loader.root();
-            if (root.getParent() != null) ((ViewGroup) root.getParent()).removeView(root);
-            setContentView(root);
-            if (!(loader.attachable() && loader.attach(this))) {
-                loader.rebind(this);
-                if (loader.check() || loader.resume()) settleLater();
-            }
-        } else {
-            root = new FrameLayout(this);
-            root.setBackgroundColor(Color.BLACK);
-            setContentView(root);
-            try {
-                loader = HotLoader.process = new HotLoader(this, root);
-                // Newest verified bundle first; the last good one only when that cannot start.
-                // Never both: a bundle replaced mid-boot cannot be relied on to stay stopped.
-                if (loader.check() || loader.resume()) settleLater();
-            } catch (Exception e) { showStatus("loader: " + e); }
-        }
+        if (loader == null) { finish(); return; }
+        FrameLayout root = loader.root();
+        if (root.getParent() != null) ((ViewGroup) root.getParent()).removeView(root);
+        setContentView(root);
+        loader.attachActivity(this);
+        if (state == null) loader.intent(getIntent());
         if (checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED)
             requestPermissions(new String[]{Manifest.permission.READ_EXTERNAL_STORAGE,
                 Manifest.permission.WRITE_EXTERNAL_STORAGE}, 1);
-        handler.post(poll);
     }
 
-    private void settleLater() {
-        final String sha = loader.currentSha();
-        handler.postDelayed(new Runnable() { @Override public void run() { loader.settle(sha); } }, HotLoader.SETTLE_MS);
+    @Override protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        if (loader != null) loader.intent(intent);
     }
 
     @Override protected void onResume() {
         super.onResume();
-        visible = true;
-        handler.removeCallbacks(poll);
-        handler.post(poll);
+        if (loader != null) loader.visible(true);
     }
 
     @Override protected void onPause() {
-        visible = false;
+        if (loader != null) loader.visible(false);
         super.onPause();
     }
 
     @Override protected void onDestroy() {
-        handler.removeCallbacksAndMessages(null);
-        // An attachable bundle keeps running in the process until the next Activity takes it.
-        if (loader != null && !loader.attachable()) loader.stopCurrent();
-        if (root.getParent() != null) ((ViewGroup) root.getParent()).removeView(root);
+        if (loader != null) loader.detachActivity(this);
         super.onDestroy();
-    }
-
-    private void showStatus(String text) {
-        TextView t = (TextView) root.findViewWithTag("trough-status");
-        if (t == null) {
-            t = new TextView(this);
-            t.setTag("trough-status");
-            t.setTypeface(Typeface.MONOSPACE);
-            t.setTextColor(0xFFE8EFE6);
-            t.setPadding(32, 96, 32, 32);
-            root.addView(t);
-        }
-        t.setText("Trough loader\n\n" + text + "\n\nWaiting for Download/trough/hot/bundle.zip");
     }
 }

@@ -1,8 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Package "t.t": its data dir /data/data/t.t is short enough to replace paths inside stock
      binaries in place (DESIGN.md "Trough root"). Classes keep their Java package.
-     Every permission and component Trough may ever need is declared here, once (DESIGN.md:
-     "Everything native is declared up front"). The permission list starts from Forge's 315. -->
+     Every permission and component Trough may ever need is declared here, once (docs/HOST.md:
+     the fixed host). Permissions: Forge's 315, then every grantable one in the Android 14
+     framework plus later ones by name (unknown names are ignored by older systems), plus the
+     development ones adb can grant (pm grant). Components forward to the bundle (Components.java)
+     and stay inert until a bundle implements them and the user enables the role or service. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     package="t.t">
@@ -321,31 +324,371 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+    <uses-permission android:name="android.permission.ACCESS_AMBIENT_LIGHT_STATS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ACCESS_BROADCAST_RESPONSE_STATS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ACCESS_NOTIFICATIONS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.AUTHENTICATE_ACCOUNTS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BRIGHTNESS_SLIDER_USAGE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CONFIGURE_DISPLAY_BRIGHTNESS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CONTROL_UI_TRACING" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.FLASHLIGHT" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.GET_APP_OPS_STATS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.GET_PROCESS_STATE_AND_OOM_SCORE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.INTERACT_ACROSS_USERS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_ACCOUNTS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_IPSEC_TUNNELS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MODIFY_QUIET_MODE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.READ_CELL_BROADCASTS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.READ_INSTALL_SESSIONS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.READ_PROFILE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.READ_SOCIAL_STREAM" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.READ_USER_DICTIONARY" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SET_MEDIA_KEY_LISTENER" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SET_VOLUME_KEY_LONG_PRESS_LISTENER" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SUBSCRIBED_FEEDS_READ" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SUBSCRIBED_FEEDS_WRITE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.USE_CREDENTIALS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.WRITE_EMBEDDED_SUBSCRIPTIONS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.WRITE_PROFILE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.WRITE_SMS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.WRITE_SOCIAL_STREAM" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.WRITE_USER_DICTIONARY" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.RANGING" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.EXECUTE_APP_FUNCTIONS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.REQUEST_OBSERVE_DEVICE_UUID_PRESENCE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.WRITE_SYSTEM_PREFERENCES" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.READ_SYSTEM_PREFERENCES" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ACCESS_MOCK_LOCATION" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.health.READ_HEART_RATE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.health.READ_SKIN_TEMPERATURE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.health.READ_OXYGEN_SATURATION" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.READ_WALLPAPER_INTERNAL" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.INJECT_EVENTS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.READ_FRAME_BUFFER" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.GRANT_RUNTIME_PERMISSIONS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.REVOKE_RUNTIME_PERMISSIONS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_APP_OPS_MODES" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.INTERACT_ACROSS_USERS_FULL" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ACCESS_SURFACE_FLINGER" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="com.android.browser.permission.READ_HISTORY_BOOKMARKS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="com.android.browser.permission.WRITE_HISTORY_BOOKMARKS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="com.android.launcher.permission.INSTALL_SHORTCUT" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="com.android.launcher.permission.UNINSTALL_SHORTCUT" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="com.android.voicemail.permission.ADD_VOICEMAIL" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="com.android.voicemail.permission.READ_VOICEMAIL" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="com.android.voicemail.permission.WRITE_VOICEMAIL" tools:ignore="ProtectedPermissions" />
+    <uses-feature android:name="android.hardware.usb.host" android:required="false" />
+    <uses-feature android:name="android.hardware.usb.accessory" android:required="false" />
+    <uses-feature android:name="android.hardware.nfc" android:required="false" />
+    <uses-feature android:name="android.hardware.nfc.hce" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
+    <uses-feature android:name="android.hardware.wifi.direct" android:required="false" />
+    <uses-feature android:name="android.hardware.uwb" android:required="false" />
+    <uses-feature android:name="android.hardware.vulkan.version" android:required="false" />
+    <uses-feature android:name="android.software.input_methods" android:required="false" />
+    <uses-feature android:name="android.software.live_wallpaper" android:required="false" />
+    <uses-feature android:name="android.software.device_admin" android:required="false" />
+    <uses-feature android:name="android.software.picture_in_picture" android:required="false" />
+    <uses-feature android:name="android.software.companion_device_setup" android:required="false" />
+    <uses-feature android:name="android.software.home_screen" android:required="false" />
     <application
+        android:name="com.trough.app.TroughApp"
         android:label="Trough"
         android:extractNativeLibs="true"
         android:requestLegacyExternalStorage="true"
+        android:preserveLegacyExternalStorage="true"
+        android:requestRawExternalStorageAccess="true"
+        android:usesCleartextTraffic="true"
+        android:hasFragileUserData="true"
+        android:allowBackup="false"
         android:hardwareAccelerated="true"
         android:largeHeap="true"
         android:debuggable="true"
         tools:ignore="HardcodedDebugMode">
-        <activity android:name="com.trough.app.TroughActivity" android:exported="true"
-            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection"
-            android:resizeableActivity="true" android:launchMode="singleTask">
-            <!-- singleTask: one Activity at a time owns the process-wide root view (HotLoader.process). -->
+        <activity android:name="com.trough.app.TroughActivity" android:exported="true" android:launchMode="singleTask"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection|touchscreen|mcc|mnc|colorMode"
+            android:resizeableActivity="true" android:supportsPictureInPicture="true"
+            android:lockTaskMode="if_whitelisted" android:windowSoftInputMode="adjustResize">
+            <!-- singleTask: one Activity at a time owns the process-wide root view (HotLoader.process).
+                 Every filter below hands its Intent to the bundle (HotLoader.intent); none acts by itself. -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- Trough can be chosen as the home app (Settings > Apps > Default apps); inert until then. -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.HOME" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="http" />
+                <data android:scheme="https" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.APP_BROWSER" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <action android:name="android.intent.action.EDIT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="file" />
+                <data android:scheme="content" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="mailto" />
+                <data android:scheme="geo" />
+                <data android:scheme="market" />
+                <data android:scheme="magnet" />
+                <data android:scheme="ftp" />
+                <data android:scheme="ssh" />
+                <data android:scheme="sftp" />
+                <data android:scheme="git" />
+                <data android:scheme="rtsp" />
+                <data android:scheme="intent" />
+                <data android:scheme="data" />
+                <data android:scheme="javascript" />
+                <data android:scheme="about" />
+                <data android:scheme="trough" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.PROCESS_TEXT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.ASSIST" />
+                <action android:name="android.intent.action.VOICE_COMMAND" />
+                <action android:name="android.intent.action.WEB_SEARCH" />
+                <action android:name="android.intent.action.SEARCH" />
+                <action android:name="android.intent.action.SEARCH_LONG_PRESS" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.CREATE_NOTE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.DIAL" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.DIAL" />
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="tel" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SENDTO" />
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="sms" />
+                <data android:scheme="smsto" />
+                <data android:scheme="mms" />
+                <data android:scheme="mmsto" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <action android:name="android.intent.action.INSTALL_PACKAGE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="file" />
+                <data android:scheme="content" />
+                <data android:mimeType="application/vnd.android.package-archive" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.media.action.IMAGE_CAPTURE" />
+                <action android:name="android.media.action.VIDEO_CAPTURE" />
+                <action android:name="android.media.action.STILL_IMAGE_CAMERA" />
+                <action android:name="android.media.action.VIDEO_CAMERA" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH" />
+                <action android:name="android.intent.action.MUSIC_PLAYER" />
+                <action android:name="android.intent.action.SET_ALARM" />
+                <action android:name="android.intent.action.SET_TIMER" />
+                <action android:name="android.intent.action.SHOW_ALARMS" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.GET_CONTENT" />
+                <action android:name="android.intent.action.PICK" />
+                <action android:name="android.intent.action.OPEN_DOCUMENT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.OPENABLE" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
+                <action android:name="android.hardware.usb.action.USB_ACCESSORY_ATTACHED" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.nfc.action.NDEF_DISCOVERED" />
+                <action android:name="android.nfc.action.TECH_DISCOVERED" />
+                <action android:name="android.nfc.action.TAG_DISCOVERED" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.APPLICATION_PREFERENCES" />
+                <action android:name="android.intent.action.MANAGE_NETWORK_USAGE" />
+                <action android:name="android.service.quicksettings.action.QS_TILE_PREFERENCES" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.app.action.CONFIRM_DEVICE_CREDENTIAL_WITH_USER" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <meta-data android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" android:resource="@xml/usb" />
+            <meta-data android:name="android.hardware.usb.action.USB_ACCESSORY_ATTACHED" android:resource="@xml/usb" />
+            <meta-data android:name="android.nfc.action.TECH_DISCOVERED" android:resource="@xml/nfc_tech" />
         </activity>
-        <service android:name="com.trough.app.TroughService" android:exported="false"
- />
+        <service android:name="com.trough.app.TroughService" android:exported="false" android:stopWithTask="false"
+            android:foregroundServiceType="dataSync|mediaPlayback|camera|microphone|location|connectedDevice|mediaProjection">
+            <!-- Types are enforced only from targetSdk 34 (Trough targets 28); declared for completeness with
+                 the names the build's framework-res (Android 14 beta) knows. -->
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Trough: the user's whole environment, kept running" />
+        </service>
+        <receiver android:name="com.trough.app.Components$Boot" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+        <receiver android:name="com.trough.app.Components$Packages" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.PACKAGE_ADDED" />
+                <action android:name="android.intent.action.PACKAGE_REMOVED" />
+                <action android:name="android.intent.action.PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.PACKAGE_CHANGED" />
+                <data android:scheme="package" />
+            </intent-filter>
+        </receiver>
+        <receiver android:name="com.trough.app.Components$Sms" android:exported="true" android:permission="android.permission.BROADCAST_SMS">
+            <intent-filter>
+                <action android:name="android.provider.Telephony.SMS_DELIVER" />
+            </intent-filter>
+        </receiver>
+        <receiver android:name="com.trough.app.Components$Mms" android:exported="true" android:permission="android.permission.BROADCAST_WAP_PUSH">
+            <intent-filter>
+                <action android:name="android.provider.Telephony.WAP_PUSH_DELIVER" />
+                <data android:mimeType="application/vnd.wap.mms-message" />
+            </intent-filter>
+        </receiver>
+        <receiver android:name="com.trough.app.Components$Events" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.ACTION_POWER_CONNECTED" />
+                <action android:name="android.intent.action.ACTION_POWER_DISCONNECTED" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.LOCALE_CHANGED" />
+                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
+                <action android:name="android.nfc.action.TRANSACTION_DETECTED" />
+            </intent-filter>
+        </receiver>
+        <receiver android:name="com.trough.app.Components$Admin" android:exported="true" android:permission="android.permission.BIND_DEVICE_ADMIN">
+            <meta-data android:name="android.app.device_admin" android:resource="@xml/device_admin" />
+            <intent-filter><action android:name="android.app.action.DEVICE_ADMIN_ENABLED" /></intent-filter>
+        </receiver>
+        <service android:name="com.trough.app.Components$Revive" android:exported="true" android:permission="android.permission.BIND_JOB_SERVICE">
+        </service>
+        <service android:name="com.trough.app.Components$Jobs" android:exported="true" android:permission="android.permission.BIND_JOB_SERVICE">
+        </service>
+        <service android:name="com.trough.app.Components$RespondViaMessage" android:exported="true" android:permission="android.permission.SEND_RESPOND_VIA_MESSAGE">
+            <intent-filter>
+                <action android:name="android.intent.action.RESPOND_VIA_MESSAGE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="sms" /><data android:scheme="smsto" /><data android:scheme="mms" /><data android:scheme="mmsto" />
+            </intent-filter>
+        </service>
+        <service android:name="com.trough.app.Components$Ime" android:exported="true" android:permission="android.permission.BIND_INPUT_METHOD">
+            <intent-filter><action android:name="android.view.InputMethod" /></intent-filter>
+            <meta-data android:name="android.view.im" android:resource="@xml/method" />
+        </service>
+        <service android:name="com.trough.app.Components$Notifications" android:exported="true" android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter><action android:name="android.service.notification.NotificationListenerService" /></intent-filter>
+        </service>
+        <service android:name="com.trough.app.Components$Vpn" android:exported="true" android:permission="android.permission.BIND_VPN_SERVICE">
+            <intent-filter><action android:name="android.net.VpnService" /></intent-filter>
+            <meta-data android:name="android.net.VpnService.SUPPORTS_ALWAYS_ON" android:value="true" />
+        </service>
+        <service android:name="com.trough.app.Components$InCall" android:exported="true" android:permission="android.permission.BIND_INCALL_SERVICE">
+            <intent-filter><action android:name="android.telecom.InCallService" /></intent-filter>
+            <meta-data android:name="android.telecom.IN_CALL_SERVICE_UI" android:value="true" />
+            <meta-data android:name="android.telecom.IN_CALL_SERVICE_RINGING" android:value="true" />
+        </service>
+        <service android:name="com.trough.app.Components$Connections" android:exported="true" android:permission="android.permission.BIND_TELECOM_CONNECTION_SERVICE">
+            <intent-filter><action android:name="android.telecom.ConnectionService" /></intent-filter>
+        </service>
+        <service android:name="com.trough.app.Components$Screening" android:exported="true" android:permission="android.permission.BIND_SCREENING_SERVICE">
+            <intent-filter><action android:name="android.telecom.CallScreeningService" /></intent-filter>
+        </service>
+        <service android:name="com.trough.app.Components$Voice" android:exported="true" android:permission="android.permission.BIND_VOICE_INTERACTION">
+            <intent-filter><action android:name="android.service.voice.VoiceInteractionService" /></intent-filter>
+            <meta-data android:name="android.voice_interaction" android:resource="@xml/voice_interaction" />
+        </service>
+        <service android:name="com.trough.app.Components$VoiceSessions" android:exported="true" android:permission="android.permission.BIND_VOICE_INTERACTION">
+        </service>
+        <service android:name="com.trough.app.Components$Recognition" android:exported="true">
+            <intent-filter><action android:name="android.speech.RecognitionService" /></intent-filter>
+            <meta-data android:name="android.speech" android:resource="@xml/recognition" />
+        </service>
+        <service android:name="com.trough.app.Components$Tile" android:exported="true" android:permission="android.permission.BIND_QUICK_SETTINGS_TILE" android:label="Trough" android:icon="@android:drawable/stat_notify_sync_noanim">
+            <intent-filter><action android:name="android.service.quicksettings.action.QS_TILE" /></intent-filter>
+        </service>
+        <service android:name="com.trough.app.Components$Dream" android:exported="true" android:permission="android.permission.BIND_DREAM_SERVICE">
+            <intent-filter><action android:name="android.service.dreams.DreamService" /></intent-filter>
+        </service>
+        <service android:name="com.trough.app.Components$Wallpaper" android:exported="true" android:permission="android.permission.BIND_WALLPAPER">
+            <intent-filter><action android:name="android.service.wallpaper.WallpaperService" /></intent-filter>
+            <meta-data android:name="android.service.wallpaper" android:resource="@xml/wallpaper" />
+        </service>
+        <service android:name="com.trough.app.Components$Media" android:exported="true">
+            <intent-filter><action android:name="android.media.browse.MediaBrowserService" /></intent-filter>
+        </service>
+        <service android:name="com.trough.app.Components$Autofill" android:exported="true" android:permission="android.permission.BIND_AUTOFILL_SERVICE">
+            <intent-filter><action android:name="android.service.autofill.AutofillService" /></intent-filter>
+        </service>
+        <service android:name="com.trough.app.Components$Credentials" android:exported="true" android:permission="android.permission.BIND_CREDENTIAL_PROVIDER_SERVICE">
+            <intent-filter><action android:name="android.service.credentials.CredentialProviderService" /></intent-filter>
+            <meta-data android:name="android.credentials.provider" android:resource="@xml/credentials" />
+        </service>
+        <service android:name="com.trough.app.Components$Apdu" android:exported="true" android:permission="android.permission.BIND_NFC_SERVICE">
+            <intent-filter><action android:name="android.nfc.cardemulation.action.HOST_APDU_SERVICE" /></intent-filter>
+            <meta-data android:name="android.nfc.cardemulation.host_apdu_service" android:resource="@xml/apdu" />
+        </service>
+        <service android:name="com.trough.app.Components$Sandbox0" android:exported="false" android:isolatedProcess="true" android:process=":sandbox0" />
+        <service android:name="com.trough.app.Components$Sandbox1" android:exported="false" android:isolatedProcess="true" android:process=":sandbox1" />
+        <provider android:name="com.trough.app.Components$Files" android:authorities="t.t.files" android:exported="true" android:grantUriPermissions="true" />
+        <provider android:name="com.trough.app.Components$Documents" android:authorities="t.t.documents" android:exported="true"
+            android:grantUriPermissions="true" android:permission="android.permission.MANAGE_DOCUMENTS">
+            <intent-filter><action android:name="android.content.action.DOCUMENTS_PROVIDER" /></intent-filter>
+        </provider>
         <!-- Process slots (Slot.java): isolated processes a bundle can run guests or work in. -->
         <activity android:name="com.trough.app.Slot$A0" android:process=":p0" android:exported="false"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection"

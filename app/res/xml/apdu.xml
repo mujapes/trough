@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Card emulation for Trough's own application id (F0 "TROUGH"); further AIDs register at runtime
+     (CardEmulation.registerAidsForService). -->
+<host-apdu-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/app_name" android:requireDeviceUnlock="false">
+    <aid-group android:category="other" android:description="@string/app_name">
+        <aid-filter android:name="F054524F554748" />
+    </aid-group>
+</host-apdu-service>

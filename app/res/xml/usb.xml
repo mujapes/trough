@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Any USB device or accessory: Trough is offered when one is attached. -->
+<resources>
+    <usb-device />
+    <usb-accessory />
+</resources>
