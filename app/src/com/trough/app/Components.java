@@ -1,6 +1,33 @@
 package com.trough.app;
 
 import android.app.Service;
+import android.accessibilityservice.AccessibilityService;
+import android.accounts.AbstractAccountAuthenticator;
+import android.accounts.Account;
+import android.accounts.AccountAuthenticatorResponse;
+import android.accounts.NetworkErrorException;
+import android.app.Instrumentation;
+import android.app.ZygotePreload;
+import android.appwidget.AppWidgetManager;
+import android.appwidget.AppWidgetProvider;
+import android.content.AbstractThreadedSyncAdapter;
+import android.content.ContentProviderClient;
+import android.content.SyncResult;
+import android.content.pm.ApplicationInfo;
+import android.print.PrinterId;
+import android.printservice.PrintJob;
+import android.printservice.PrintService;
+import android.printservice.PrinterDiscoverySession;
+import android.service.controls.Control;
+import android.service.controls.ControlsProviderService;
+import android.service.controls.actions.ControlAction;
+import android.service.textservice.SpellCheckerService;
+import android.speech.tts.SynthesisCallback;
+import android.speech.tts.SynthesisRequest;
+import android.speech.tts.TextToSpeechService;
+import android.view.accessibility.AccessibilityEvent;
+import java.util.concurrent.Flow;
+import java.util.function.Consumer;
 import android.app.admin.DeviceAdminReceiver;
 import android.app.job.JobParameters;
 import android.app.job.JobService;
@@ -349,4 +376,122 @@ public final class Components {
     }
     public static final class Sandbox0 extends Sandbox {}
     public static final class Sandbox1 extends Sandbox {}
+
+    // --- reach outside Trough (declared for completeness; user decision 2026-10-30) ---
+
+    public static final class Accessibility extends AccessibilityService {
+        @Override protected void onServiceConnected() { send(this, "connected"); }
+        @Override public void onAccessibilityEvent(AccessibilityEvent e) { send(this, "event", e); }
+        @Override public void onInterrupt() { send(this, "interrupt"); }
+        @Override protected boolean onKeyEvent(KeyEvent e) { return yes(send(this, "key", e)); }
+        @Override public boolean onUnbind(Intent i) { send(this, "unbind", i); return super.onUnbind(i); }
+    }
+
+    // --- more system surfaces: printing, device controls, speech, spelling, widgets, accounts ---
+
+    public static final class Print extends PrintService {
+        @Override protected PrinterDiscoverySession onCreatePrinterDiscoverySession() {
+            Object r = send(this, "discovery");
+            if (r instanceof PrinterDiscoverySession) return (PrinterDiscoverySession) r;
+            return new PrinterDiscoverySession() {
+                @Override public void onStartPrinterDiscovery(List<PrinterId> p) {}
+                @Override public void onStopPrinterDiscovery() {}
+                @Override public void onValidatePrinters(List<PrinterId> p) {}
+                @Override public void onStartPrinterStateTracking(PrinterId p) {}
+                @Override public void onStopPrinterStateTracking(PrinterId p) {}
+                @Override public void onDestroy() {}
+            };
+        }
+        @Override protected void onPrintJobQueued(PrintJob j) { if (!yes(send(this, "job", j))) j.fail("Trough has no printer for this yet"); }
+        @Override protected void onRequestCancelPrintJob(PrintJob j) { if (!yes(send(this, "cancel", j))) j.cancel(); }
+    }
+
+    public static final class Controls extends ControlsProviderService {
+        @SuppressWarnings("unchecked")
+        private static Flow.Publisher<Control> pub(Object r) {
+            if (r instanceof Flow.Publisher) return (Flow.Publisher<Control>) r;
+            return new Flow.Publisher<Control>() {
+                @Override public void subscribe(Flow.Subscriber<? super Control> sub) {
+                    sub.onSubscribe(new Flow.Subscription() { public void request(long n) {} public void cancel() {} });
+                    sub.onComplete();
+                }
+            };
+        }
+        @Override public Flow.Publisher<Control> createPublisherForAllAvailable() { return pub(send(this, "all")); }
+        @Override public Flow.Publisher<Control> createPublisherFor(List<String> ids) { return pub(send(this, "for", ids)); }
+        @Override public void performControlAction(String id, ControlAction a, Consumer<Integer> done) {
+            if (!yes(send(this, "action", id, a, done))) done.accept(ControlAction.RESPONSE_FAIL);
+        }
+    }
+
+    public static final class Speech extends TextToSpeechService {
+        @Override protected int onIsLanguageAvailable(String lang, String country, String variant) { Object r = send(this, "available", lang, country, variant); return r instanceof Integer ? (Integer) r : android.speech.tts.TextToSpeech.LANG_NOT_SUPPORTED; }
+        @Override protected String[] onGetLanguage() { Object r = send(this, "language"); return r instanceof String[] ? (String[]) r : new String[]{"eng", "GBR", ""}; }
+        @Override protected int onLoadLanguage(String lang, String country, String variant) { Object r = send(this, "load", lang, country, variant); return r instanceof Integer ? (Integer) r : android.speech.tts.TextToSpeech.LANG_NOT_SUPPORTED; }
+        @Override protected void onStop() { send(this, "stop"); }
+        @Override protected void onSynthesizeText(SynthesisRequest r, SynthesisCallback cb) { if (!yes(send(this, "synthesize", r, cb))) cb.error(); }
+    }
+
+    public static final class Spelling extends SpellCheckerService {
+        @Override public Session createSession() {
+            Object r = send(this, "session");
+            if (r instanceof Session) return (Session) r;
+            return new Session() {
+                @Override public void onCreate() {}
+                @Override public android.view.textservice.SuggestionsInfo onGetSuggestions(android.view.textservice.TextInfo t, int limit) {
+                    return new android.view.textservice.SuggestionsInfo(0, new String[0]);
+                }
+            };
+        }
+    }
+
+    public static final class Widget extends AppWidgetProvider {
+        @Override public void onReceive(Context c, Intent i) { super.onReceive(c, i); send(this, "receive", c, i); }
+        @Override public void onUpdate(Context c, AppWidgetManager m, int[] ids) { send(this, "update", c, m, ids); }
+    }
+
+    /** Accounts of type t.t in Settings > Accounts (and sync for contacts, calendars, anything). */
+    public static final class Accounts extends Service {
+        private AbstractAccountAuthenticator auth;
+        @Override public IBinder onBind(Intent i) {
+            if (auth == null) auth = new AbstractAccountAuthenticator(this) {
+                private Bundle r(String e, Object... a) { Object o = send(Accounts.this, e, a); return o instanceof Bundle ? (Bundle) o : null; }
+                @Override public Bundle editProperties(AccountAuthenticatorResponse x, String type) { return r("editProperties", x, type); }
+                @Override public Bundle addAccount(AccountAuthenticatorResponse x, String type, String token, String[] features, Bundle o) { return r("addAccount", x, type, token, features, o); }
+                @Override public Bundle confirmCredentials(AccountAuthenticatorResponse x, Account a, Bundle o) { return r("confirmCredentials", x, a, o); }
+                @Override public Bundle getAuthToken(AccountAuthenticatorResponse x, Account a, String type, Bundle o) { return r("getAuthToken", x, a, type, o); }
+                @Override public String getAuthTokenLabel(String type) { Object o = send(Accounts.this, "authTokenLabel", type); return o instanceof String ? (String) o : type; }
+                @Override public Bundle updateCredentials(AccountAuthenticatorResponse x, Account a, String type, Bundle o) { return r("updateCredentials", x, a, type, o); }
+                @Override public Bundle hasFeatures(AccountAuthenticatorResponse x, Account a, String[] f) throws NetworkErrorException {
+                    Bundle b = r("hasFeatures", x, a, f);
+                    if (b != null) return b;
+                    b = new Bundle(); b.putBoolean(android.accounts.AccountManager.KEY_BOOLEAN_RESULT, false); return b;
+                }
+            };
+            return auth.getIBinder();
+        }
+    }
+    public static final class Sync extends Service {
+        private AbstractThreadedSyncAdapter adapter;
+        @Override public IBinder onBind(Intent i) {
+            if (adapter == null) adapter = new AbstractThreadedSyncAdapter(this, true, true) {
+                @Override public void onPerformSync(Account a, Bundle extras, String authority, ContentProviderClient p, SyncResult r) { send(Sync.this, "sync", a, extras, authority, p, r); }
+            };
+            return adapter.getSyncAdapterBinder();
+        }
+    }
+    /** Trough as the browser behind other apps' Custom Tabs: the bundle returns the binder. */
+    public static final class CustomTabs extends Plain {}
+
+    /** android:instrumentation targeting Trough itself (am instrument / startInstrumentation). */
+    public static final class Instrument extends Instrumentation {
+        @Override public void onCreate(Bundle args) { super.onCreate(args); send(this, "create", args); start(); }
+        @Override public void onStart() { if (!yes(send(this, "start"))) finish(0, new Bundle()); }
+    }
+
+    /** The app zygote's preload for Sandbox2 (useAppZygote): sandboxes fork from it pre-warmed. */
+    public static final class Preload implements ZygotePreload {
+        @Override public void doPreload(ApplicationInfo info) {}
+    }
+    public static final class Sandbox2 extends Sandbox {}
 }

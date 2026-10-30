@@ -157,11 +157,16 @@ each to the running bundle. It holds mechanism, never policy (docs/HOST.md):
   a file provider, a revive job, boot/package/SMS receivers, eight process slots, isolated sandboxes.
 - **One Activity** (singleTask) receives HOME, launcher, browser links, every file/share/text
   intent, dial/SMS/camera/alarm/search/assist intents, USB attach and NFC discovery.
-- **Permissions:** Forge's 315, every grantable one in the Android 14 framework, later ones by
-  name, and the development permissions `pm grant` can give over adb.
+- **Permissions:** every permission the Android 14 framework defines (signature ones too: a
+  device owner, a role or `pm grant` over adb can grant some), plus later ones by name.
+- **Longevity:** extra trusted bundle keys (files/hot/trusted, installed by a trusted bundle), an
+  app-private inbox (files/hot/inbox) for bundles Trough builds or fetches itself, every
+  Activity/Application callback forwarded, sixteen process slots with every launch mode. The
+  host should never need reinstalling for a capability Android grants to apps.
 
-Not declared, by user decision (2026-10-30): an accessibility service. Reaching into other
-apps' UI is not the direction; Trough brings software inside instead (Lift).
+The accessibility service is declared too (user, 2026-10-30, reversing an earlier note: "give
+it access to absolutely everything", in case it is needed). The direction is unchanged: Trough
+brings software inside (Lift) rather than driving other apps' UI; the service is a last resort.
 
 ### Lifetime: never closed
 
@@ -224,6 +229,12 @@ local CPU, thermal headroom, deadline), and the result returns as an ordinary pu
   containers, cloud agent sessions. GitHub Actions minutes on the public repo are for building
   and testing Trough itself (CI), which their terms allow; Actions is not a general compute
   backend for the OS.
+
+Ambition this enables (user, 2026-10-30): rented servers and GPUs turn the phone into a
+high-compute machine. GPU experiments run remotely; with low enough latency, remote rendering
+and game streaming (hardware decode via MediaCodec low-latency mode, input sent upstream;
+prior art Moonlight/Sunshine, Parsec) make PC gaming from the device possible. The transport
+and decode path is part of the hardware ladder's media adapters, measured end to end.
 
 ### The Linux filesystem: complete Debian, not a subset
 
@@ -302,6 +313,58 @@ for the platform, all of which belong to the OS rather than to that one app:
 - peripherals through the hardware ladder: Bluetooth and USB printers and scanners;
 - one-hand, glanceable, fast interaction in a moving vehicle and in daylight;
 - reliability: a delivery recorded is durable before it is shown as recorded.
+
+### App development is native to the OS
+
+User direction, 2026-10-30: the OS supports building software cleanly and natively, not by
+bolting features onto Trough. Three kinds of app, one toolchain on the device:
+- **Trough apps:** modules in the scene, built and hot-replaced in place (the default).
+- **Full Android APKs:** built on the phone (aapt2, d8/r8, apksigner from the Debian root or
+  the SDK's jars, all already run by the self-build), installed through PackageInstaller
+  (REQUEST_INSTALL_PACKAGES), or run inside Trough as guests without installing.
+- **Linux programs:** anything Debian builds.
+An app's source, builds, tests and releases are records like everything else; agents work on
+them with the user.
+
+### Trough's own language
+
+The long-term module language is Trough's own (user approves; low-level design is the builder's
+call). Purpose: a language Trough itself parses, type-checks, specialises, compiles and
+hot-replaces, so modules, user-built apps and lifted code share one representation that Lift,
+the derivation planner and the models can reason about completely. Requirements: the
+semantic substrate's contracts (records, revisions, derivations, effects, capabilities) are
+language-level, not libraries; incremental compilation fits the derivation graph; it lowers to
+native code (via C11 or LLVM) and to dex where Android APIs are needed; memory-safe by
+construction at untrusted boundaries. Designed after the substrate it describes has settled;
+until then C11 and Java remain the implementation languages.
+
+### Model CLIs and Trough's own agent harness
+
+Trough runs any model CLI as a first-class agent backend: Claude Code, Codex, Gemini CLI,
+Antigravity's agent and any other, plus Trough's own loop over provider APIs (TroughAgent).
+All share Trough's task, tool, permission and artifact semantics (DESIGN.md "Complete experience").
+Beyond hosting them, Trough builds its own harness infrastructure for maximal model control:
+tools, context, memory and permissions are hot-reloadable components the models can inspect
+and edit, so a model can redesign its own capabilities inside Trough under the same build ->
+oracle -> activate protocol (and the user's permission). Compute stays small; this is a
+direction within Trough, not a bid for unbounded self-improvement.
+
+### Continuous improvement without patchwork
+
+User direction, 2026-10-30: once Trough runs, it is improved continually in small steps. In
+Forge, stepwise patches made behaviour messy. The design must make small changes compose
+cleanly at the most fundamental level:
+- **Local by construction:** a module touches only its declared records, derivations, effects
+  and scene regions. No global event bus, shared timers, ad hoc flags or duplicated state
+  (Forge's DOM/JS/server copies), so a patch cannot create hidden coupling.
+- **Every behaviour has an oracle**, so a change that breaks something else fails before it is
+  activated, not after the user notices.
+- **Every change is a revision with provenance** (what, why, which contract), and can be rolled
+  back alone.
+- **Consolidation is normal work:** when patches accumulate around a contract, the next step
+  is a redesign of that contract with migration, measured by contract size, special cases and
+  oracle coverage, not a further patch. Code that contradicts DESIGN.md is a bug in one of them.
+- Hot replacement keeps all of this seamless for the user: improvement never needs a restart.
 
 ### Workarounds before sacrifices
 

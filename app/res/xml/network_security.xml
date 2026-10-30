@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Trough's own networking (and its browser) decides trust; the platform stack allows
+     cleartext and trusts user-installed CAs as well as system ones. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors><certificates src="system" /><certificates src="user" /></trust-anchors>
+    </base-config>
+    <debug-overrides><trust-anchors><certificates src="user" /></trust-anchors></debug-overrides>
+</network-security-config>

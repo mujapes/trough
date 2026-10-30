@@ -23,7 +23,7 @@ signs with a CI key, so a CI APK cannot update the phone's install. Sign with
 | `TroughActivity` | singleTask. Shows `loader.root()`, reports attach/detach/visibility, forwards every Intent. |
 | `TroughService` | Foreground service (sticky, `stopWithTask=false`), notification with Open and Quit. Quit stops the bundle and kills the process. |
 | `Components` | Every other declared component, as forwarding shims (below). |
-| `Slot` | Eight process slots `:p0`..`:p7`, each an Activity (`Slot$A<n>`) and a Service (`Slot$S<n>`). They load the last settled bundle themselves. |
+| `Slot` | Sixteen process slots `:p0`..`:p15`, each with Activities in every launch mode (`A` standard, `T` singleTop, `K` singleTask, `I` singleInstance, `L` translucent), a Service (`S`) and a ContentProvider (`P`, authority `t.t.slot<n>`). They load the last settled bundle themselves. |
 
 ## Bundle entry points
 
@@ -41,6 +41,21 @@ public static methods. All are optional except one of `boot`/`start`. Missing on
 | `stop()` | replacement by a new bundle, or Quit | nothing |
 | `slotActivity(Activity, Bundle)` | a slot Activity started (in its slot process) | the slot finishes |
 | `slotBind(Service, Intent)` -> IBinder | a slot Service bound (in its slot process) | null |
+| `slotProvider(ContentProvider, String event, Object[] args)` -> Object | a slot provider call: query, type, insert, delete, update, call, open | null / 0 / FileNotFoundException |
+
+Host callbacks also arrive through `dispatch`: host = the Activity, events `activity.result`
+(request, result, Intent), `activity.permissions` (request, String[], int[]),
+`activity.configuration`, `activity.focus`, `activity.multiWindow`, `activity.pip`,
+`activity.userLeave`, `activity.start`, `activity.stop`, `activity.trimMemory`, `activity.save`,
+`activity.topResumed`; host = the Application, `app.trimMemory`, `app.lowMemory`,
+`app.configuration`. Use them for anything that reports back to an Activity: VPN prepare, media
+projection, role requests, PackageInstaller consent, file pickers, runtime permissions.
+
+**Bundle sources and keys.** HotLoader polls two inboxes with the same rules:
+`Download/trough/hot` (the VM and other builders) and `files/hot/inbox` (app-private: bundles
+Trough builds or downloads itself). A bundle verifies against `assets/hot-pubkey.der` or any
+`files/hot/trusted/*.der` (X.509 EC P-256). A trusted bundle may add keys there (rotation, a
+second builder, Trough's own signing key); keys are read at process start.
 
 Isolated sandboxes cannot read the bundle. The bundle binds `Components$Sandbox0`/`1` with
 `Context.bindIsolatedService(intent, flags, instanceName, executor, conn)` (each instance name
@@ -77,7 +92,16 @@ return `Boolean.TRUE` when the bundle handled something that otherwise has a def
 | `Admin` | device admin (and device owner, if provisioned over adb) | `receive(Context, Intent)` |
 | `Files` (`t.t.files`) | content Trough shares out | `query`, `type`, `insert`, `delete`, `update`, `call(method, arg, extras)`, `open(Uri, mode)` -> ParcelFileDescriptor |
 | `Documents` (`t.t.documents`) | Trough's filesystem in Android's file picker | `roots(projection)`, `document(id, p)`, `children(parent, p, sort)` -> Cursor; `open(id, mode, signal)` -> ParcelFileDescriptor; `create`, `delete`, `rename`, `isChild` |
-| `Sandbox0`, `Sandbox1` | isolated processes | binder protocol above |
+| `Sandbox0`, `Sandbox1`, `Sandbox2` | isolated processes (`Sandbox2` forks from the app zygote, `Components$Preload`) | binder protocol above |
+| `Accessibility` | accessibility service (last resort; DESIGN.md) | `connected`, `event(AccessibilityEvent)`, `interrupt`, `key(KeyEvent)` -> Boolean, `unbind(Intent)` |
+| `Print` | print service | `discovery` -> PrinterDiscoverySession, `job(PrintJob)` / `cancel(PrintJob)` -> Boolean |
+| `Controls` | device controls | `all`, `for(List)` -> Flow.Publisher<Control>; `action(id, ControlAction, Consumer)` -> Boolean |
+| `Speech` | text-to-speech engine | `available`, `load` -> Integer, `language` -> String[], `stop`, `synthesize(request, callback)` -> Boolean |
+| `Spelling` | spell checker | `session` -> SpellCheckerService.Session |
+| `Widget` | home-screen widget provider | `receive(Context, Intent)`, `update(Context, AppWidgetManager, int[])` |
+| `Accounts`, `Sync` | account type `t.t` in Settings, sync adapter on `t.t.files` | authenticator events (`addAccount`, `getAuthToken`, ...) -> Bundle; `sync(account, extras, authority, client, result)` |
+| `CustomTabs` | Trough as other apps' Custom Tabs browser | `bind(Intent)` -> IBinder (ICustomTabsService) |
+| `Instrument` | instrumentation targeting t.t | `create(Bundle)`, `start` -> Boolean (else finishes) |
 
 TroughActivity's filters: launcher, HOME, http/https (browser role), APP_BROWSER, file/content
 VIEW/EDIT of any type, mailto/geo/market/magnet/ftp/ssh/sftp/git/rtsp/intent/data/about/trough
@@ -91,8 +115,11 @@ browser, phone, SMS, digital assistant, autofill/passwords) or grants the specia
 (notification access, VPN, input method, device admin, battery, display over other apps, all
 files access, usage access, exact alarms).
 
+Also declared: `uses-native-library` (optional) for vendor GPU-compute/DSP/TPU libraries, a
+network security config trusting user CAs and allowing cleartext, the app zygote preload, and
+every framework permission.
+
 ## Not declared
 
-An accessibility service (user decision, 2026-10-30). Anything system-signature-only that no
-grant path can reach is left out as noise; development permissions are declared because
-`pm grant` over the shell-uid bridge can grant them.
+Nothing knowingly left out (user, 2026-10-30: "absolutely everything"). If something turns out
+missing, add it to the host with a reason, and record in HANDOFF.md that an install is needed.

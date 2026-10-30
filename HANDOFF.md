@@ -14,10 +14,12 @@ The phone's shared storage is `/mnt/shared` (`/mnt/shared/Download/trough/` = th
 not in the VM; the two talk through Download/trough (bundles, signed control channel, evidence).
 
 **State on 2026-10-30 evening (Claude Opus 5.5):**
-- Host APK rewritten to be final (docs/HOST.md, commit c6b364e): process-owned loader
-  (TroughApp/HotLoader.process), bundle contract v2 (`boot`/`attach`/`detach`/`intent`/
-  `dispatch`), every component and role declared as forwarding shims (Components.java), process
-  slots, isolated sandboxes, revive job, boot receiver, 371 permissions. Built, not yet installed:
+- Host APK rewritten to be final (docs/HOST.md): process-owned loader (TroughApp/
+  HotLoader.process), bundle contract v2 (`boot`/`attach`/`detach`/`intent`/`dispatch`),
+  every component and role declared as forwarding shims (Components.java, accessibility
+  included), Activity/Application callbacks forwarded, 16 process slots in every launch mode,
+  isolated sandboxes (one app-zygote), extra trusted keys + app-private inbox, revive job, boot
+  receiver, all 892 framework permissions. Built, not yet installed:
   **the user must install `Download/trough/trough-os.apk`** (same signing key, data kept). Nothing in
   it has run on a device yet: after install, verify launch, Recents swipe -> reopen keeps the
   agent session, Back -> background, notification Quit, and a process kill -> revive.
@@ -47,9 +49,11 @@ Phone results: `/mnt/shared/Download/trough/{status,bench,crash}-*.json|txt`, `e
 
 **The user's standing preferences.** Full autonomy, including moving credentials. Keep going
 past milestones unless there is a real question. Slow, oracle-first work is fine after an honest
-estimate. Workarounds before sacrifices. No unwatched model turns. No accessibility service.
+estimate. Workarounds before sacrifices. No unwatched model turns. The accessibility service is
+declared but a last resort.
 No WebView. Short, direct messages; the user types fast and without spaces; read intent, not
-spelling. Do not target the user's employer's devices or software (2026-10-30: they build their own).
+spelling. The user guides high-level decisions and leaves low-level design to the builder.
+Do not target the user's employer's devices or software (2026-10-30: they build their own).
 
 # Previous handoff: autonomous construction, 2026-10-28
 

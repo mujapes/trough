@@ -48,7 +48,8 @@ import java.util.zip.ZipInputStream;
  *     public static void attach(Activity)     a new Activity shows root (the bundle keeps running)
  *     public static void detach()             no Activity now (v1 bundles without attach are stopped)
  *     public static void intent(Intent)       an Intent delivered to Trough (VIEW, SEND, ...); queued until running
- *     public static Object dispatch(Object host, String event, Object[] args)   every declared component
+ *     public static Object dispatch(Object host, String event, Object[] args)   every declared component,
+ *                                             and Activity/Application callbacks ("activity.*", "app.*")
  *     public static void stop()
  *
  * Recovery state, app-private under files/hot/:
@@ -63,7 +64,7 @@ final class HotLoader {
     static HotLoader process;
     private final Context app;
     private final FrameLayout root;
-    private final PublicKey key;
+    private final ArrayList<PublicKey> keys = new ArrayList<>();   // assets key + files/hot/trusted/*.der
     private final File state;
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ArrayList<Intent> intents = new ArrayList<>();   // before a bundle runs; bounded
@@ -72,9 +73,8 @@ final class HotLoader {
     private volatile Class<?> current;
     private volatile Method dispatch;
     private Class<?> deferred;          // a v1 bundle waiting for an Activity
-    private File deferredDir;
+    private File currentDir;
     private String currentSha = "";
-    private long seenModified = -1;
     String status = "no bundle yet";
 
     private final Runnable poll = new Runnable() {
@@ -100,9 +100,14 @@ final class HotLoader {
         this.app = app;
         root = new FrameLayout(app);
         root.setBackgroundColor(Color.BLACK);
-        byte[] der = readAll(app.getAssets().open("hot-pubkey.der"));
-        key = KeyFactory.getInstance("EC").generatePublic(new X509EncodedKeySpec(der));
         state = new File(app.getFilesDir(), "hot");
+        keys.add(KeyFactory.getInstance("EC").generatePublic(new X509EncodedKeySpec(readAll(app.getAssets().open("hot-pubkey.der")))));
+        // Further keys a trusted bundle installed (rotation, another builder's key, Trough's own
+        // signing key for bundles it builds or fetches): a lost VM key never forces a reinstall.
+        File[] extra = new File(state, "trusted").listFiles();
+        if (extra != null) for (File f : extra)
+            if (f.getName().endsWith(".der")) try { keys.add(KeyFactory.getInstance("EC").generatePublic(new X509EncodedKeySpec(readAll(new FileInputStream(f))))); }
+            catch (Throwable t) { android.util.Log.e("trough", "trusted key " + f, t); }
         String[] unsettled = read(new File(state, "starting")).split(" ");
         if (unsettled.length == 2 && !unsettled[1].equals(String.valueOf(android.os.Process.myPid())))
             write(new File(new File(state, "bad"), unsettled[0]), "died before settling");
@@ -136,28 +141,33 @@ final class HotLoader {
         catch (Throwable t) { status = "last good bundle failed: " + cause(t); return false; }
     }
 
-    /** Cheap when nothing changed: one stat. Returns true if a new bundle was started. */
+    /** Cheap when nothing changed: one stat per inbox. Returns true if a new bundle was started.
+     *  Inboxes: Download/trough/hot (the VM, other builders) and files/hot/inbox (app-private:
+     *  bundles Trough builds or downloads itself). Same signature rules for both. */
     boolean check() {
-        File zip = new File(sharedDir(), "bundle.zip"), sig = new File(sharedDir(), "bundle.sig");
+        return check(sharedDir(), 0) || check(new File(state, "inbox"), 1);
+    }
+
+    private final long[] seenModified = {-1, -1};
+
+    private boolean check(File inbox, int slot) {
+        File zip = new File(inbox, "bundle.zip"), sig = new File(inbox, "bundle.sig");
         long modified = Math.max(zip.lastModified(), sig.lastModified());
-        if (modified == 0 || modified == seenModified) return false;
+        if (modified == 0 || modified == seenModified[slot]) return false;
         try {
             byte[] bytes = readAll(new FileInputStream(zip));
             String sha = hex(MessageDigest.getInstance("SHA-256").digest(bytes));
-            if (sha.equals(currentSha)) { seenModified = modified; return false; }
+            if (sha.equals(currentSha)) { seenModified[slot] = modified; return false; }
             if (new File(new File(state, "bad"), sha).exists()) {
-                seenModified = modified;
+                seenModified[slot] = modified;
                 status = "bundle " + sha.substring(0, 8) + " died before settling; waiting for a new one";
                 return false;
             }
-            Signature v = Signature.getInstance("SHA256withECDSA");
-            v.initVerify(key);
-            v.update(bytes);
-            if (!v.verify(readAll(new FileInputStream(sig)))) {
+            if (!verified(bytes, readAll(new FileInputStream(sig)))) {
                 status = "bundle " + sha.substring(0, 8) + ": bad signature (or still being written)";
                 return false;
             }
-            seenModified = modified;
+            seenModified[slot] = modified;
             File dir = new File(state, sha);
             if (!new File(dir, "manifest.json").exists()) extract(bytes, dir);
             activate(sha, dir);
@@ -168,6 +178,16 @@ final class HotLoader {
         }
     }
 
+    private boolean verified(byte[] bytes, byte[] sig) {
+        for (PublicKey k : keys) try {
+            Signature v = Signature.getInstance("SHA256withECDSA");
+            v.initVerify(k);
+            v.update(bytes);
+            if (v.verify(sig)) return true;
+        } catch (Throwable ignored) {}
+        return false;
+    }
+
     private void activate(String sha, File dir) throws Exception {
         JSONObject manifest = new JSONObject(new String(readAll(new FileInputStream(new File(dir, "manifest.json"))), "UTF-8"));
         DexClassLoader loader = new DexClassLoader(new File(dir, "classes.dex").getPath(),
@@ -176,9 +196,10 @@ final class HotLoader {
         stopCurrent();
         root.removeAllViews();
         currentSha = sha;
+        currentDir = dir;
         Method boot = method(entry, "boot", Context.class, FrameLayout.class, File.class);
         if (boot == null && activity == null) {   // v1: needs an Activity; attachActivity starts it
-            deferred = entry; deferredDir = dir;
+            deferred = entry;
             status = "bundle " + sha.substring(0, 8) + " waits for Trough's window";
             return;
         }
@@ -197,25 +218,25 @@ final class HotLoader {
     /** a now shows root (the caller set it as content view). */
     void attachActivity(Activity a) {
         activity = a;
-        if (deferred != null) {
-            Class<?> e = deferred; File dir = deferredDir;
-            deferred = null;
-            try { activate(currentSha, dir); } catch (Throwable t) { status = "bundle failed: " + cause(t); showStatus(); }
-            return;
-        }
+        if (deferred != null) { restart(); return; }
         if (current != null) { attachCurrent(); return; }
         if (!check() && !resume()) showStatus();
     }
 
     private void attachCurrent() {
         Method m = method(current, "attach", Activity.class);
-        if (m == null) {   // v1 without attach was started on an earlier Activity: start it again here
-            stopCurrent(); root.removeAllViews();
-            if (!resume()) showStatus();
-            return;
-        }
+        if (m == null) { restart(); return; }   // v1 without attach, started on an earlier Activity
         try { m.invoke(null, activity); }
-        catch (Throwable t) { status = "attach failed: " + cause(t); stopCurrent(); root.removeAllViews(); if (!resume()) showStatus(); }
+        catch (Throwable t) { status = "attach failed: " + cause(t); restart(); }
+    }
+
+    /** The same bundle (not necessarily the last good one) started afresh on the current Activity. */
+    private void restart() {
+        File dir = currentDir;
+        stopCurrent();
+        root.removeAllViews();
+        try { if (dir != null) { activate(currentSha, dir); return; } } catch (Throwable t) { status = "bundle failed: " + cause(t); }
+        if (!resume()) showStatus();
     }
 
     /** a no longer shows root (destroyed: Recents swipe, finish, recreation). */
@@ -257,6 +278,11 @@ final class HotLoader {
         try { return m.invoke(null, host, event, args); }
         catch (Throwable t) { android.util.Log.e("trough", "dispatch " + event, cause(t)); return null; }
     }
+
+    /** Activity and Application callbacks only the host receives (results of system dialogs,
+     *  permission results, configuration, memory pressure, window state): event "activity.<name>"
+     *  or "app.<name>", host = the Activity or Application. */
+    void host(Object host, String event, Object... args) { dispatch(host, event, args); }
 
     private void showStatus() {
         TextView t = (TextView) root.findViewWithTag("trough-status");

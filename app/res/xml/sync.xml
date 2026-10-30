@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<sync-adapter xmlns:android="http://schemas.android.com/apk/res/android"
+    android:contentAuthority="t.t.files" android:accountType="t.t"
+    android:supportsUploading="true" android:allowParallelSyncs="true" android:isAlwaysSyncable="true" android:userVisible="true" />

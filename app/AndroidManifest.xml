@@ -3,8 +3,9 @@
      binaries in place (DESIGN.md "Trough root"). Classes keep their Java package.
      Every permission and component Trough may ever need is declared here, once (docs/HOST.md:
      the fixed host). Permissions: Forge's 315, then every grantable one in the Android 14
-     framework plus later ones by name (unknown names are ignored by older systems), plus the
-     development ones adb can grant (pm grant). Components forward to the bundle (Components.java)
+     framework plus later ones by name (unknown names are ignored by older systems): all 766 the
+     Android 14 framework defines, including signature ones a device owner, a role or adb
+     (pm grant) may grant. Components forward to the bundle (Components.java)
      and stay inert until a bundle implements them and the user enables the role or service. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
@@ -397,6 +398,527 @@
     <uses-feature android:name="android.software.picture_in_picture" android:required="false" />
     <uses-feature android:name="android.software.companion_device_setup" android:required="false" />
     <uses-feature android:name="android.software.home_screen" android:required="false" />
+    <uses-permission android:name="android.permission.SET_DEFAULT_ACCOUNT_FOR_CONTACTS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ACCESS_MESSAGES_ON_ICC" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_CELL_BROADCAST_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.WRITE_OBB" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.LOCATION_BYPASS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ACCESS_IMS_CALL_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.PERFORM_IMS_SINGLE_REGISTRATION" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.EXEMPT_FROM_AUDIO_RECORD_RESTRICTIONS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.RECORD_BACKGROUND_AUDIO" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ACCESS_UCE_PRESENCE_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ACCESS_UCE_OPTIONS_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BACKGROUND_CAMERA" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SYSTEM_CAMERA" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CAMERA_OPEN_CLOSE_LISTENER" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SEND_SMS_NO_CONFIRMATION" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CARRIER_FILTER_SMS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.RECEIVE_EMERGENCY_BROADCAST" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.RECEIVE_BLUETOOTH_MAP" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_DIRECTORY_SEARCH" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MODIFY_CELL_BROADCASTS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.INSTALL_LOCATION_TIME_ZONE_PROVIDER_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_TIME_ZONE_PROVIDER_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.HDMI_CEC" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ACCESS_CONTEXT_HUB" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CONTROL_AUTOMOTIVE_GNSS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_TEST_NETWORKS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.READ_WIFI_CREDENTIAL" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.TETHER_PRIVILEGED" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.RECEIVE_WIFI_CREDENTIAL_CHANGE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SCORE_NETWORKS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.REQUEST_NETWORK_SCORES" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.RESTART_WIFI_SUBSYSTEM" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.NETWORK_AIRPLANE_MODE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.NETWORK_STACK" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.OBSERVE_NETWORK_POLICY" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.NETWORK_FACTORY" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.NETWORK_STATS_PROVIDER" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.NETWORK_SETTINGS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.RADIO_SCAN_WITHOUT_LOCATION" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.NETWORK_SETUP_WIZARD" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.NETWORK_MANAGED_PROVISIONING" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.NETWORK_CARRIER_PROVISIONING" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ACCESS_LOWPAN_STATE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CHANGE_LOWPAN_STATE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.READ_LOWPAN_CREDENTIAL" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_LOWPAN_INTERFACES" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.NETWORK_BYPASS_PRIVATE_DNS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.WIFI_SET_DEVICE_MOBILITY_STATE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.WIFI_UPDATE_USABILITY_STATS_SCORE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.WIFI_UPDATE_COEX_UNSAFE_CHANNELS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.WIFI_ACCESS_COEX_UNSAFE_CHANNELS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_WIFI_COUNTRY_CODE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CONTROL_OEM_PAID_NETWORK_PREFERENCE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_ETHERNET_NETWORKS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SUSPEND_APPS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BLUETOOTH_MAP" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BLUETOOTH_STACK" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.VIRTUAL_INPUT_DEVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.NFC_SET_CONTROLLER_ALWAYS_ON" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SECURE_ELEMENT_PRIVILEGED_OPERATION" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CONNECTIVITY_INTERNAL" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CONNECTIVITY_USE_RESTRICTED_NETWORKS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.NETWORK_SIGNAL_STRENGTH_WAKEUP" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.PACKET_KEEPALIVE_OFFLOAD" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.RECEIVE_DATA_ACTIVITY_CHANGE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.LOOP_RADIO" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.NFC_HANDOVER_STATUS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_BLUETOOTH_WHEN_WIRELESS_CONSENT_REQUIRED" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ENABLE_TEST_HARNESS_MODE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.UWB_PRIVILEGED" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.VIBRATE_ALWAYS_ON" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ACCESS_VIBRATOR_STATE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_FACTORY_RESET_PROTECTION" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.TRIGGER_LOST_MODE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_USB" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_DEBUGGING" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ACCESS_MTP" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.HARDWARE_TEST" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_DYNAMIC_SYSTEM" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.INSTALL_DYNAMIC_SYSTEM" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ACCESS_BROADCAST_RADIO" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ACCESS_FM_RADIO" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.NET_ADMIN" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.REMOTE_AUDIO_PLAYBACK" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.TV_INPUT_HARDWARE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CAPTURE_TV_INPUT" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.DVB_DEVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_CARRIER_OEM_UNLOCK_STATE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_USER_OEM_UNLOCK_STATE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.READ_OEM_UNLOCK_STATE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.OEM_UNLOCK_STATE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ACCESS_PDB_STATE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.TEST_BLACKLISTED_PASSWORD" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.NOTIFY_PENDING_SYSTEM_UPDATE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CAMERA_DISABLE_TRANSMIT_LED" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CAMERA_SEND_SYSTEM_EVENTS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CAMERA_INJECT_EXTERNAL_CAMERA" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.GRANT_RUNTIME_PERMISSIONS_TO_TELEPHONY_DEFAULTS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.READ_PRIVILEGED_PHONE_STATE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.READ_ACTIVE_EMERGENCY_SESSION" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.LISTEN_ALWAYS_REPORTED_SIGNAL_STRENGTH" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.REGISTER_SIM_SUBSCRIPTION" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.REGISTER_CALL_PROVIDER" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.REGISTER_CONNECTION_MANAGER" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.NETWORK_SCAN" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_PHONE_ACCOUNT_SUGGESTION_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_CALL_DIAGNOSTIC_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_CONNECTION_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CONTROL_INCALL_EXPERIENCE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.RECEIVE_STK_COMMANDS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SEND_EMBMS_INTENTS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_SENSORS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_IMS_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_TELEPHONY_DATA_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_TELEPHONY_NETWORK_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_EUICC_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.READ_CARRIER_APP_INFO" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_GBA_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ACCESS_RCS_USER_CAPABILITY_EXCHANGE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.WRITE_MEDIA_STORAGE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_CRATES" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CACHE_CONTENT" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ALLOCATE_AGGRESSIVE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.USE_RESERVED_DISK" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.REAL_GET_TASKS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.START_TASKS_FROM_RECENTS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.START_CROSS_PROFILE_ACTIVITIES" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CONFIGURE_INTERACT_ACROSS_PROFILES" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_USERS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CREATE_USERS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_SUBSCRIPTION_USER_ASSOCIATION" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.QUERY_USERS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_PROFILE_AND_DEVICE_OWNERS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.QUERY_ADMIN_POLICY" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.PROVISION_DEMO_DEVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CLEAR_FREEZE_PERIOD" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.FORCE_DEVICE_POLICY_MANAGER_LOGS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.GET_DETAILED_TASKS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.REMOVE_TASKS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_ACTIVITY_STACKS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_ACTIVITY_TASKS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ACTIVITY_EMBEDDING" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.START_ANY_ACTIVITY" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.START_ACTIVITIES_FROM_BACKGROUND" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SEND_SHOW_SUSPENDED_APP_DETAILS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.START_ACTIVITY_AS_CALLER" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.GET_INTENT_SENDER_INTENT" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SYSTEM_APPLICATION_OVERLAY" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.RUN_IN_BACKGROUND" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.USE_DATA_IN_BACKGROUND" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SET_DISPLAY_OFFSET" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.COMPANION_APPROVE_WIFI_CONNECTIONS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.READ_PROJECTION_STATE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.TOGGLE_AUTOMOTIVE_PROJECTION" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SUGGEST_TELEPHONY_TIME_AND_ZONE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SUGGEST_MANUAL_TIME_AND_ZONE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SUGGEST_EXTERNAL_TIME" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_TIME_AND_ZONE_DETECTION" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SET_SCREEN_COMPATIBILITY" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.WRITE_DEVICE_CONFIG" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.READ_DEVICE_CONFIG" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.READ_APP_SPECIFIC_LOCALES" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MONITOR_DEVICE_CONFIG_ACCESS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.FORCE_STOP_PACKAGES" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.RETRIEVE_WINDOW_CONTENT" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.STORAGE_INTERNAL" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ASEC_ACCESS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ASEC_CREATE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ASEC_DESTROY" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ASEC_MOUNT_UNMOUNT" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ASEC_RENAME" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ALLOW_ANY_CODEC_FOR_PLAYBACK" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_CA_CERTIFICATES" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.RECOVERY" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_RESUME_ON_REBOOT_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.READ_SYSTEM_UPDATE_INFO" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_JOB_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.UPDATE_CONFIG" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.QUERY_TIME_ZONE_RULES" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.UPDATE_TIME_ZONE_RULES" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.RESET_SHORTCUT_MANAGER_THROTTLING" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_NETWORK_RECOMMENDATION_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CHANGE_OVERLAY_PACKAGES" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_CREDENTIAL_MANAGEMENT_APP" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.UPDATE_FONTS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.USE_ATTESTATION_VERIFICATION_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.VERIFY_ATTESTATION" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_ATTESTATION_VERIFICATION_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.REQUEST_UNIQUE_ID_ATTESTATION" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_TRACE_REPORT_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.APPROVE_INCIDENT_REPORTS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.REQUEST_INCIDENT_REPORT_APPROVAL" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.GET_PASSWORD" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.TRIGGER_SHELL_BUGREPORT" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.TRIGGER_SHELL_PROFCOLLECT_UPLOAD" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.STATUS_BAR_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.FORCE_BACK" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.GET_HISTORICAL_APP_OPS_STATS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.UPDATE_APP_OPS_STATS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_APP_OPS_RESTRICTIONS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.INTERNAL_SYSTEM_WINDOW" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.UNLIMITED_TOASTS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.HIDE_NON_SYSTEM_OVERLAY_WINDOWS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_APP_TOKENS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.REGISTER_WINDOW_MANAGER_LISTENERS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.FREEZE_SCREEN" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.FILTER_EVENTS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.RETRIEVE_WINDOW_TOKEN" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MODIFY_ACCESSIBILITY_DATA" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ACT_AS_PACKAGE_FOR_ACCESSIBILITY" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CHANGE_ACCESSIBILITY_VOLUME" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.FRAME_STATS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.TEMPORARY_ENABLE_ACCESSIBILITY" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.OPEN_ACCESSIBILITY_DETAILS_SETTINGS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SET_ACTIVITY_WATCHER" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SHUTDOWN" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.STOP_APP_SWITCHES" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.GET_TOP_ACTIVITY_INFO" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SET_SYSTEM_AUDIO_CAPTION" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_ACCESSIBILITY_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_PRINT_RECOMMENDATION_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.READ_PRINT_SERVICES" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.READ_PRINT_SERVICE_RECOMMENDATIONS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_PRINT_SPOOLER_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_COMPANION_DEVICE_MANAGER_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_RUNTIME_PERMISSION_PRESENTER_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_ATTENTION_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_ROTATION_RESOLVER_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_GAME_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_HOTWORD_DETECTION_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_HOTWORD_DETECTION" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_AUTOFILL" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_AUTOFILL_FIELD_CLASSIFICATION_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_INLINE_SUGGESTION_RENDER_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_TEXTCLASSIFIER_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_SELECTION_TOOLBAR_RENDER_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_CONTENT_CAPTURE_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_TRANSLATION_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_UI_TRANSLATION" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_CONTENT_SUGGESTIONS_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_WALLPAPER_EFFECTS_GENERATION_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_MUSIC_RECOGNITION_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_AUGMENTED_AUTOFILL_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_VOICE_KEYPHRASES" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.KEYPHRASE_ENROLLMENT_APPLICATION" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_REMOTE_DISPLAY" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_TV_REMOTE_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.TV_VIRTUAL_REMOTE_CONTROLLER" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CHANGE_HDMI_CEC_ACTIVE_SOURCE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MODIFY_PARENTAL_CONTROLS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.READ_CONTENT_RATING_SYSTEMS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.NOTIFY_TV_INPUTS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.TUNER_RESOURCE_ACCESS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MEDIA_RESOURCE_OVERRIDE_PID" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.REGISTER_MEDIA_RESOURCE_OBSERVER" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_ROUTE_PROVIDER" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_DEVICE_ADMINS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.RESET_PASSWORD" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.LOCK_DEVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SET_ORIENTATION" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SET_POINTER_SPEED" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SET_INPUT_CALIBRATION" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SET_KEYBOARD_LAYOUT" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SCHEDULE_PRIORITIZED_ALARM" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.TABLET_MODE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.INSTALL_SELF_UPDATES" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.INSTALL_PACKAGE_UPDATES" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="com.android.permission.INSTALL_EXISTING_PACKAGES" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="com.android.permission.USE_INSTALLER_V2" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.INSTALL_TEST_ONLY_PACKAGE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.INSTALL_DPC_PACKAGES" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="com.android.permission.USE_SYSTEM_DATA_LOADERS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CLEAR_APP_USER_DATA" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.GET_APP_GRANTED_URI_PERMISSIONS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CLEAR_APP_GRANTED_URI_PERMISSIONS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_SCOPED_ACCESS_DIRECTORY_PERMISSIONS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.FORCE_PERSISTABLE_URI_PERMISSIONS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.INTERNAL_DELETE_CACHE_FILES" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MOVE_PACKAGE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.KEEP_UNINSTALLED_PACKAGES" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.INSTALL_GRANT_RUNTIME_PERMISSIONS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.REVOKE_POST_NOTIFICATIONS_WITHOUT_KILL" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.GET_RUNTIME_PERMISSIONS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.RESTORE_RUNTIME_PERMISSIONS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ADJUST_RUNTIME_PERMISSIONS_POLICY" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.UPGRADE_RUNTIME_PERMISSIONS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.WHITELIST_RESTRICTED_PERMISSIONS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.WHITELIST_AUTO_REVOKE_PERMISSIONS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.OBSERVE_GRANT_REVOKE_PERMISSIONS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_ONE_TIME_PERMISSION_SESSIONS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_ROLE_HOLDERS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BYPASS_ROLE_QUALIFICATION" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.OBSERVE_ROLE_HOLDERS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_COMPANION_DEVICES" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ASSOCIATE_COMPANION_DEVICES" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ROTATE_SURFACE_FLINGER" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MODIFY_TOUCH_MODE_STATE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ACCESS_INPUT_FLINGER" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.DISABLE_INPUT_DEVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CONTROL_WIFI_DISPLAY" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CONFIGURE_DISPLAY_COLOR_MODE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CONTROL_DEVICE_LIGHTS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CONTROL_DISPLAY_SATURATION" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CONTROL_DISPLAY_COLOR_TRANSFORMS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CONTROL_DISPLAY_BRIGHTNESS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.OVERRIDE_DISPLAY_MODE_REQUESTS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MODIFY_REFRESH_RATE_SWITCHING_TYPE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MODIFY_USER_PREFERRED_DISPLAY_MODE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CONTROL_VPN" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CONTROL_ALWAYS_ON_VPN" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CAPTURE_TUNER_AUDIO_INPUT" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CAPTURE_MEDIA_OUTPUT" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CAPTURE_VOICE_COMMUNICATION_OUTPUT" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CAPTURE_AUDIO_HOTWORD" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ACCESS_ULTRASOUND" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SOUNDTRIGGER_DELEGATE_IDENTITY" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_ROUTING" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CALL_AUDIO_INTERCEPTION" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.QUERY_AUDIO_STATE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MODIFY_DEFAULT_AUDIO_EFFECTS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.DISABLE_SYSTEM_SOUND_EFFECTS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.REMOTE_DISPLAY_PROVIDER" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CAPTURE_VIDEO_OUTPUT" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CAPTURE_SECURE_VIDEO_OUTPUT" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BRICK" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.DEVICE_POWER" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.POWER_SAVER" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BATTERY_PREDICTION" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.USER_ACTIVITY" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_LOW_POWER_STANDBY" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.NET_TUNNELING" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BROADCAST_CLOSE_SYSTEM_DIALOGS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BROADCAST_NETWORK_PRIVILEGED" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.PERFORM_CDMA_PROVISIONING" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.PERFORM_SIM_ACTIVATION" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.OBSERVE_APP_USAGE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CHANGE_APP_IDLE_STATE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CHANGE_APP_LAUNCH_TIME_ESTIMATE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CHANGE_DEVICE_IDLE_TEMP_WHITELIST" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.STATSCOMPANION" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.REGISTER_STATS_PULL_ATOM" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BACKUP" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MODIFY_SETTINGS_OVERRIDEABLE_BY_RESTORE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.RECOVER_KEYSTORE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CONFIRM_FULL_BACKUP" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_SLICE_PERMISSIONS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_KEYGUARD_APPWIDGET" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MODIFY_APPWIDGET_BIND_PERMISSIONS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CHANGE_BACKGROUND_DATA_SETTING" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.GLOBAL_SEARCH_CONTROL" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.READ_SEARCH_INDEXABLES" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_SETTINGS_SUGGESTIONS_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.WRITE_SETTINGS_HOMEPAGE_DATA" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ALLOW_PLACE_IN_MULTI_PANE_SETTINGS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SET_WALLPAPER_COMPONENT" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SET_WALLPAPER_DIM_AMOUNT" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.READ_DREAM_STATE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.WRITE_DREAM_STATE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.READ_DREAM_SUPPRESSION" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ACCESS_CACHE_FILESYSTEM" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.COPY_PROTECTED_DATA" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CRYPT_KEEPER" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.READ_NETWORK_USAGE_HISTORY" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_NETWORK_POLICY" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MODIFY_NETWORK_ACCOUNTING" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_SUBSCRIPTION_PLANS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.intent.category.MASTER_CLEAR.permission.C2D_MESSAGE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.PACKAGE_VERIFICATION_AGENT" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_PACKAGE_VERIFIER" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.PACKAGE_ROLLBACK_AGENT" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_ROLLBACKS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.TEST_MANAGE_ROLLBACKS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SET_HARMFUL_APP_WARNINGS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.INTENT_FILTER_VERIFICATION_AGENT" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_INTENT_FILTER_VERIFIER" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.DOMAIN_VERIFICATION_AGENT" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_DOMAIN_VERIFICATION_AGENT" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.UPDATE_DOMAIN_VERIFICATION_USER_SELECTION" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SERIAL_PORT" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ACCESS_CONTENT_PROVIDERS_EXTERNALLY" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.UPDATE_LOCK" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.REQUEST_NOTIFICATION_ASSISTANT_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_NOTIFICATIONS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_NOTIFICATION_LISTENERS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.USE_COLORIZED_NOTIFICATIONS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ACCESS_KEYGUARD_SECURE_STORAGE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SET_INITIAL_LOCK" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SET_AND_VERIFY_LOCKSCREEN_CREDENTIALS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_FINGERPRINT" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.RESET_FINGERPRINT_LOCKOUT" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.TEST_BIOMETRIC" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_BIOMETRIC" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.USE_BIOMETRIC_INTERNAL" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_BIOMETRIC_DIALOG" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CONTROL_KEYGUARD" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CONTROL_KEYGUARD_SECURE_NOTIFICATIONS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_WEAK_ESCROW_TOKEN" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.TRUST_LISTENER" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.PROVIDE_TRUST_AGENT" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SHOW_KEYGUARD_MESSAGE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.LAUNCH_TRUST_AGENT_SETTINGS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_TRUST_AGENT" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_NOTIFICATION_ASSISTANT_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.PROVIDE_RESOLVER_RANKER_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_RESOLVER_RANKER_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_CACHE_QUOTA_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.INVOKE_CARRIER_SETUP" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_CONDITIONS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ACCESS_DRM_CERTIFICATES" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_MEDIA_PROJECTION" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.REMOVE_DRM_CERTIFICATES" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ACCESS_VOICE_INTERACTION_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.START_REVIEW_PERMISSION_DECISIONS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.QUERY_DO_NOT_ASK_CREDENTIALS_ON_BOOT" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.KILL_UID" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.LOCAL_MAC_ADDRESS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.PEERS_MAC_ADDRESS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.DISPATCH_NFC_MESSAGE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MODIFY_DAY_NIGHT_MODE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ENTER_CAR_MODE_PRIORITIZED" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.HANDLE_CAR_MODE_CHANGES" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SEND_CATEGORY_CAR_NOTIFICATIONS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ACCESS_INSTANT_APPS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.VIEW_INSTANT_APPS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_BIND_INSTANT_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.RECEIVE_MEDIA_RESOURCE_USAGE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_SOUND_TRIGGER" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SOUND_TRIGGER_RUN_IN_BATTERY_SAVER" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_SOUND_TRIGGER_DETECTION_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.DISPATCH_PROVISIONING_MESSAGE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.READ_BLOCKED_NUMBERS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.WRITE_BLOCKED_NUMBERS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.RESTRICTED_VR_ACCESS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ACCESS_VR_MANAGER" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ACCESS_VR_STATE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.UPDATE_LOCK_TASK_PACKAGES" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SUBSTITUTE_NOTIFICATION_APP_NAME" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.NOTIFICATION_DURING_SETUP" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_AUTO_FILL" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_CONTENT_CAPTURE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_ROTATION_RESOLVER" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_CLOUDSEARCH" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_MUSIC_RECOGNITION" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_SPEECH_RECOGNITION" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_CONTENT_SUGGESTIONS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_APP_PREDICTIONS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_SEARCH_UI" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_SMARTSPACE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_WALLPAPER_EFFECTS_GENERATION" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MODIFY_THEME_OVERLAY" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ACCESS_SHORTCUTS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.UNLIMITED_SHORTCUTS_API_CALLS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.READ_RUNTIME_PROFILES" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_AUDIO_POLICY" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_CAMERA" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CONTROL_REMOTE_APP_TRANSITION_ANIMATIONS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.WATCH_APPOPS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.DISABLE_HIDDEN_API_CHECKS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MONITOR_DEFAULT_SMS_PACKAGE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_EXPLICIT_HEALTH_CHECK_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_EXTERNAL_STORAGE_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_APPOPS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.READ_CLIPBOARD_IN_BACKGROUND" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SUPPRESS_CLIPBOARD_ACCESS_NOTIFICATION" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_ACCESSIBILITY" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.GRANT_PROFILE_OWNER_DEVICE_IDS_ACCESS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MARK_DEVICE_ORGANIZATION_OWNED" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SEND_DEVICE_CUSTOMIZATION_READY" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.RECEIVE_DEVICE_CUSTOMIZATION_READY" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.AMBIENT_WALLPAPER" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_SENSOR_PRIVACY" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.OBSERVE_SENSOR_PRIVACY" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.REVIEW_ACCESSIBILITY_SERVICES" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SUBSTITUTE_SHARE_TARGET_APP_NAME_AND_ICON" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ACCESS_SHARED_LIBRARIES" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.LOG_COMPAT_CHANGE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.READ_COMPAT_CHANGE_CONFIG" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.OVERRIDE_COMPAT_CHANGE_CONFIG" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.OVERRIDE_COMPAT_CHANGE_CONFIG_ON_RELEASE_BUILD" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MONITOR_INPUT" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ALLOW_SLIPPERY_TOUCHES" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ASSOCIATE_INPUT_DEVICE_TO_DISPLAY" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.PEEK_DROPBOX_DATA" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ACCESS_TV_TUNER" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ACCESS_TV_DESCRAMBLER" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ACCESS_TV_SHARED_FILTER" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ADD_TRUSTED_DISPLAY" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ADD_ALWAYS_UNLOCKED_DISPLAY" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ACCESS_LOCUS_ID_USAGE_STATS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_APP_HIBERNATION" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.RESET_APP_ERRORS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.INPUT_CONSUMER" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CONTROL_DEVICE_STATE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_DISPLAY_HASHING_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_TOAST_RATE_LIMITING" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_GAME_MODE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SET_GAME_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ACCESS_FPS_COUNTER" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_GAME_ACTIVITY" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SIGNAL_REBOOT_READINESS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.GET_PEOPLE_TILE_PREVIEW" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.READ_PEOPLE_DATA" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.RENOUNCE_PERMISSIONS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SET_CLIP_SOURCE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ACCESS_TUNED_INFO" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CAPTURE_BLACKOUT_CONTENT" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.READ_GLOBAL_APP_SEARCH_DATA" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CREATE_VIRTUAL_DEVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SEND_SAFETY_CENTER_UPDATE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.LAUNCH_DEVICE_MANAGER_SETUP" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.UPDATE_DEVICE_MANAGEMENT_RESOURCES" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.READ_SAFETY_CENTER_STATUS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_SAFETY_CENTER" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ACCESS_AMBIENT_CONTEXT_EVENT" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_AMBIENT_CONTEXT_DETECTION_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SET_UNRESTRICTED_KEEP_CLEAR_AREAS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SET_UNRESTRICTED_GESTURE_EXCLUSION" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.TIS_EXTENSION_INTERFACE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.WRITE_SECURITY_LOG" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MAKE_UID_VISIBLE" tools:ignore="ProtectedPermissions" />
     <application
         android:name="com.trough.app.TroughApp"
         android:label="Trough"
@@ -407,6 +929,8 @@
         android:usesCleartextTraffic="true"
         android:hasFragileUserData="true"
         android:allowBackup="false"
+        android:networkSecurityConfig="@xml/network_security"
+        android:zygotePreloadName="com.trough.app.Components$Preload"
         android:hardwareAccelerated="true"
         android:largeHeap="true"
         android:debuggable="true"
@@ -684,43 +1208,165 @@
         </service>
         <service android:name="com.trough.app.Components$Sandbox0" android:exported="false" android:isolatedProcess="true" android:process=":sandbox0" />
         <service android:name="com.trough.app.Components$Sandbox1" android:exported="false" android:isolatedProcess="true" android:process=":sandbox1" />
+        <!-- Vendor libraries (GPU compute, DSP, TPU): optional, loaded only if the device has them. -->
+        <uses-native-library android:name="libOpenCL.so" android:required="false" />
+        <uses-native-library android:name="libOpenCL-pixel.so" android:required="false" />
+        <uses-native-library android:name="libOpenCL-car.so" android:required="false" />
+        <uses-native-library android:name="libcdsprpc.so" android:required="false" />
+        <uses-native-library android:name="libedgetpu_client.google.so" android:required="false" />
+        <uses-native-library android:name="libGLES_mali.so" android:required="false" />
+        <uses-native-library android:name="libvndksupport.so" android:required="false" />
+        <service android:name="com.trough.app.Components$Accessibility" android:exported="true" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE" android:label="Trough">
+            <intent-filter><action android:name="android.accessibilityservice.AccessibilityService" /></intent-filter>
+            <meta-data android:name="android.accessibilityservice" android:resource="@xml/accessibility" />
+        </service>
+        <service android:name="com.trough.app.Components$Print" android:exported="true" android:permission="android.permission.BIND_PRINT_SERVICE">
+            <intent-filter><action android:name="android.printservice.PrintService" /></intent-filter>
+        </service>
+        <service android:name="com.trough.app.Components$Controls" android:exported="true" android:permission="android.permission.BIND_CONTROLS" android:label="Trough">
+            <intent-filter><action android:name="android.service.controls.ControlsProviderService" /></intent-filter>
+        </service>
+        <service android:name="com.trough.app.Components$Speech" android:exported="true" android:label="Trough">
+            <intent-filter><action android:name="android.intent.action.TTS_SERVICE" /><category android:name="android.intent.category.DEFAULT" /></intent-filter>
+        </service>
+        <service android:name="com.trough.app.Components$Spelling" android:exported="true" android:permission="android.permission.BIND_TEXT_SERVICE" android:label="Trough">
+            <intent-filter><action android:name="android.service.textservice.SpellCheckerService" /></intent-filter>
+            <meta-data android:name="android.view.textservice.scs" android:resource="@xml/spelling" />
+        </service>
+        <receiver android:name="com.trough.app.Components$Widget" android:exported="true" android:label="Trough">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget" />
+        </receiver>
+        <service android:name="com.trough.app.Components$Accounts" android:exported="true">
+            <intent-filter><action android:name="android.accounts.AccountAuthenticator" /></intent-filter>
+            <meta-data android:name="android.accounts.AccountAuthenticator" android:resource="@xml/authenticator" />
+        </service>
+        <service android:name="com.trough.app.Components$Sync" android:exported="true">
+            <intent-filter><action android:name="android.content.SyncAdapter" /></intent-filter>
+            <meta-data android:name="android.content.SyncAdapter" android:resource="@xml/sync" />
+        </service>
+        <service android:name="com.trough.app.Components$CustomTabs" android:exported="true">
+            <intent-filter><action android:name="android.support.customtabs.action.CustomTabsService" /></intent-filter>
+        </service>
+        <service android:name="com.trough.app.Components$Sandbox2" android:exported="false" android:isolatedProcess="true" android:useAppZygote="true" />
         <provider android:name="com.trough.app.Components$Files" android:authorities="t.t.files" android:exported="true" android:grantUriPermissions="true" />
         <provider android:name="com.trough.app.Components$Documents" android:authorities="t.t.documents" android:exported="true"
             android:grantUriPermissions="true" android:permission="android.permission.MANAGE_DOCUMENTS">
             <intent-filter><action android:name="android.content.action.DOCUMENTS_PROVIDER" /></intent-filter>
         </provider>
-        <!-- Process slots (Slot.java): isolated processes a bundle can run guests or work in. -->
-        <activity android:name="com.trough.app.Slot$A0" android:process=":p0" android:exported="false"
-            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection"
-            android:resizeableActivity="true" />
+        <!-- Process slots (Slot.java): 16 processes, every launch mode, a service and a provider each. -->
+        <activity android:name="com.trough.app.Slot$A0" android:process=":p0" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" />
+        <activity android:name="com.trough.app.Slot$T0" android:process=":p0" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleTop" />
+        <activity android:name="com.trough.app.Slot$K0" android:process=":p0" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleTask" android:taskAffinity="t.t.k0" />
+        <activity android:name="com.trough.app.Slot$I0" android:process=":p0" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleInstance" android:taskAffinity="t.t.i0" />
+        <activity android:name="com.trough.app.Slot$L0" android:process=":p0" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:theme="@android:style/Theme.Translucent.NoTitleBar" />
         <service android:name="com.trough.app.Slot$S0" android:process=":p0" android:exported="false" />
-        <activity android:name="com.trough.app.Slot$A1" android:process=":p1" android:exported="false"
-            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection"
-            android:resizeableActivity="true" />
+        <provider android:name="com.trough.app.Slot$P0" android:process=":p0" android:authorities="t.t.slot0" android:exported="false" android:grantUriPermissions="true" />
+        <activity android:name="com.trough.app.Slot$A1" android:process=":p1" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" />
+        <activity android:name="com.trough.app.Slot$T1" android:process=":p1" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleTop" />
+        <activity android:name="com.trough.app.Slot$K1" android:process=":p1" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleTask" android:taskAffinity="t.t.k1" />
+        <activity android:name="com.trough.app.Slot$I1" android:process=":p1" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleInstance" android:taskAffinity="t.t.i1" />
+        <activity android:name="com.trough.app.Slot$L1" android:process=":p1" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:theme="@android:style/Theme.Translucent.NoTitleBar" />
         <service android:name="com.trough.app.Slot$S1" android:process=":p1" android:exported="false" />
-        <activity android:name="com.trough.app.Slot$A2" android:process=":p2" android:exported="false"
-            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection"
-            android:resizeableActivity="true" />
+        <provider android:name="com.trough.app.Slot$P1" android:process=":p1" android:authorities="t.t.slot1" android:exported="false" android:grantUriPermissions="true" />
+        <activity android:name="com.trough.app.Slot$A2" android:process=":p2" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" />
+        <activity android:name="com.trough.app.Slot$T2" android:process=":p2" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleTop" />
+        <activity android:name="com.trough.app.Slot$K2" android:process=":p2" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleTask" android:taskAffinity="t.t.k2" />
+        <activity android:name="com.trough.app.Slot$I2" android:process=":p2" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleInstance" android:taskAffinity="t.t.i2" />
+        <activity android:name="com.trough.app.Slot$L2" android:process=":p2" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:theme="@android:style/Theme.Translucent.NoTitleBar" />
         <service android:name="com.trough.app.Slot$S2" android:process=":p2" android:exported="false" />
-        <activity android:name="com.trough.app.Slot$A3" android:process=":p3" android:exported="false"
-            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection"
-            android:resizeableActivity="true" />
+        <provider android:name="com.trough.app.Slot$P2" android:process=":p2" android:authorities="t.t.slot2" android:exported="false" android:grantUriPermissions="true" />
+        <activity android:name="com.trough.app.Slot$A3" android:process=":p3" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" />
+        <activity android:name="com.trough.app.Slot$T3" android:process=":p3" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleTop" />
+        <activity android:name="com.trough.app.Slot$K3" android:process=":p3" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleTask" android:taskAffinity="t.t.k3" />
+        <activity android:name="com.trough.app.Slot$I3" android:process=":p3" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleInstance" android:taskAffinity="t.t.i3" />
+        <activity android:name="com.trough.app.Slot$L3" android:process=":p3" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:theme="@android:style/Theme.Translucent.NoTitleBar" />
         <service android:name="com.trough.app.Slot$S3" android:process=":p3" android:exported="false" />
-        <activity android:name="com.trough.app.Slot$A4" android:process=":p4" android:exported="false"
-            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection"
-            android:resizeableActivity="true" />
+        <provider android:name="com.trough.app.Slot$P3" android:process=":p3" android:authorities="t.t.slot3" android:exported="false" android:grantUriPermissions="true" />
+        <activity android:name="com.trough.app.Slot$A4" android:process=":p4" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" />
+        <activity android:name="com.trough.app.Slot$T4" android:process=":p4" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleTop" />
+        <activity android:name="com.trough.app.Slot$K4" android:process=":p4" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleTask" android:taskAffinity="t.t.k4" />
+        <activity android:name="com.trough.app.Slot$I4" android:process=":p4" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleInstance" android:taskAffinity="t.t.i4" />
+        <activity android:name="com.trough.app.Slot$L4" android:process=":p4" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:theme="@android:style/Theme.Translucent.NoTitleBar" />
         <service android:name="com.trough.app.Slot$S4" android:process=":p4" android:exported="false" />
-        <activity android:name="com.trough.app.Slot$A5" android:process=":p5" android:exported="false"
-            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection"
-            android:resizeableActivity="true" />
+        <provider android:name="com.trough.app.Slot$P4" android:process=":p4" android:authorities="t.t.slot4" android:exported="false" android:grantUriPermissions="true" />
+        <activity android:name="com.trough.app.Slot$A5" android:process=":p5" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" />
+        <activity android:name="com.trough.app.Slot$T5" android:process=":p5" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleTop" />
+        <activity android:name="com.trough.app.Slot$K5" android:process=":p5" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleTask" android:taskAffinity="t.t.k5" />
+        <activity android:name="com.trough.app.Slot$I5" android:process=":p5" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleInstance" android:taskAffinity="t.t.i5" />
+        <activity android:name="com.trough.app.Slot$L5" android:process=":p5" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:theme="@android:style/Theme.Translucent.NoTitleBar" />
         <service android:name="com.trough.app.Slot$S5" android:process=":p5" android:exported="false" />
-        <activity android:name="com.trough.app.Slot$A6" android:process=":p6" android:exported="false"
-            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection"
-            android:resizeableActivity="true" />
+        <provider android:name="com.trough.app.Slot$P5" android:process=":p5" android:authorities="t.t.slot5" android:exported="false" android:grantUriPermissions="true" />
+        <activity android:name="com.trough.app.Slot$A6" android:process=":p6" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" />
+        <activity android:name="com.trough.app.Slot$T6" android:process=":p6" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleTop" />
+        <activity android:name="com.trough.app.Slot$K6" android:process=":p6" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleTask" android:taskAffinity="t.t.k6" />
+        <activity android:name="com.trough.app.Slot$I6" android:process=":p6" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleInstance" android:taskAffinity="t.t.i6" />
+        <activity android:name="com.trough.app.Slot$L6" android:process=":p6" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:theme="@android:style/Theme.Translucent.NoTitleBar" />
         <service android:name="com.trough.app.Slot$S6" android:process=":p6" android:exported="false" />
-        <activity android:name="com.trough.app.Slot$A7" android:process=":p7" android:exported="false"
-            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection"
-            android:resizeableActivity="true" />
+        <provider android:name="com.trough.app.Slot$P6" android:process=":p6" android:authorities="t.t.slot6" android:exported="false" android:grantUriPermissions="true" />
+        <activity android:name="com.trough.app.Slot$A7" android:process=":p7" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" />
+        <activity android:name="com.trough.app.Slot$T7" android:process=":p7" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleTop" />
+        <activity android:name="com.trough.app.Slot$K7" android:process=":p7" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleTask" android:taskAffinity="t.t.k7" />
+        <activity android:name="com.trough.app.Slot$I7" android:process=":p7" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleInstance" android:taskAffinity="t.t.i7" />
+        <activity android:name="com.trough.app.Slot$L7" android:process=":p7" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:theme="@android:style/Theme.Translucent.NoTitleBar" />
         <service android:name="com.trough.app.Slot$S7" android:process=":p7" android:exported="false" />
+        <provider android:name="com.trough.app.Slot$P7" android:process=":p7" android:authorities="t.t.slot7" android:exported="false" android:grantUriPermissions="true" />
+        <activity android:name="com.trough.app.Slot$A8" android:process=":p8" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" />
+        <activity android:name="com.trough.app.Slot$T8" android:process=":p8" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleTop" />
+        <activity android:name="com.trough.app.Slot$K8" android:process=":p8" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleTask" android:taskAffinity="t.t.k8" />
+        <activity android:name="com.trough.app.Slot$I8" android:process=":p8" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleInstance" android:taskAffinity="t.t.i8" />
+        <activity android:name="com.trough.app.Slot$L8" android:process=":p8" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <service android:name="com.trough.app.Slot$S8" android:process=":p8" android:exported="false" />
+        <provider android:name="com.trough.app.Slot$P8" android:process=":p8" android:authorities="t.t.slot8" android:exported="false" android:grantUriPermissions="true" />
+        <activity android:name="com.trough.app.Slot$A9" android:process=":p9" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" />
+        <activity android:name="com.trough.app.Slot$T9" android:process=":p9" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleTop" />
+        <activity android:name="com.trough.app.Slot$K9" android:process=":p9" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleTask" android:taskAffinity="t.t.k9" />
+        <activity android:name="com.trough.app.Slot$I9" android:process=":p9" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleInstance" android:taskAffinity="t.t.i9" />
+        <activity android:name="com.trough.app.Slot$L9" android:process=":p9" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <service android:name="com.trough.app.Slot$S9" android:process=":p9" android:exported="false" />
+        <provider android:name="com.trough.app.Slot$P9" android:process=":p9" android:authorities="t.t.slot9" android:exported="false" android:grantUriPermissions="true" />
+        <activity android:name="com.trough.app.Slot$A10" android:process=":p10" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" />
+        <activity android:name="com.trough.app.Slot$T10" android:process=":p10" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleTop" />
+        <activity android:name="com.trough.app.Slot$K10" android:process=":p10" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleTask" android:taskAffinity="t.t.k10" />
+        <activity android:name="com.trough.app.Slot$I10" android:process=":p10" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleInstance" android:taskAffinity="t.t.i10" />
+        <activity android:name="com.trough.app.Slot$L10" android:process=":p10" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <service android:name="com.trough.app.Slot$S10" android:process=":p10" android:exported="false" />
+        <provider android:name="com.trough.app.Slot$P10" android:process=":p10" android:authorities="t.t.slot10" android:exported="false" android:grantUriPermissions="true" />
+        <activity android:name="com.trough.app.Slot$A11" android:process=":p11" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" />
+        <activity android:name="com.trough.app.Slot$T11" android:process=":p11" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleTop" />
+        <activity android:name="com.trough.app.Slot$K11" android:process=":p11" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleTask" android:taskAffinity="t.t.k11" />
+        <activity android:name="com.trough.app.Slot$I11" android:process=":p11" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleInstance" android:taskAffinity="t.t.i11" />
+        <activity android:name="com.trough.app.Slot$L11" android:process=":p11" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <service android:name="com.trough.app.Slot$S11" android:process=":p11" android:exported="false" />
+        <provider android:name="com.trough.app.Slot$P11" android:process=":p11" android:authorities="t.t.slot11" android:exported="false" android:grantUriPermissions="true" />
+        <activity android:name="com.trough.app.Slot$A12" android:process=":p12" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" />
+        <activity android:name="com.trough.app.Slot$T12" android:process=":p12" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleTop" />
+        <activity android:name="com.trough.app.Slot$K12" android:process=":p12" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleTask" android:taskAffinity="t.t.k12" />
+        <activity android:name="com.trough.app.Slot$I12" android:process=":p12" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleInstance" android:taskAffinity="t.t.i12" />
+        <activity android:name="com.trough.app.Slot$L12" android:process=":p12" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <service android:name="com.trough.app.Slot$S12" android:process=":p12" android:exported="false" />
+        <provider android:name="com.trough.app.Slot$P12" android:process=":p12" android:authorities="t.t.slot12" android:exported="false" android:grantUriPermissions="true" />
+        <activity android:name="com.trough.app.Slot$A13" android:process=":p13" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" />
+        <activity android:name="com.trough.app.Slot$T13" android:process=":p13" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleTop" />
+        <activity android:name="com.trough.app.Slot$K13" android:process=":p13" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleTask" android:taskAffinity="t.t.k13" />
+        <activity android:name="com.trough.app.Slot$I13" android:process=":p13" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleInstance" android:taskAffinity="t.t.i13" />
+        <activity android:name="com.trough.app.Slot$L13" android:process=":p13" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <service android:name="com.trough.app.Slot$S13" android:process=":p13" android:exported="false" />
+        <provider android:name="com.trough.app.Slot$P13" android:process=":p13" android:authorities="t.t.slot13" android:exported="false" android:grantUriPermissions="true" />
+        <activity android:name="com.trough.app.Slot$A14" android:process=":p14" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" />
+        <activity android:name="com.trough.app.Slot$T14" android:process=":p14" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleTop" />
+        <activity android:name="com.trough.app.Slot$K14" android:process=":p14" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleTask" android:taskAffinity="t.t.k14" />
+        <activity android:name="com.trough.app.Slot$I14" android:process=":p14" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleInstance" android:taskAffinity="t.t.i14" />
+        <activity android:name="com.trough.app.Slot$L14" android:process=":p14" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <service android:name="com.trough.app.Slot$S14" android:process=":p14" android:exported="false" />
+        <provider android:name="com.trough.app.Slot$P14" android:process=":p14" android:authorities="t.t.slot14" android:exported="false" android:grantUriPermissions="true" />
+        <activity android:name="com.trough.app.Slot$A15" android:process=":p15" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" />
+        <activity android:name="com.trough.app.Slot$T15" android:process=":p15" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleTop" />
+        <activity android:name="com.trough.app.Slot$K15" android:process=":p15" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleTask" android:taskAffinity="t.t.k15" />
+        <activity android:name="com.trough.app.Slot$I15" android:process=":p15" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:launchMode="singleInstance" android:taskAffinity="t.t.i15" />
+        <activity android:name="com.trough.app.Slot$L15" android:process=":p15" android:exported="false" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <service android:name="com.trough.app.Slot$S15" android:process=":p15" android:exported="false" />
+        <provider android:name="com.trough.app.Slot$P15" android:process=":p15" android:authorities="t.t.slot15" android:exported="false" android:grantUriPermissions="true" />
     </application>
+    <instrumentation android:name="com.trough.app.Components$Instrument" android:targetPackage="t.t" android:label="Trough" />
 </manifest>
