@@ -8,7 +8,7 @@ switch between models (Claude and GPT) to build it; this file is the live state.
 "Start here" block whenever the state changes, and commit early: the phone that hosts the VM
 crashes or powers off semi-regularly, and a context window is not memory.
 
-**Where you are running.** A Debian arm64 VM (Android's Linux Terminal) on the user's Pixel 7.
+**Where you are running.** A Debian arm64 VM (Android's Linux Terminal) on the user's Pixel 7a (Android 17, SDK 37).
 The phone's shared storage is `/mnt/shared` (`/mnt/shared/Download/trough/` = the phone's
 `Download/trough/`). The VM's `/tmp` is RAM: keep big files out. Trough itself runs on the phone,
 not in the VM; the two talk through Download/trough (bundles, signed control channel, evidence).
@@ -19,10 +19,10 @@ not in the VM; the two talk through Download/trough (bundles, signed control cha
   every component and role declared as forwarding shims (Components.java, accessibility
   included), Activity/Application callbacks forwarded, 16 process slots in every launch mode,
   isolated sandboxes (one app-zygote), extra trusted keys + app-private inbox, revive job, boot
-  receiver, all 892 framework permissions. Built, not yet installed:
-  **the user must install `Download/trough/trough-os.apk`** (same signing key, data kept). Nothing in
-  it has run on a device yet: after install, verify launch, Recents swipe -> reopen keeps the
-  agent session, Back -> background, notification Quit, and a process kill -> revive.
+  receiver, all 892 framework permissions, seamless `replace` + `Vault`. **Installed 2026-10-30
+  (commit 32c3cf8):** boots the v1 bundle on the window, control channel works (app.observe ok).
+  Still to verify on device: Recents swipe -> reopen keeps the agent session, Back -> background,
+  notification Quit, process kill -> revive.
 - Hot bundle `061fd2ce` published (Power: `/awake`, screen on while visible, partial wake lock,
   Back to background, battery-exemption request; Main/Chat/Development `attach`). It is a v1
   bundle (`start`, no `boot`): with the new host it waits for a window, then keeps running across

@@ -41,7 +41,7 @@ Current cross-model handoff: read [HANDOFF.md](HANDOFF.md). The current construc
   primitive, debug screen or self-hosted build works.
 
 ## Ground rules
-- Trough is the OS, in ONE Android app replacing the Forge VM. Target device: Pixel 7 (Tensor G2,
+- Trough is the OS, in ONE Android app replacing the Forge VM. Target device: Pixel 7a (Tensor G2,
   arm64, Mali-G710, Android 17), sideloaded, targetSdk 28 (needed to exec binaries from app storage).
 - The fixed APK (the host) exposes platform mechanisms; replaceable modules own policy (including
   native modules). Manifest declarations do not replace runtime grants or Android restrictions.
