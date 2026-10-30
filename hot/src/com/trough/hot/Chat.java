@@ -58,6 +58,7 @@ final class Chat implements Agent.Listener {
         this.home = home;
         this.reload = reload;
         a.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+        Power.start(a, home);
         LinearLayout col = new LinearLayout(a);
         col.setOrientation(LinearLayout.VERTICAL);
         col.setBackgroundColor(BG);
@@ -216,7 +217,10 @@ final class Chat implements Agent.Listener {
         };
     }
 
-    void close() { if (session != null) session.close(); }
+    void close() {
+        Power.stop();
+        if (session != null) session.close();
+    }
 
     private void submit() {
         String text = input.getText().toString().trim();
@@ -237,8 +241,14 @@ final class Chat implements Agent.Listener {
             note("Tap the status line to pick the agent (" + android.text.TextUtils.join(", ", agents.keySet()) + ").\n"
                 + "/login  sign claude in on this phone (its own login, not the VM's)\n"
                 + "/key <secret>  API key for a model Trough runs itself (home/.trough/models.json)\n"
+                + "/awake  keep Trough running: screen, cpu, back, battery exemption, child processes\n"
                 + "/reload  rebuild Trough from files/src now (it also does this after every turn)\n"
                 + "/help  this list");
+            return;
+        }
+        if (text.equals("/awake") || text.startsWith("/awake ")) {
+            input.setText("");
+            note(Power.command(text.substring(6)));
             return;
         }
         if (text.equals("/login")) {
