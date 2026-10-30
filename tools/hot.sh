@@ -28,6 +28,9 @@ if command -v "${CLANG:-clang-19}" >/dev/null && DEPS="$("$ROOT/tools/bionic-dep
     cp "${TROUGH_CACHE:-$HOME/.cache/trough-sysroot}/deb/ndk-sysroot_30_aarch64.deb" "$B/native/bionic-inputs/ndk-sysroot.deb"
     cp "$SQLITE_SRC/sqlite3.c" "$SQLITE_SRC/sqlite3.h" "$B/native/bionic-inputs/"
     cp -r "$BIONIC_INCLUDE" "$B/native/bionic-inputs/include"
+    mkdir -p "$B/native/bionic-inputs/harfbuzz"
+    cp "$HARFBUZZ_SRC"/*.cc "$HARFBUZZ_SRC"/*.hh "$HARFBUZZ_SRC"/*.h "$HARFBUZZ_SRC/../COPYING" "$B/native/bionic-inputs/harfbuzz/"
+    export HB_CACHE="${TROUGH_CACHE:-$HOME/.cache/trough-sysroot}/hb-objects"
 else
     echo "hot.sh: no bionic toolchain/inputs; bundle has no android-* outputs" >&2
 fi
@@ -119,4 +122,5 @@ cp "$B/bundle.sig" "$PUBLISH/.bundle.sig.tmp"
 mv -f "$PUBLISH/.bundle.sig.tmp" "$PUBLISH/bundle.sig"
 cp "$B/bundle.zip" "$PUBLISH/.bundle.zip.tmp"
 mv -f "$PUBLISH/.bundle.zip.tmp" "$PUBLISH/bundle.zip"
+touch "$PUBLISH/bundle.zip" "$PUBLISH/bundle.sig"   # shared storage keeps the replaced file's mtime across rename; the phone polls mtime
 echo "published $(sha256sum "$PUBLISH/bundle.zip" | cut -c1-8) ($(stat -c %s "$PUBLISH/bundle.zip") bytes) -> $PUBLISH"
