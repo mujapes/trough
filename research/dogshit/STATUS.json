@@ -1,13 +1,18 @@
 {
   "branch": "claude/troughs-nlp-research-fmilgw",
   "updated": "2026-10-31",
-  "phase": "0-setup: harness under construction; no evaluations run",
+  "phase": "0-setup: HALTED by user budget correction (promotional credit cannot be verified; weekly allowance not authorized). Harness partially written, NOT run or tested.",
   "tests_run": [],
   "evaluations_run": [],
-  "credit_monitoring": "Not observable. get_session exposes only rate_limit_info (seven_day window, status allowed_warning, isUsingOverage=false); no promotional balance figure is exposed to this session.",
+  "credit_monitoring": "Not observable. get_session exposes only rate_limit_info {rateLimitType: seven_day, status: allowed_warning, isUsingOverage: false, resetsAt: 1793635200}; no promotional balance or billing source is exposed, so a stop-before-weekly-allowance boundary cannot be guaranteed from inside the session.",
   "limitations": [
     "No prior Dogshit material exists in the repository; design is derived from DESIGN.md semantic substrate (records, revisions, derivations, effects).",
     "Model subjects can only be Claude subagents of this cloud session; no API sampling-parameter control (temperature) is available."
   ],
-  "next_experiment": "Build generator, renderers (NL, constrained English, JS), reference interpreter, compiled-Python and node cross-check oracles; preregister protocol before any model run."
+  "next_experiment": "When authorized: NL and constrained-English renderers plus CE parser; self-tests (interpreter vs compiled Python vs node JS agreement, round trip, mutant detection); commit PROTOCOL.md preregistration before any model run.",
+  "files": {
+    "dogshit/program.py": "AST, reference interpreter, seeded program/event generators, held-out composition features (unexecuted)",
+    "dogshit/render_code.py": "reference Python lowering and JavaScript renderer (unexecuted)"
+  },
+  "blocker": "Research halted until the user can guarantee the promotional-credit-only boundary."
 }
