@@ -1,0 +1,13 @@
+{
+  "branch": "claude/troughs-nlp-research-fmilgw",
+  "updated": "2026-10-31",
+  "phase": "0-setup: harness under construction; no evaluations run",
+  "tests_run": [],
+  "evaluations_run": [],
+  "credit_monitoring": "Not observable. get_session exposes only rate_limit_info (seven_day window, status allowed_warning, isUsingOverage=false); no promotional balance figure is exposed to this session.",
+  "limitations": [
+    "No prior Dogshit material exists in the repository; design is derived from DESIGN.md semantic substrate (records, revisions, derivations, effects).",
+    "Model subjects can only be Claude subagents of this cloud session; no API sampling-parameter control (temperature) is available."
+  ],
+  "next_experiment": "Build generator, renderers (NL, constrained English, JS), reference interpreter, compiled-Python and node cross-check oracles; preregister protocol before any model run."
+}
