@@ -62,7 +62,7 @@ final class MediaPanel {
         Session(Context context) { this.context=context;audio=(AudioManager)context.getSystemService(Context.AUDIO_SERVICE); }
         public Object invoke(Object proxy,Method method,Object[] args) {
             String op=(String)args[0];
-            if("openMusic".equals(op))open(Uri.parse((String)args[1]),(String)args[2]);
+            if("openMusic".equals(op))open(Uri.parse((String)args[1]),(String)args[2],true);
             else if("musicControl".equals(op)){String action=(String)args[1];int value=((Number)args[2]).intValue();if("toggle".equals(action)){if(playing)pause();else start();}else if("pause".equals(action))pause();else if("seek".equals(action)&&ready&&player!=null)player.seekTo(Math.max(0,Math.min(duration,value)));}
             else if("show".equals(op)) show((Activity)args[1]);
             else if("attach".equals(op)) { activity=(Activity)args[1];if(activity==null && dialog!=null) dialog.dismiss(); }
@@ -120,8 +120,9 @@ final class MediaPanel {
             Button b=new Button(c);b.setText(label);b.setAllCaps(false);b.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { action.run(); }});
             box.addView(b);return b;
         }
-        private void open(final Uri source,String label) {
-            String scheme=source.getScheme();if(!"content".equals(scheme) && !"file".equals(scheme)) { error="Choose a local audio or video document";paint();return; }
+        private void open(final Uri source,String label) { open(source,label,false); }
+        private void open(final Uri source,String label,boolean musicStream) {
+            String scheme=source.getScheme();if(!MusicSourcePolicy.allowed(scheme,source.getHost(),musicStream)) { error=musicStream?"No playable HTTPS music stream":"Choose a local audio or video document";paint();return; }
             final MediaPlayer previous=player;player=null;ready=false;playing=false;duration=0;error="";uri=source.toString();title=label==null?"Local media":label;
             if(previous!=null) io.execute(new Runnable() { public void run() { previous.release(); }});
             final MediaPlayer next=new MediaPlayer();player=next;next.setAudioStreamType(AudioManager.STREAM_MUSIC);

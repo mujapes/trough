@@ -845,6 +845,9 @@ final class Chat implements Agent.Listener {
         scheduleCosmicRestore();
         resumeResident();
         NativeHomePanel.pending(a,root,inputLayer,input);
+        // Populate the replacement before its first draw, not the next one-second poll.
+        NativeHomePanel.working(root,busy,Main.liveReloadState(),workChecks,activityAge(lastAgentActivityAt));
+        if(NativeHomePanel.wantsTrace(root))NativeHomePanel.trace(root,nativeHomeTrace());
         root.post(new Runnable(){public void run(){restoreHalfSwordPreview();ClaudeSignIn.restore(root);}});
     }
 

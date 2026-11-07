@@ -9,8 +9,14 @@
   "validation": "All 264 synced Java files compile against Android API; local source git fsck clean and working tree clean. Inbox 125 filesystem checks and viewport 8 checks previously passed. Imported vendor whitespace retained byte-for-byte; native rebuild and public CI not rerun.",
   "scope": "Source only; no app-private state, credentials, transcripts or original game assets.",
   "additional_working_source": {
-    "Chat.java": "938e4cfcd2ef79aafdd5a37e73e81d8c57808f728b4f31c465d3776095635690",
-    "TranscriptRowIdentity.java": "5539395c5d54f99901ea7057b83c3338509ecf658a0236c0fd5c60ff5c520750"
+    "Chat.java": "0312b059295d0106540e069cd5f1bbf0adff10377cea99a53f140b319197f755",
+    "TranscriptRowIdentity.java": "5539395c5d54f99901ea7057b83c3338509ecf658a0236c0fd5c60ff5c520750",
+    "NativeHomePanel.java": "9d9dd6d8523bf51eef55730fd75887264db86242529edbdb29063ae4e0f1787b",
+    "NativeAppCatalog.java": "b706fd1566fc614e3df79d47e6cc120d732ff6b91ed8199ce94eabcf663cc5fa",
+    "NativeIconLoader.java": "be8205cdeab5b4c4118304b8a2b658762e36cc7dc42ebc02944cf9dc55873764",
+    "WindowFrameRecorder.java": "f3c57bbc1713bc2ff4a551cfea518b20551eb24e7016194906033fec9f9dd0d7",
+    "MediaPanel.java": "65cac0646e07162c40b8ab02863c720070f164800a02520b4c202d2dee120d2b",
+    "MusicSourcePolicy.java": "d9ab2c5028701f17f1d446eed8ad237ba35a1afa16105d6afdf4b9a429bab14e"
   },
-  "followup": "Per-row native transcript reuse repair; exact identity9 checks and viewport8 checks pass, live warm-reload timing pending."
+  "followup": "Catalog cache, recycled app rows, first-frame trace initialization, input timing correction and explicit HTTPS Music player route; targeted Java8 and9 Music source-policy checks passed. Native activation/visual Music playback verification remains pending."
 }
