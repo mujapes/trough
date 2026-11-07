@@ -11,7 +11,7 @@
   "additional_working_source": {
     "Chat.java": "0312b059295d0106540e069cd5f1bbf0adff10377cea99a53f140b319197f755",
     "TranscriptRowIdentity.java": "5539395c5d54f99901ea7057b83c3338509ecf658a0236c0fd5c60ff5c520750",
-    "NativeHomePanel.java": "b97914015a90094bcbbdfd11c8d642bb9227b6ec92d26bc8ebf029f988a5029b",
+    "NativeHomePanel.java": "ce6b935e34900f22e8e08742285cf23345ccfd80b8c9f431db86f584d4a58339",
     "NativeAppCatalog.java": "b706fd1566fc614e3df79d47e6cc120d732ff6b91ed8199ce94eabcf663cc5fa",
     "NativeIconLoader.java": "be8205cdeab5b4c4118304b8a2b658762e36cc7dc42ebc02944cf9dc55873764",
     "WindowFrameRecorder.java": "f3c57bbc1713bc2ff4a551cfea518b20551eb24e7016194906033fec9f9dd0d7",
@@ -21,5 +21,5 @@
     "NativeMusicCheck.java": "776724796b348724dd593458c279fa860cde48c82aba3436054df33feba76c64",
     "NativeAppReference.java": "4ecfa5cb10af47ede1ea17e3615adc355c6bdb8b7072d6c81b7fdce0e29c20b7"
   },
-  "followup": "Production Music bridge preparation passed with no audio; mixing path implemented, internal Music controller verified without external activity. Shared keyboard overlap repair compiled, native geometry/visual activation check pending."
+  "followup": "Three adjacent direct Trace Off/Glass/Solid controls; keyboard-overlap repair compiled. Latest visual activation still pending during in-flight reload."
 }
