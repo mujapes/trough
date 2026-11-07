@@ -213,6 +213,11 @@ final class Chat implements Agent.Listener {
         if(closed || autoSendHeld || keyboardGestureActive || !autoSendArmed) return;
         long remaining=AUTO_SEND_PAUSE_MS-(android.os.SystemClock.uptimeMillis()-draftEditedAt);
         if(remaining>0) { MAIN.postDelayed(this,remaining); return; }
+        // A focused app field owns typing. Preserve the prompt until its editor is selected again.
+        if(appFieldFocused()) {
+            draftEditedAt=android.os.SystemClock.uptimeMillis();
+            MAIN.postDelayed(this,300); return;
+        }
         // Never send while the app is hidden, a finger is down, or an IME owns unfinished text.
         if(!AutoSendVisibility.allows(input.isShown(),new File(a.getFilesDir(),"home/.trough/keyboard-only").isFile() || new File(a.getFilesDir(),"home/.trough/visual-only").isFile(),root.isShown(),keyboard.isShown(),root.getWindowVisibility()==View.VISIBLE)
             || keyboard.hasPendingPress() || android.view.inputmethod.BaseInputConnection.getComposingSpanStart(input.getText())>=0) {
@@ -533,7 +538,7 @@ final class Chat implements Agent.Listener {
         ScrollView workViewport=halfSwordProgress.detachOutputViewport();workViewport.setBackgroundColor(android.graphics.Color.TRANSPARENT);workLane.addView(workViewport,new FrameLayout.LayoutParams(-1,-1));thoughtLane.addView(scroll,new FrameLayout.LayoutParams(-1,-1));
         outputStack.addView(workLane,new FrameLayout.LayoutParams(-1,-1));outputStack.addView(thoughtLane,new FrameLayout.LayoutParams(-1,-1));outputPane.addView(outputStack,new LinearLayout.LayoutParams(-1,0,1));
         if(state!=null&&state.get("outputTab") instanceof String)root.setTag(0x7f0d74d0,state.get("outputTab"));
-        final Runnable chooseOutput=new Runnable(){public void run(){boolean work="work".equals(root.getTag(0x7f0d74d0));if(input!=null&&work!=draftForWork){if(enqueuePending){root.setTag(0x7f0d74d0,draftForWork?"work":"thought");return;}if(draftForWork)workDraft=input.getText().toString();else thoughtDraft=input.getText().toString();MAIN.removeCallbacks(autoSubmit);autoSendArmed=false;input.clearCountdown();suppressAutoSend=true;try{input.setText(work?workDraft:thoughtDraft);input.setSelection(input.length());}finally{suppressAutoSend=false;}lastScheduledDraft=null;}draftForWork=work;workLane.setVisibility(work?View.VISIBLE:View.GONE);thoughtLane.setVisibility(work?View.GONE:View.VISIBLE);historyBar.setVisibility(work?View.GONE:View.VISIBLE);workTab.setSelected(work);thoughtTab.setSelected(!work);workTab.setText(work?"Half Sword ✓":"Half Sword");thoughtTab.setText(work?"Chat":"Chat ✓");}};outputSelection=chooseOutput;
+        final Runnable chooseOutput=new Runnable(){public void run(){boolean work="work".equals(root.getTag(0x7f0d74d0));if(input!=null&&work!=draftForWork){if(enqueuePending){root.setTag(0x7f0d74d0,draftForWork?"work":"thought");return;}if(draftForWork)workDraft=input.getText().toString();else thoughtDraft=input.getText().toString();MAIN.removeCallbacks(autoSubmit);autoSendArmed=false;input.clearCountdown();suppressAutoSend=true;try{input.setText(work?workDraft:thoughtDraft);input.setSelection(input.length());}finally{suppressAutoSend=false;}lastScheduledDraft=null;}draftForWork=work;workLane.setVisibility(work?View.VISIBLE:View.GONE);thoughtLane.setVisibility(work?View.GONE:View.VISIBLE);historyBar.setVisibility(work?View.GONE:View.VISIBLE);workTab.setSelected(work);thoughtTab.setSelected(!work);workTab.setText(work?"Half Sword ✓":"Half Sword");thoughtTab.setText(work?"Chat":"Chat ✓");if(composerReady&&!enqueuePending)queueAutoSubmit();}};outputSelection=chooseOutput;
         workTab.setOnClickListener(new View.OnClickListener(){public void onClick(View v){root.setTag(0x7f0d74d0,"work");chooseOutput.run();}});thoughtTab.setOnClickListener(new View.OnClickListener(){public void onClick(View v){root.setTag(0x7f0d74d0,"thought");chooseOutput.run();}});chooseOutput.run();
         conversationPanes.addView(outputPane,new LinearLayout.LayoutParams(0,-1,2));
         col.addView(conversationPanes,new LinearLayout.LayoutParams(-1,0,1));
@@ -698,8 +703,7 @@ final class Chat implements Agent.Listener {
         restore(state);
         suppressAutoSend=true;try{input.setText(draftForWork?workDraft:(thoughtDraft.isEmpty()?input.getText().toString():thoughtDraft));input.setSelection(input.length());}finally{suppressAutoSend=false;}
         composerReady=true;
-        if(state!=null && input.length()>0 && (Boolean.TRUE.equals(state.get("autoSendArmed"))
-            || Boolean.TRUE.equals(state.get("autoSendHeld")))) {
+        if(state!=null && input.length()>0) {
             autoSendArmed=true;
             Object edited=state.get("draftEditedAt");
             draftEditedAt=!Boolean.TRUE.equals(state.get("autoSendHeld")) && edited instanceof Number
@@ -2134,7 +2138,13 @@ final class Chat implements Agent.Listener {
         nativeTraceInputs=inputs;nativeTraceCached=NativeHomePanel.traceMode(root)==2?NativeTraceRenderer.history(body,range[0],total-range[1],toggle):body;return nativeTraceCached;
     }
 
+    private boolean appFieldFocused() {
+        View focused=root.findFocus();
+        return focused instanceof android.widget.EditText && focused!=input && focused.isShown();
+    }
+
     private void submit() {
+        if(appFieldFocused()) return;
         MAIN.removeCallbacks(autoSubmit); autoSendArmed=false; input.clearCountdown();
         String text = input.getText().toString().trim();
         if(text.equals("/work") || text.startsWith("/work ")) {

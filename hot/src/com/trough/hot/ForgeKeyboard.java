@@ -37,7 +37,8 @@ final class ForgeKeyboard extends LinearLayout implements AutoCloseable {
     private android.media.SoundPool instrument;
     private final int[] notes=new int[15];
     private void playNote(int key){if(instrument!=null && key>=0)instrument.play(notes[key%notes.length],.22f,.22f,1,0,1f);}
-    private final EditText editor;
+    private EditText editor;
+    private final EditText promptEditor;
     private final View nativeOwner;
     private final LinearLayout powerRow;
     private final LinearLayout[] rows=new LinearLayout[3];
@@ -89,7 +90,7 @@ final class ForgeKeyboard extends LinearLayout implements AutoCloseable {
     ForgeKeyboard(Context context, EditText editor, Runnable send,View nativeOwner) {
         super(context);
         this.nativeOwner=nativeOwner;
-        this.editor=editor;
+        this.editor=editor; this.promptEditor=editor;
         if(new java.io.File(context.getFilesDir(),"home/.trough/musical-keyboard").isFile()) {
             try {instrument=new android.media.SoundPool.Builder().setMaxStreams(12).setAudioAttributes(new android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_GAME).setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC).build()).build();
                 for(int i=0;i<notes.length;i++)notes[i]=instrument.load(new java.io.File(context.getFilesDir(),"home/.trough/media/keys/"+i+".wav").getPath(),1);
@@ -337,7 +338,16 @@ final class ForgeKeyboard extends LinearLayout implements AutoCloseable {
         return true;
     }
 
+    /** Pin one field for the entire gesture; selecting an app field never edits the AI draft. */
+    private void selectEditor() {
+        if(!presses.isEmpty()) return;
+        View focused=nativeOwner==null?null:nativeOwner.findFocus();
+        editor=focused instanceof EditText && focused.isShown() && focused.isEnabled()
+            ?(EditText)focused:promptEditor;
+    }
+
     private void act(String action) {
+        selectEditor();
         if(closed || !isEnabled() || !editor.isEnabled()) return;
         String value=action;
         boolean letter=action.length()==1 && Character.isLetter(action.charAt(0));
@@ -652,6 +662,7 @@ final class ForgeKeyboard extends LinearLayout implements AutoCloseable {
             return true;
         }
         @Override public boolean onTouchEvent(MotionEvent event) {
+            if(event.getActionMasked()==MotionEvent.ACTION_DOWN) selectEditor();
             if(closed || getVisibility()!=VISIBLE || ForgeKeyboard.this.getVisibility()!=VISIBLE
                 || !isEnabled() || !ForgeKeyboard.this.isEnabled() || !editor.isEnabled()) {
                 cancelTouch(this); return false;
