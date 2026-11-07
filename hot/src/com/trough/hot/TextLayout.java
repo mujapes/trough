@@ -70,6 +70,7 @@ final class TextLayout {
             .setJustificationMode(LineBreaker.JUSTIFICATION_MODE_NONE).build();
         LineBreaker.ParagraphConstraints constraints = new LineBreaker.ParagraphConstraints();
         constraints.setWidth(width);
+        constraints.setTabStops(null, 20);
         LineBreaker.Result result = breaker.computeLineBreaks(measured, constraints, 0);
         boolean paragraphRtl = !bidi.baseIsLeftToRight();
         int lineStart = 0;

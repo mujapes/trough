@@ -1,0 +1,16 @@
+package com.trough.hot;
+import android.os.*;import android.view.KeyEvent;import java.io.File;import org.json.JSONObject;
+/** Native View key dispatch; no hardware-injection or OS focus claim. */
+final class HalfSwordKeysCheck implements Runnable {
+ final HalfSwordView view;final HalfSwordAimCheck input;final Handler ui=new Handler(Looper.getMainLooper());final long began=SystemClock.uptimeMillis();int stage,steps;long paused;boolean diagonal,retained,repeat,cancelled;
+ HalfSwordKeysCheck(HalfSwordView v){view=v;input=new HalfSwordAimCheck(v);}void start(){ui.postDelayed(this,150);}void need(boolean b,String why)throws Exception{if(!b)throw new Exception(why);}
+ void key(int action,int code,int count)throws Exception{long now=SystemClock.uptimeMillis();need(view.bodyPushPad.dispatchKeyEvent(new KeyEvent(now,now,action,code,count)),"Key rejected");}
+ public void run(){try{need(SystemClock.uptimeMillis()-began<15000,"Key check timeout");need(view.isAttachedToWindow()&&view.renderVisible,"Scene unavailable");switch(stage){
+ case 0:if(view.characterRunning)input.click("Run / pause");input.click("Reset physics");input.click("Stance support setup");stage=1;break;
+ case 1:if(view.resetPending())break;key(0,KeyEvent.KEYCODE_DPAD_UP,0);stage=2;break;
+ case 2:if(view.characterBusy||view.characterSteps<1)break;input.observation();steps=view.characterSteps;key(0,KeyEvent.KEYCODE_DPAD_UP,1);repeat=true;key(0,KeyEvent.KEYCODE_DPAD_RIGHT,0);diagonal=view.bodyPushX>0&&view.bodyPushForward>0&&Math.abs(Math.hypot(view.bodyPushX,view.bodyPushForward)-1)<1e-6;need(diagonal,"Diagonal command missing");stage=3;break;
+ case 3:if(view.characterBusy||view.characterSteps<=steps)break;need(view.characterSteps==steps+1,"Repeat queued extra paused steps");steps=view.characterSteps;key(1,KeyEvent.KEYCODE_DPAD_RIGHT,0);retained=view.bodyPushActive&&view.bodyPushX==0&&view.bodyPushForward==1;need(retained,"Releasing right cancelled held up");view.cancelAllTouchInputs();cancelled=!view.bodyPushActive&&view.bodyPushPad.keys.held==0;need(cancelled,"Cancel retained keys");key(1,KeyEvent.KEYCODE_DPAD_UP,0);need(!view.bodyPushActive,"Late release revived movement");paused=SystemClock.uptimeMillis();stage=4;break;
+ case 4:if(SystemClock.uptimeMillis()-paused<500)break;need(view.characterSteps==steps&&!view.characterRunning&&!view.bodyPushActive,"Key release continued stepping");finish(null);return;
+ }ui.postDelayed(this,100);}catch(Throwable error){view.characterRunning=false;view.cancelAllTouchInputs();finish(error.toString());}}
+ void finish(String error){try{JSONObject d=new JSONObject();d.put("passed",error==null).put("error",error==null?"":error).put("stage",stage).put("diagonal",diagonal).put("release_retains_other_key",retained).put("repeat_not_extra_step",repeat&&view.characterSteps==2).put("cancel_clears_keys",cancelled).put("physics_steps",view.characterSteps).put("module",HalfSwordBridge.loadedModuleSha256).put("time_ms",System.currentTimeMillis()).put("scope","Native View dispatchKeyEvent on paused supported fighter; no OS hardware keyboard/focus claim");Payloads.writeSmall(new File(view.getContext().getFilesDir(),"home/.trough/half-sword-keys-check-result.json"),d.toString());}catch(Exception e){android.util.Log.e("Trough","Keys check receipt",e);}}
+}

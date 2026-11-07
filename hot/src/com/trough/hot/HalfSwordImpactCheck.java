@@ -1,0 +1,23 @@
+package com.trough.hot;
+import android.os.*;import android.graphics.Rect;import android.view.*;import android.widget.Button;import java.io.File;import org.json.*;
+/** One-shot impact delivery and coexistence with both input owners + grip. */
+final class HalfSwordImpactCheck implements Runnable {
+ final HalfSwordView view;final HalfSwordAimCheck input;final Handler ui=new Handler(Looper.getMainLooper());final long began=SystemClock.uptimeMillis();int stage,steps;long grip;JSONObject before,after,held;boolean pausedSingle,ownersRetained,resetCleared;double movement;
+ HalfSwordImpactCheck(HalfSwordView v){view=v;input=new HalfSwordAimCheck(v,true,true);}void start(){ui.postDelayed(this,150);}void need(boolean yes,String why)throws Exception{if(!yes)throw new Exception(why);}
+ public void run(){try{need(SystemClock.uptimeMillis()-began<22000,"Impact timeout");need(view.isAttachedToWindow()&&view.renderVisible&&!view.characterFailed,"Scene unavailable");
+ switch(stage){
+ case 0:Button bump=HalfSwordViewCheck.button(view.controlsRoot(),"Bump torso");need(bump!=null,"Impact control missing");if(!bump.isShown())input.click("Simulator controls");stage=13;break;
+ case 13:Button visible=HalfSwordViewCheck.button(view.controlsRoot(),"Bump torso");visible.requestRectangleOnScreen(new Rect(0,0,visible.getWidth(),visible.getHeight()),true);Rect rect=new Rect();if(!visible.getGlobalVisibleRect(rect)||rect.height()<HalfSwordView.dp(view.getContext(),36))break;input.click("Reset physics");stage=1;break;
+ case 1:if(view.resetPending())break;need(view.requestCharacterStep(),"Initial step rejected");stage=2;break;
+ case 2:if(view.characterBusy||view.characterSteps<1)break;if(!view.weaponHoldEnabled)input.click("Compliant hold · prototype");input.click("Run / pause");steps=view.characterSteps;stage=3;break;
+ case 3:if(view.characterSteps-steps<60)break;input.observation();input.click("Run / pause");input.pausedSteps=-1;stage=4;break;
+ case 4:if(!input.pausedScene(false))break;before=input.observation();steps=view.characterSteps;input.click("Bump torso");stage=5;break;
+ case 5:if(view.characterBusy||view.torsoBumpFrames<1)break;need(!view.characterRunning&&view.characterSteps==steps+1&&view.torsoBumpFrames==1&&!view.torsoBumpPending,"Paused bump repeated or failed");after=input.observation();JSONArray a=before.getJSONArray("pelvis_velocity_cm_s"),b=after.getJSONArray("pelvis_velocity_cm_s");need(Math.hypot(b.getDouble(0)-a.getDouble(0),b.getDouble(1)-a.getDouble(1))>5,"Bump response too small");pausedSingle=true;input.click("Run / pause");steps=view.characterSteps;stage=6;break;
+ case 6:if(view.characterSteps-steps<60)break;need(view.torsoBumpFrames==1,"Bump repeated later");before=input.observation();grip=view.weaponGripReactionFrames;input.body(MotionEvent.ACTION_DOWN);input.aimEvent(MotionEvent.ACTION_DOWN,30,30);need(view.touchCapture.owners()==3,"Both pads unavailable");input.click("Bump torso");need(view.touchCapture.owners()==3&&view.bodyPushActive,"Bump canceled held input");ownersRetained=true;steps=view.characterSteps;stage=7;break;
+ case 7:if(view.characterSteps-steps<90)break;held=input.observation();need(view.torsoBumpFrames==2&&view.weaponHeld&&view.weaponGripReactionFrames>grip&&view.physicalAimApplied&&view.touchCapture.owners()==3,"Impact/grip/input coexistence failed");JSONArray x=before.getJSONArray("pelvis_cm"),y=held.getJSONArray("pelvis_cm");movement=Math.hypot(y.getDouble(0)-x.getDouble(0),y.getDouble(1)-x.getDouble(1));need(movement>30,"Movement lost during impact");input.body(MotionEvent.ACTION_CANCEL);input.aimEvent(MotionEvent.ACTION_CANCEL,30,30);input.click("Run / pause");input.pausedSteps=-1;stage=8;break;
+ case 8:if(!input.pausedScene(true))break;input.click("Reset physics");stage=9;break;
+ case 9:if(view.resetPending())break;need(view.torsoBumpFrames==0&&!view.torsoBumpPending,"Reset retained impact");resetCleared=true;input.click("Simulator controls");finish(null);return;
+ }ui.postDelayed(this,100);
+ }catch(Throwable error){view.characterRunning=false;view.cancelAllTouchInputs();finish(error.toString());}}
+ void finish(String error){try{JSONObject out=new JSONObject();out.put("passed",error==null).put("error",error==null?"":error).put("stage",stage).put("paused_one_frame",pausedSingle).put("held_inputs_retained",ownersRetained).put("reset_cleared",resetCleared).put("movement_cm",movement).put("paused_bump_observation",after).put("held_observation",held).put("module",HalfSwordBridge.loadedModuleSha256).put("time_ms",System.currentTimeMillis());Payloads.writeSmall(new File(view.getContext().getFilesDir(),"home/.trough/half-sword-impact-check-result.json"),out.toString());}catch(Exception e){android.util.Log.e("Trough","Impact receipt failed",e);}}
+}

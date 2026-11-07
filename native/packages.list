@@ -1,3 +1,10 @@
 libsqlite3-dev
 clang-19
 lld-19
+debconf
+perl-base
+perl
+base-files
+python3
+apktool
+dexdump

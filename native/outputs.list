@@ -1,6 +1,7 @@
 bin/bench
 bin/probe
 bin/texec
+bin/hostexec
 bin/threadtest
 bin/dnstest
 bin/nsprobe

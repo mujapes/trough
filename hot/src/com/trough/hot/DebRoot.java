@@ -23,7 +23,7 @@ final class DebRoot {
     private DebRoot() {}
 
     static String install(Context ctx, String zipPath) throws Exception {
-        File data = ctx.getDataDir(), d = new File(data, "d");
+        File data = Root.os(), d = new File(data, "d");
         String sha = new File(zipPath).getName();
         File marker = new File(d, ".payload-" + sha);
         if (marker.exists()) return "current";
@@ -64,7 +64,7 @@ final class DebRoot {
     }
 
     /** A root dpkg owns: from here on it is never replaced, only converged. */
-    static boolean present(Context ctx) { return new File(ctx.getDataDir(), "d/var/lib/dpkg/status").exists(); }
+    static boolean present(Context ctx) { return new File(Root.os(), "d/var/lib/dpkg/status").exists(); }
 
     /**
      * Trough's own files in d/ (tools/root.sh OWNED: apt.conf, sources, wrappers, tfix, the
@@ -72,7 +72,8 @@ final class DebRoot {
      * bundle's rootfiles/, each replaced by rename. Nothing dpkg owns is touched.
      */
     static String converge(Context ctx, File bundle) throws Exception {
-        File src = new File(bundle, "rootfiles"), d = new File(ctx.getDataDir(), "d");
+        if (Root.guest()) return "guest: shares the host's root";
+        File src = new File(bundle, "rootfiles"), d = new File(Root.os(), "d");
         if (!new File(src, "files").isDirectory()) return "bundle has no rootfiles";
         int files = copy(new File(src, "files"), d, "");
         int links = 0;
@@ -117,7 +118,8 @@ final class DebRoot {
      * changed since the last success. Idempotent: what is installed stays; nothing is removed.
      */
     static JSONObject packages(Context ctx, File bundle) throws Exception {
-        File list = new File(bundle, "rootfiles/packages.txt"), d = new File(ctx.getDataDir(), "d");
+        if (Root.guest()) return new JSONObject().put("skipped", "guest: shares the host's root");
+        File list = new File(bundle, "rootfiles/packages.txt"), d = new File(Root.os(), "d");
         JSONObject r = new JSONObject();
         if (!list.exists()) return r.put("skipped", "bundle has no package list");
         String want = new String(Payloads.readSmall(list), "UTF-8").trim();
@@ -132,10 +134,53 @@ final class DebRoot {
         File w = new File(ctx.getCacheDir(), "rootpkgs");
         w.mkdirs();
         JSONObject update = SelfTest.exec(w, ctx, null, 600, d + "/usr/local/bin/apt-get", "update");
+        r.put("update", update);
+        // Packages the bootstrap root only seeded into dpkg's status (tools/root.sh EXCLUDE) are
+        // "installed" with no files, so install skips them. Reinstall the listed hollow ones FIRST:
+        // others' maintainer scripts need them (tzdata's postinst sources debconf, phone 10-30).
+        boolean ok = true;
+        java.util.List<String> hollow = new java.util.ArrayList<>();
+        for (String p : want.split("\n")) if (!p.trim().isEmpty() && hollow(d, p.trim())) hollow.add(p.trim());
+        if (!hollow.isEmpty()) {
+            java.util.List<String> re = new java.util.ArrayList<>();
+            re.add(d + "/usr/local/bin/apt-get");
+            re.add("install");
+            re.add("-y");
+            re.add("--reinstall");
+            re.add("--no-install-recommends");
+            re.addAll(hollow);
+            JSONObject reinstall = SelfTest.exec(w, ctx, null, 1800, re.toArray(new String[0]));
+            r.put("reinstall", reinstall).put("hollow", new org.json.JSONArray(hollow));
+            ok = reinstall.getInt("exit") == 0;
+        }
         JSONObject install = SelfTest.exec(w, ctx, null, 1800, cmd.toArray(new String[0]));
-        r.put("update", update).put("install", install);
-        if (install.getInt("exit") == 0) Payloads.writeSmall(mark, want);
-        return r.put("ok", install.getInt("exit") == 0);
+        r.put("install", install);
+        ok = ok && install.getInt("exit") == 0;
+        if (ok) Payloads.writeSmall(mark, want);
+        return r.put("ok", ok);
+    }
+
+    /** Installed according to dpkg, but none of its first few regular files exist in the root. */
+    static boolean hollow(File d, String pkg) {
+        if (pkg.equals("libc6") || pkg.equals("libc-bin")) return false;   // Trough's own glibc (l/)
+        File info = new File(d, "var/lib/dpkg/info/" + pkg + ".list");
+        if (!info.exists()) info = new File(d, "var/lib/dpkg/info/" + pkg + ":arm64.list");
+        if (!info.exists()) return false;   // not installed: plain install handles it
+        // tools/root.sh gives seeded packages an EMPTY list; a real package always lists at least
+        // "/." and its doc directory (phone 10-30: debconf was seeded, so nothing was "missing").
+        if (info.length() == 0) return true;
+        int checked = 0;
+        try {
+            for (String line : new String(Payloads.readSmall(info), "UTF-8").split("\n")) {
+                File f = new File(d, line);
+                if (line.isEmpty() || line.equals("/.") || f.isDirectory()) continue;
+                if (f.exists()) return false;
+                if (++checked >= 3) break;
+            }
+        } catch (Exception e) {
+            return false;
+        }
+        return checked > 0;
     }
 
     private static java.util.List<String> lines(File f) throws Exception {

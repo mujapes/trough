@@ -37,6 +37,7 @@ final class Payloads {
         dir(ctx).mkdirs();
         for (Iterator<String> it = wanted.keys(); it.hasNext(); ) {
             String name = it.next(), sha = wanted.getString(name);
+            if(!sha.matches("[a-f0-9]{64}")) throw new SecurityException("invalid payload hash: "+name);
             if (skip != null && skip.contains(name)) continue;
             File local = new File(dir(ctx), sha);
             if (!local.exists()) {
@@ -51,8 +52,11 @@ final class Payloads {
                 if (!tmp.renameTo(local)) throw new IllegalStateException("rename " + local);
                 local.setExecutable(true, false);
             }
+            if(!local.setExecutable(true,true)) throw new IllegalStateException("payload permissions: "+name);
             out.put(name, local.getPath());
         }
+        File codex = CodexRuntime.install(dir(ctx), Json.obj(Json.parse(manifest.toString())));
+        if(codex!=null) out.put("codex",codex.getPath());
         return out;
     }
 

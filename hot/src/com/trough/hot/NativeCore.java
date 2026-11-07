@@ -7,6 +7,24 @@ import java.util.*;
  * Each bundle loads its own copy from its own directory: Android ties a loaded library to one
  * ClassLoader, and every hot bundle has a new one. Negative returns are -ts_status. */
 final class NativeCore {
+    static native int shapeInit(String locales);
+    static native int[] bidiLine(char[] text, int start, int end);
+    static native int[][] bidiBatch(char[] text, int[] ranges);
+    static native float[] lineBreaks(char[] text, float[] advances, String locale, float width, float size);
+    static native float[] lineCandidates(char[] text, float[] advances, String locale, float width, float size);
+    static native float[] shapeMetrics(char[] text, boolean rtl, float size, String locale);
+    static native float[] paragraphMeasure(char[] text, String locale, float size, float width, int cancelAfter);
+    static native long[] fontResources();
+    static native float[] defaultMetrics(float size, String locale);
+    static native Object[] layoutParagraph(char[] text, String locale, float size, float width, float left, float top);
+    static native Object[] visualLine(char[] text, String locale, float size, int start, int end,
+                                     float width, float lineWidth, float left, float baseline);
+    static native String shapeOwnership(String locales);
+    static native float[] shapeRun(char[] text, int start, int end, boolean rtl, float size);
+    static native String shapeFace(int face);
+    static native String shapeError();
+    static native int shapeFaceFormats(int face);
+    static native byte[] shapeProbe(char[] text, int start, int end, boolean rtl, float size, float[] queries);
     static native long start(String dir);
     static native void stop(long keeper);
     static native long create(long keeper);
@@ -71,6 +89,8 @@ final class NativeCore {
     static native int deriveFrameOpen(long deriver, int w, int h, int atlasW, int atlasH);
     static native int deriveSurfaceOpen(long deriver, android.view.Surface surface, int w, int h, int atlasW, int atlasH);
     static native byte[] deriveFrame(long deriver, boolean pixels, double[] timing);
+    // Render owner only, after the final frame; may block on GPU fences.
+    static native void deriveFrameClose(long deriver);
     static native void deriveClose(long deriver);
     static native byte[] sceneRender(int w, int h, float[] rects, float[] glyphs, byte[] atlas, int aw, int ah);
     static native byte[] textRender(int w, int h, float[] glyphs, byte[] atlas, int aw, int ah, double[] timing);

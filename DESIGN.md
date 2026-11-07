@@ -9,6 +9,15 @@ below carry over). Read this before implementing any subsystem.
 [Historical decisions and device evidence](docs/IMPLEMENTATION_HISTORY.md) are not a second specification.
 [HANDOFF.md](HANDOFF.md) is the live state for whichever model is building (Claude, GPT/Codex, others).
 
+## Current device development — 2026-11-07
+
+The user now explicitly prioritizes improving the live native Home/chat/input interface as
+part of the operating surface. The October statement below that the console is not being
+polished is historical; it must not prevent these requested UI changes. Continuous authorized
+work runs in bounded turns with actual delivery guards and explicit pause handling. Preserve
+native input, optional output, on-device userland and state-preserving live replacement.
+Visible reload pauses remain a measured defect, not an accepted design tradeoff.
+
 ## Intent
 
 Trough is the user's whole computing environment: an operating system that runs inside one

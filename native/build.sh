@@ -14,8 +14,9 @@ FREE="-O2 -static -nostdlib -ffreestanding -fno-builtin -fno-stack-protector"
 DYN="-Wl,-dynamic-linker,/lib/ld-linux-aarch64.so.1"
 $CC -O2 -static -o "$O/bin/bench" "$S/bench/bench.c"
 $CC $FREE -o "$O/bin/probe" "$S/probe/probe.c"
-$CC $FREE -Wl,-Ttext-segment=0x6f00000000 -o "$O/bin/texec" "$S/texec/texec.c"
+$CC $FREE -I"$S/glibc/outside" -I"$S/glibc" -Wl,-Ttext-segment=0x6f00000000 -o "$O/bin/texec" "$S/texec/texec.c"
 $CC -O2 $DYN -o "$O/bin/threadtest" "$S/threadtest/threadtest.c"
+$CC -O2 -Wall $DYN -o "$O/bin/hostexec" "$S/hostexec/hostexec.c"   # docs/FILESYSTEM.md: host-exec broker
 $CC -O2 $DYN -o "$O/bin/dnstest" "$S/threadtest/dnstest.c"
 $CC -O2 -Wall -Wextra $DYN -o "$O/bin/nsprobe" "$S/nsprobe/nsprobe.c"
 $CC -O2 -Wall -Wextra -shared -fPIC -o "$O/lib/libexecmap.so" "$S/execmap/execmap.c" -ldl
@@ -61,7 +62,9 @@ if [ -d "$S/bionic-inputs" ]; then
     X=$(mktemp -d)
     dpkg-deb -x "$S/bionic-inputs/ndk-sysroot.deb" "$X"
     BIONIC_SYSROOT="$X/data/data/com.termux/files" SQLITE_SRC="$S/bionic-inputs" \
-        BIONIC_INCLUDE="$S/bionic-inputs/include" sh "$S/bionic.sh" "$S" "$O"
+        BIONIC_INCLUDE="$S/bionic-inputs/include" \
+        HARFBUZZ_SRC="$S/bionic-inputs/harfbuzz" FREETYPE_SRC="$S/bionic-inputs/freetype" \
+        PNG_SRC="$S/bionic-inputs/png" sh "$S/bionic.sh" "$S" "$O"
     rm -rf "$X"
     cat "$S/outputs-bionic.list" >> "$O/outputs.list"
 fi

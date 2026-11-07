@@ -16,6 +16,8 @@ final class ScenarioProtocol {
     interface Handler {
         boolean supports(String scenario);
         Map<String,Object> execute(String scenario) throws Exception;
+        default boolean acceptsParameters(String scenario, Map<String,Object> parameters) { return parameters == null; }
+        default Map<String,Object> execute(String scenario, Map<String,Object> parameters) throws Exception { return execute(scenario); }
     }
     private final File journal;
     private final PublicKey requestKey;
@@ -40,9 +42,13 @@ final class ScenarioProtocol {
         long now=clock.millis(),issued=number(q,"issued_ms"),expires=number(q,"expires_ms");
         result.put("expires_ms",expires);
         Set<String> fields=new HashSet<>(Arrays.asList("version","id","scenario","bundle","runtime","issued_ms","expires_ms"));
-        if(!fields.equals(q.keySet()) || number(q,"version")!=1 || issued<0 || expires<issued ||
+        long version=number(q,"version");
+        Map<String,Object> parameters=null;
+        if(version==2) { fields.add("parameters"); parameters=Json.obj(q.get("parameters")); }
+        if(!fields.equals(q.keySet()) || (version!=1 && version!=2) || (version==2 && parameters==null) || issued<0 || expires<issued ||
             expires-issued>900000 || issued>now+10000 || expires<=now) return reject(result,"schema or expiry");
         if(!handler.supports(scenario)) return reject(result,"unknown scenario");
+        if(!handler.acceptsParameters(scenario,parameters)) return reject(result,"invalid parameters");
         boolean inspect="app.observe".equals(scenario);
         if(!(bundle.equals(Json.str(q,"bundle")) || inspect && "*".equals(Json.str(q,"bundle"))) ||
            !(runtime.equals(Json.str(q,"runtime")) || inspect && "*".equals(Json.str(q,"runtime"))))
@@ -69,7 +75,7 @@ final class ScenarioProtocol {
         result.put("status","accepted"); writeJournal(record,encode(result));
         long started=System.nanoTime();
         try {
-            Map<String,Object> outcome=handler.execute(scenario);
+            Map<String,Object> outcome=handler.execute(scenario,parameters);
             result.put("outcome",outcome);
             result.put("status",Boolean.TRUE.equals(outcome.get("ok"))?"done":"failed");
         } catch(Exception e) {

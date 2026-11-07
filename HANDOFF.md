@@ -1,3 +1,22 @@
+## Device source update — 2026-11-07
+
+The source in `hot/src` and `native` now includes the on-device work through the commit in
+[device-source-snapshot.json](docs/device-source-snapshot.json). Trough runs directly in its
+native Android userland; the older VM instructions below are historical. The local `files/src`
+repository automatically commits successful reload builds but had no publishing remote, so
+GitHub had fallen behind. Keep the repository layout mapping in that receipt when syncing.
+
+Current work: shared native input/Home surface, compact expandable trace, activity/network/frame
+readouts, bounded diagnostics, continuous-work delivery and seamless reload performance.
+Known pre-write delivery rejection is repaired without replay; one actual automatic continuation
+dispatch was observed. Reload construction remains visibly disruptive (~103ms chat restore);
+this is unfinished, not seamless. Trace history and opaque/glass positions must remain intact.
+Public music search/native decoder preflight passed; signed-in library and audible controls
+have not been verified. Detailed private diagnostics and user messages remain on device.
+
+No host APK rebuild or install is implied by this source synchronization. Older design and
+implementation history below are retained; current user instructions take precedence.
+
 # Current handoff: Trough as the OS, 2026-10-30
 
 ## Start here (any model: Claude, GPT/Codex, others)

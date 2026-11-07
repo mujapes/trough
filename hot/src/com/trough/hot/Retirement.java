@@ -10,9 +10,9 @@ import java.util.*;
  * the next bundle's check reopens the store (only possible if the predecessor's Main.stop
  * released it) and requires every typed edit. */
 final class Retirement {
-    private static File probe(Activity a) { return new File(a.getFilesDir(), "retire-probe.txt"); }
+    private static File probe(android.content.Context a) { return new File(a.getFilesDir(), "retire-probe.txt"); }
 
-    static Map<String, Object> setup(Activity activity, File bundle) throws Exception {
+    static Map<String, Object> setup(android.content.Context activity, File bundle) throws Exception {
         long k = Drafts.keeper(activity, bundle);
         long doc = NativeCore.create(k), q = NativeCore.attach(k, doc);
         if (doc < 0 || q < 0) throw new IllegalStateException("attach");
@@ -34,7 +34,7 @@ final class Retirement {
         return Json.map("ok", true, "document", doc, "length", model.length(), "bundle", bundle.getName());
     }
 
-    static Map<String, Object> check(Activity activity, File bundle) throws Exception {
+    static Map<String, Object> check(android.content.Context activity, File bundle) throws Exception {
         String[] p = new String(ScenarioProtocol.read(probe(activity), 1 << 20), StandardCharsets.UTF_8).split("\n", 3);
         long doc = Long.parseLong(p[0]);
         long k = Drafts.keeper(activity, bundle);

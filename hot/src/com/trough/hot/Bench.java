@@ -2,7 +2,6 @@ package com.trough.hot;
 
 import android.content.Context;
 import android.os.Build;
-import android.os.Environment;
 import android.os.OutcomeReceiver;
 import android.os.PowerMonitor;
 import android.os.PowerMonitorReadings;
@@ -27,7 +26,7 @@ import java.util.concurrent.TimeUnit;
  *  1. exec a static arm64 binary shipped as lib*.so -- proves the exec path the userland needs;
  *  2. that binary measures each core's clock from CNTVCT and checks it against cpufreq;
  *  3. power monitors (API 35+) give energy per rail across the run, with no adb.
- * Result JSON goes to Download/trough/ (the VM sees it at /mnt/shared/Download/trough/).
+ * Result JSON stays in this installation's private diagnostic directory.
  */
 final class Bench {
     private Bench() {}
@@ -105,7 +104,7 @@ final class Bench {
         String text;
         try { text = r.toString(2); } catch (Exception e) { text = r.toString(); }
         try {
-            File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "trough");
+            File dir = Main.reportDirectory(ctx);
             dir.mkdirs();
             File f = new File(dir, "bench-" + System.currentTimeMillis() + ".json");
             try (FileOutputStream o = new FileOutputStream(f)) { o.write(text.getBytes("UTF-8")); }

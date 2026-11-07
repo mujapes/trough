@@ -35,7 +35,7 @@ final class Self {
      * files/src is a git repo. The bundle's source is committed on branch "bundle" (straight
      * from the bundle dir, through a separate index, never touching the work tree) and merged
      * into "main", where the agent's edits live, so both kinds of change survive. If the merge
-     * conflicts, main is saved as agent-<time> and reset to the bundle: nothing is ever lost.
+     * conflicts, main stays active and is also saved as agent-<time>; bundle waits for resolution.
      */
     static String seed(Context ctx, File bundle) throws Exception {
         File from = new File(bundle, "src"), repo = src(ctx);
@@ -84,8 +84,7 @@ final class Self {
             gitOr(ctx, repo, "merge", "--abort");
             String keep = "agent-" + System.currentTimeMillis();
             git(ctx, repo, null, "branch", keep, "main");
-            git(ctx, repo, null, "reset", "-q", "--hard", "bundle");
-            return "bundle " + commit.substring(0, 8) + " conflicted with local edits; they are on branch " + keep;
+            return "bundle " + commit.substring(0, 8) + " conflicts; local version remains active on main and " + keep;
         }
     }
 
@@ -99,7 +98,7 @@ final class Self {
     /** Runs the root's git; returns trimmed stdout, throws IllegalStateException on failure. */
     static String git(Context ctx, File cwd, File index, String... args) throws Exception {
         String[] cmd = new String[args.length + 1];
-        cmd[0] = new File(ctx.getDataDir(), "d/usr/bin/git").getPath();
+        cmd[0] = new File(Root.os(), "d/usr/bin/git").getPath();
         System.arraycopy(args, 0, cmd, 1, args.length);
         ProcessBuilder pb = new ProcessBuilder(cmd).directory(cwd).redirectInput(new File("/dev/null"));
         Map<String, String> env = pb.environment();
@@ -137,9 +136,11 @@ final class Self {
 
     /** Builds src into <self>/<key>/classes.dex, or reuses it. Fills r with what happened. */
     static File build(Context ctx, File src, File bundle, JSONObject payloads, File self, JSONObject r) throws Exception {
-        File script = new File(bundle, "build.sh");
+        File versionedScript = new File(src, "build-tools/hot-build.sh");
+        File script = versionedScript.isFile() ? versionedScript : new File(bundle, "build.sh");
         String aj = payloads.getString("android.jar"), d8 = payloads.getString("d8.jar");
-        String key = sha((treeSha(src) + treeSha(script) + new File(aj).getName() + new File(d8).getName()).getBytes("UTF-8"));
+        String key = sha((treeSha(src) + treeSha(script) + new File(aj).getName() + new File(d8).getName()
+            + (Root.guest() ? ":lift-v1" : "")).getBytes("UTF-8"));
         File out = new File(self, key);
         r.put("key", key.substring(0, 12)).put("identity", key);
         if (new File(out, "classes.dex").exists()) { r.put("cached", true); return out; }
@@ -154,6 +155,9 @@ final class Self {
         Map<String, String> env = pb.environment();
         env.clear();
         env.putAll(Root.env(ctx, cache));
+        // Applies only to these build children, never the app's ART runtime or agent tools.
+        // Older bundle recipes also inherit the CPU/GC cap while the versioned recipe sets heaps.
+        env.put("JAVA_TOOL_OPTIONS", "-XX:ActiveProcessorCount=1 -XX:+UseSerialGC");
         long t0 = System.nanoTime();
         Process p = pb.start();
         ByteArrayOutputStream log = new ByteArrayOutputStream();
@@ -166,6 +170,16 @@ final class Self {
         String text = log.toString("UTF-8").trim();
         if (!text.isEmpty()) r.put("log", text.length() > 1500 ? text.substring(text.length() - 1500) : text);
         if (exit != 0 || !new File(tmp, "classes.dex").exists()) { Main.deleteTree(tmp); throw new IllegalStateException("self build failed (" + exit + ")"); }
+        // Recompilation must preserve the guest's framework boundary. Loading raw javac/d8 output
+        // would send Environment calls back to the host and mix credentials/control channels.
+        if (Root.guest()) {
+            File lifted = new File(tmp, "lifted.dex");
+            java.util.Map<String, Object> lift = new java.util.LinkedHashMap<>();
+            int sites = Lift.liftDex(ctx, new File(tmp, "classes.dex"), lifted, cache, lift);
+            r.put("lift", new JSONObject(lift)).put("lift_sites", sites);
+            if (sites < 1 || !lifted.renameTo(new File(tmp, "classes.dex")))
+                throw new IllegalStateException("guest self build lost its Lift boundary");
+        }
         new File(tmp, "classes.dex").setReadOnly();   // ART refuses writable dex
         Main.deleteTree(cache);
         if (!tmp.renameTo(out)) throw new IllegalStateException("rename " + out);
@@ -192,9 +206,18 @@ final class Self {
      * preload library loads into a shell. Returns the dir, or null if src has no native/.
      */
     static File buildNative(Context ctx, File src, JSONObject r) throws Exception {
+        // Shared across hot class loaders; never acquire BOOT_LOCK while this is held.
+        synchronized ("com.trough.hot.native-build") {
+            return buildNativeLocked(ctx, src, r);
+        }
+    }
+
+    private static File buildNativeLocked(Context ctx, File src, JSONObject r) throws Exception {
         File nat = new File(src, "native");
         if (!new File(nat, "build.sh").isFile()) return null;
-        String key = treeSha(nat).substring(0, 16);
+        String sourceIdentity = treeSha(nat);
+        String key = sourceIdentity.substring(0, 16);
+        r.put("source_identity", sourceIdentity);
         File root = new File(ctx.getFilesDir(), "self-native"), out = new File(root, key);
         r.put("key", key);
         if (new File(out, ".ok").exists()) { r.put("cached", true); return out; }
@@ -202,7 +225,7 @@ final class Self {
         Main.deleteTree(tmp);
         tmp.mkdirs();
         File cwd = ctx.getCacheDir();
-        String d = new File(ctx.getDataDir(), "d").getPath();
+        String d = new File(Root.os(), "d").getPath();
         long t0 = System.nanoTime();
         JSONObject b = SelfTest.exec(cwd, ctx, null, 600, "/system/bin/sh", new File(nat, "build.sh").getPath(), nat.getPath(), tmp.getPath());
         r.put("build", b).put("build_ms", (System.nanoTime() - t0) / 1_000_000);
@@ -214,11 +237,17 @@ final class Self {
         java.util.Map<String, String> pre = new java.util.HashMap<>();
         pre.put("LD_PRELOAD", new File(tmp, "lib/libexecmap.so").getPath());
         JSONObject s3 = SelfTest.exec(cwd, ctx, pre, 60, d + "/usr/bin/sh", "-c", "echo execmap-ok");
-        boolean ok = s1.getInt("exit") == 0 && s2.getString("out").contains("\"ok\":true")
+        boolean ok = s1.getInt("exit") == 0 && s2.getInt("exit") == 0 && s2.getString("out").contains("\"ok\":true")
             && s3.getInt("exit") == 0 && s3.getString("out").contains("execmap-ok") && !s3.getString("out").contains("cannot be preloaded");
         r.put("smoke", new JSONObject().put("texec_true", s1.getInt("exit")).put("texec_threadtest", s2.getString("out").trim())
             .put("execmap_shell", s3.getString("out").trim()).put("ok", ok));
         if (!ok) { Main.deleteTree(tmp); throw new IllegalStateException("native smoke test failed"); }
+        String after = treeSha(nat);
+        if (!sourceIdentity.equals(after)) {
+            r.put("source_changed", true).put("current_source_identity", after);
+            Main.deleteTree(tmp);
+            throw new IllegalStateException("native source changed during build; candidate discarded");
+        }
         Payloads.writeSmall(new File(tmp, ".ok"), "smoke-tested");
         Main.deleteTree(out);
         if (!tmp.renameTo(out)) throw new IllegalStateException("rename " + out);

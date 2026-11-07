@@ -38,35 +38,53 @@ import java.util.Map;
  */
 final class Power {
     private static final String[] KEYS = {"screen", "cpu", "back"};
-    private static Activity a;
+    private static android.content.Context ctx;   // the application: the wake lock outlives windows
+    private static Activity a;                     // the current window, or null
     private static File home;
     private static PowerManager.WakeLock cpu;
+    private static boolean started;
+    // Settings are refreshed by apply(), never read from disk by runtime telemetry.
+    private static boolean appliedScreen = true, appliedCpu = true, appliedBack = true;
+    private static long observedPowerAt = -1;
+    private static Map<String, Object> observedPower = new LinkedHashMap<String, Object>();
 
-    static synchronized void start(Activity activity, File h) {
-        a = activity;
+    static synchronized void start(android.content.Context c, Activity window, File h) {
+        ctx = c.getApplicationContext();
+        a = window;
         home = h;
+        started = true;
+        observedPowerAt = -1;
         apply();
+        askBattery();
+    }
+
+    /** A new window (or none): flags and the Back callback go on it; the wake lock is kept. */
+    static synchronized void attach(Activity window) {
+        if (!started) return;
+        if (a != null && a != window) a.getWindow().setCallback(a);
+        a = window;
+        apply();
+        askBattery();
+    }
+
+    static synchronized void stop() {
+        if (!started) return;
+        if (cpu != null && cpu.isHeld()) cpu.release();
+        cpu = null;
+        if (a != null) a.getWindow().setCallback(a);
+        a = null;
+        started = false;
+    }
+
+    /** Once, and only with a window to show Android's dialog over. */
+    private static void askBattery() {
+        if (a == null) return;
         Map<String, Object> s = read();
         if (!Boolean.TRUE.equals(s.get("asked_battery")) && !batteryExempt()) {
             s.put("asked_battery", true);
             write(s);
             requestBattery();
         }
-    }
-
-    /** The window is new: flags and the Back callback go on it; the wake lock is kept. */
-    static synchronized void attach(Activity activity) {
-        if (a == null) return;
-        a = activity;
-        apply();
-    }
-
-    static synchronized void stop() {
-        if (a == null) return;
-        if (cpu != null && cpu.isHeld()) cpu.release();
-        cpu = null;
-        a.getWindow().setCallback(a);
-        a = null;
     }
 
     /** "/awake [screen|cpu|back on|off | battery | child]"; returns the text to show. */
@@ -80,6 +98,7 @@ final class Power {
         } else if (w.length == 1 && w[0].equals("battery")) {
             if (!requestBattery()) return "could not open the battery-optimisation request\n\n" + status();
         } else if (w.length == 1 && w[0].equals("child")) {
+            if (a == null) return "open Trough's window first\n\n" + status();
             try { a.startActivity(new Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)); }
             catch (Exception e) { return "could not open Developer options: " + e + "\n\n" + status(); }
             return "Developer options opened: turn on \"Disable child process restrictions\" (stops Android killing claude/codex as phantom processes)";
@@ -98,29 +117,75 @@ final class Power {
             + "Swiping from Recents keeps Trough running with an updated APK; the notification's Quit ends it.";
     }
 
+    /** Read-only native state; no settings writes, permission prompts, or screen inspection.
+     * Binder-backed device values are sampled at most once a second. Unknown values stay null.
+     */
+    static synchronized Map<String, Object> state() {
+        long now = android.os.SystemClock.elapsedRealtime();
+        if (ctx != null && (observedPowerAt < 0 || now < observedPowerAt || now - observedPowerAt >= 1000)) {
+            Map<String, Object> sample = new LinkedHashMap<String, Object>();
+            sample.put("batteryExempt", null);
+            sample.put("interactive", null);
+            sample.put("doze", null);
+            sample.put("powerSave", null);
+            String error = "";
+            try {
+                PowerManager power = (PowerManager) ctx.getSystemService(Activity.POWER_SERVICE);
+                if (power == null) throw new IllegalStateException("PowerManager unavailable");
+                sample.put("batteryExempt", power.isIgnoringBatteryOptimizations(ctx.getPackageName()));
+                sample.put("interactive", power.isInteractive());
+                sample.put("doze", power.isDeviceIdleMode());
+                sample.put("powerSave", power.isPowerSaveMode());
+            } catch (RuntimeException failure) { error = failure.getClass().getSimpleName(); }
+            sample.put("error", error);
+            observedPower = sample;
+            observedPowerAt = now;
+        }
+        Map<String, Object> out = new LinkedHashMap<String, Object>(observedPower);
+        // Fill unknown keys before start(), too; false must not mean unavailable.
+        if (!out.containsKey("batteryExempt")) {
+            out.put("batteryExempt", null); out.put("interactive", null);
+            out.put("doze", null); out.put("powerSave", null);
+            out.put("error", "Power not started");
+        }
+        out.put("started", started);
+        out.put("screenEnabled", appliedScreen);
+        out.put("cpuEnabled", appliedCpu);
+        out.put("backEnabled", appliedBack);
+        out.put("cpuHeld", cpu != null && cpu.isHeld());
+        out.put("windowAttached", a != null);
+        out.put("observedElapsedMs", observedPowerAt);
+        return out;
+    }
+
     private static String on(Map<String, Object> s, String k) { return enabled(s, k) ? "on" : "off"; }
     private static boolean enabled(Map<String, Object> s, String k) { return !Boolean.FALSE.equals(s.get(k)); }
 
     private static void apply() {
         Map<String, Object> s = read();
-        Window win = a.getWindow();
-        if (enabled(s, "screen")) win.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        else win.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        appliedScreen = enabled(s, "screen");
+        appliedCpu = enabled(s, "cpu");
+        appliedBack = enabled(s, "back");
         if (enabled(s, "cpu")) {
             if (cpu == null) {
-                cpu = ((PowerManager) a.getSystemService(Activity.POWER_SERVICE)).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "trough:run");
+                cpu = ((PowerManager) ctx.getSystemService(Activity.POWER_SERVICE)).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "trough:run");
                 cpu.setReferenceCounted(false);
             }
             if (!cpu.isHeld()) cpu.acquire();
         } else if (cpu != null && cpu.isHeld()) cpu.release();
+        if (a == null) return;
+        Window win = a.getWindow();
+        if (enabled(s, "screen")) win.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        else win.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         win.setCallback(enabled(s, "back") ? new BackToBackground(a) : a);
     }
 
     private static boolean batteryExempt() {
-        return ((PowerManager) a.getSystemService(Activity.POWER_SERVICE)).isIgnoringBatteryOptimizations(a.getPackageName());
+        return ((PowerManager) ctx.getSystemService(Activity.POWER_SERVICE)).isIgnoringBatteryOptimizations(ctx.getPackageName());
     }
 
     private static boolean requestBattery() {
+        if (a == null) return false;
         try {
             a.startActivity(new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + a.getPackageName())));
             return true;

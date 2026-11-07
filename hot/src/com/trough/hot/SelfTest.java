@@ -45,7 +45,7 @@ final class SelfTest {
     static JSONObject apt(Context ctx) throws Exception {
         File w = new File(ctx.getCacheDir(), "apttest");
         w.mkdirs();
-        String d = new File(ctx.getDataDir(), "d").getPath();
+        String d = new File(Root.os(), "d").getPath();
         JSONObject r = new JSONObject();
         // Android's policy on hard links for apps, measured (dpkg backs up its status with link()).
         File a = new File(w, "link-src"), b = new File(w, "link-dst");
@@ -68,7 +68,7 @@ final class SelfTest {
      */
     static JSONObject nativeRepro(Context ctx, File bundle) throws Exception {
         return new JSONObject(Json.write(NativeReproduction.run(bundle,ctx.getCacheDir(),Root.env(ctx,ctx.getCacheDir()),
-            "/system/bin/sh",new File(ctx.getDataDir(),"d/usr/libexec/trough/tfix").getAbsolutePath())));
+            "/system/bin/sh",new File(Root.os(),"d/usr/libexec/trough/tfix").getAbsolutePath())));
     }
 
     /**
@@ -154,8 +154,8 @@ final class SelfTest {
 
     /**
      * Self.seed's merge policy on a scratch repo: a bundle change and an agent edit to different
-     * files both survive; a conflicting pair leaves the bundle's tree and the agent's version
-     * on an agent-* branch.
+     * files both survive; a conflicting pair keeps the local tree active and backed up
+     * on an agent-* branch while the incoming bundle remains available.
      */
     static JSONObject seedMerge(Context ctx) throws Exception {
         File w = new File(ctx.getCacheDir(), "seedmerge"), b = new File(w, "bundle"), repo = new File(w, "repo");
@@ -175,7 +175,9 @@ final class SelfTest {
         r.put("conflict", Self.seed(ctx, b, repo));
         String branches = Self.git(ctx, repo, null, "branch", "--list", "agent-*");
         String kept = branches.isEmpty() ? "" : Self.git(ctx, repo, null, "show", branches.trim() + ":b");
-        boolean safe = text(new File(repo, "b")).equals("bundle2\n") && kept.equals("agent2");
+        boolean safe = text(new File(repo, "b")).equals("agent2\n") && kept.equals("agent2")
+            && Self.git(ctx,repo,null,"show","bundle:b").equals("bundle2")
+            && Self.git(ctx,repo,null,"status","--porcelain").isEmpty();
         r.put("current_is_noop", "current".equals(r.getString("again")))
          .put("clean_merge_keeps_both", both).put("conflict_keeps_agent_branch", safe)
          .put("ok", "current".equals(r.getString("again")) && both && safe);
@@ -195,7 +197,7 @@ final class SelfTest {
 
     static JSONObject run(Context ctx) throws Exception {
         JSONObject r = new JSONObject();
-        File d = new File(ctx.getDataDir(), "d"), bin = new File(d, "usr/bin");
+        File d = new File(Root.os(), "d"), bin = new File(d, "usr/bin");
         File w = new File(ctx.getCacheDir(), "selftest");
         Main.deleteTree(w);
         w.mkdirs();
@@ -245,7 +247,7 @@ final class SelfTest {
     }
 
     static JSONObject exec(File cwd, Context ctx, Map<String, String> extra, long timeoutS, String... cmd) throws Exception {
-        ProcessBuilder pb = new ProcessBuilder(cmd).directory(cwd).redirectErrorStream(true)
+        ProcessBuilder pb = new ProcessBuilder(Root.command(ctx, cmd)).directory(cwd).redirectErrorStream(true)
             .redirectInput(new File("/dev/null"));
         Map<String, String> env = pb.environment();
         env.clear();

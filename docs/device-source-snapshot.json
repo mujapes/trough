@@ -1,0 +1,11 @@
+{
+  "source_commit": "a81ee1bbff4733008ee32b139ee1f6fdc896a6b9",
+  "tracked_files": 1480,
+  "java_files": 264,
+  "mapping": {
+    "com/": "hot/src/com/",
+    "native/": "native/"
+  },
+  "validation": "All 264 synced Java files compile against Android API; local source git fsck clean and working tree clean. Inbox 125 filesystem checks and viewport 8 checks previously passed. Imported vendor whitespace retained byte-for-byte; native rebuild and public CI not rerun.",
+  "scope": "Source only; no app-private state, credentials, transcripts or original game assets."
+}
