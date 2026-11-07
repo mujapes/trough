@@ -1,11 +1,16 @@
 {
   "source_commit": "a81ee1bbff4733008ee32b139ee1f6fdc896a6b9",
   "tracked_files": 1480,
-  "java_files": 264,
+  "java_files": 265,
   "mapping": {
     "com/": "hot/src/com/",
     "native/": "native/"
   },
   "validation": "All 264 synced Java files compile against Android API; local source git fsck clean and working tree clean. Inbox 125 filesystem checks and viewport 8 checks previously passed. Imported vendor whitespace retained byte-for-byte; native rebuild and public CI not rerun.",
-  "scope": "Source only; no app-private state, credentials, transcripts or original game assets."
+  "scope": "Source only; no app-private state, credentials, transcripts or original game assets.",
+  "additional_working_source": {
+    "Chat.java": "938e4cfcd2ef79aafdd5a37e73e81d8c57808f728b4f31c465d3776095635690",
+    "TranscriptRowIdentity.java": "5539395c5d54f99901ea7057b83c3338509ecf658a0236c0fd5c60ff5c520750"
+  },
+  "followup": "Per-row native transcript reuse repair; exact identity9 checks and viewport8 checks pass, live warm-reload timing pending."
 }

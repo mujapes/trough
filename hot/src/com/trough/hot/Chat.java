@@ -61,7 +61,7 @@ final class Chat implements Agent.Listener {
     private final ArrayList<TextView> retainedEntries;
     private int retainedEntryCount;
     private long restoreDurationMs;
-    private static final int HISTORY_LIMIT=80, HISTORY_TAG=0x7f0d7491;
+    private static final int HISTORY_LIMIT=80, HISTORY_TAG=0x7f0d7491, ENTRY_SOURCE_TAG=0x7f0d74eb;
     private boolean browsingHistory;
     private int historyStart,historyEnd;
     private Button olderHistory,newerHistory;
@@ -81,10 +81,15 @@ final class Chat implements Agent.Listener {
     }
     private void showHistory(int end){
         historyEnd=Math.min(historySize(),Math.max(0,end));historyStart=Math.max(0,historyEnd-HISTORY_LIMIT);
-        for(int i=feed.getChildCount()-1;i>=0;i--)if(feed.getChildAt(i).getTag(HISTORY_TAG) instanceof Integer)feed.removeViewAt(i);
+        java.util.HashMap<Integer,TextView> reusable=new java.util.HashMap<Integer,TextView>();
+        if(retainedEntries!=null)for(TextView item:retainedEntries)if(item.getTag(HISTORY_TAG) instanceof Integer)reusable.put((Integer)item.getTag(HISTORY_TAG),item);
+        for(int i=feed.getChildCount()-1;i>=0;i--){View item=feed.getChildAt(i);if(item.getTag(HISTORY_TAG) instanceof Integer){if(item instanceof TextView)reusable.put((Integer)item.getTag(HISTORY_TAG),(TextView)item);feed.removeViewAt(i);}}
         for(int i=historyStart,at=0;i<historyEnd;i++){
-            String[] row=historyRow(i);TextView v;
-            if(live!=null&&i==transcriptPrefix.size()+liveEntry)v=live;else v=entry(row[0],row[1]);
+            String[] row=historyRow(i);TextView v=reusable.get(Integer.valueOf(i));
+            if(v!=null&&!TranscriptRowIdentity.matches(v.getTag(ENTRY_SOURCE_TAG),row[0],row[1]))v=null;
+            if(live!=null&&i==transcriptPrefix.size()+liveEntry)v=live;
+            else if(v==null)v=entry(row[0],row[1]);
+            else {retainedEntryCount++;String kind=row[0].startsWith("work_")?row[0].substring(5):row[0];v.setOnClickListener(null);bindToolDetails(v,kind,"user".equals(kind)?NativeTraceRenderer.visibleUser(row[1]):row[1],false);if(isAssistantKind(kind)||"user".equals(kind))styleProse(v,"user".equals(kind));}
             if(v.getParent() instanceof ViewGroup)((ViewGroup)v.getParent()).removeView(v);
             v.setTag(HISTORY_TAG,Integer.valueOf(i));feed.addView(v,at++);
         }
@@ -1713,6 +1718,7 @@ final class Chat implements Agent.Listener {
         for (int i = 0; i < log.size(); i++) entries.add(log.get(i).clone());
         Map<String, Object> m = new HashMap<>();
         m.put("entries", entries);
+        m.put("historyEnd",historyEnd);m.put("browsingHistory",browsingHistory);
         m.put("transcript_ready",transcriptReady);
         m.put("transcript_prefix",new ArrayList<String[]>(transcriptPrefix));
         m.put("redditCommunity",RedditReader.openCommunity(feed));
@@ -1821,7 +1827,9 @@ final class Chat implements Agent.Listener {
                 int index=log.size()-1;
 
             }
-        showHistory(historySize());
+        browsingHistory=Boolean.TRUE.equals(state.get("browsingHistory"));
+        Object savedHistoryEnd=state.get("historyEnd");
+        showHistory(browsingHistory&&savedHistoryEnd instanceof Number?((Number)savedHistoryEnd).intValue():historySize());
         if(progress instanceof Map) showWork((Map<String,Object>)progress);
         List<Object> checks=Json.arr(state.get("workChecks")),files=Json.arr(state.get("workFiles"));
         if(checks!=null) workChecks.addAll(checks);if(files!=null) workFiles.addAll(files);
@@ -2592,24 +2600,16 @@ final class Chat implements Agent.Listener {
     /** Keep the native text/layout caches across a code swap instead of reparsing the whole chat. */
     private static ArrayList<TextView> reusableEntries(View view,Map<?,?> state) {
         if(state==null || !(state.get("entries") instanceof List)) return null;
-        List<?> entries=(List<?>)state.get("entries");
         if(view instanceof ScrollView && ((ScrollView)view).getChildCount()==1
             && ((ScrollView)view).getChildAt(0) instanceof LinearLayout) {
             LinearLayout candidate=(LinearLayout)((ScrollView)view).getChildAt(0);
             ArrayList<TextView> found=new ArrayList<TextView>();
             for(int i=0;i<candidate.getChildCount();i++) {
                 View child=candidate.getChildAt(i);
-                if(child instanceof TextView && child.getTag() instanceof String) found.add((TextView)child);
+                if(child instanceof TextView && child.getTag(HISTORY_TAG) instanceof Integer
+                    && child.getTag(ENTRY_SOURCE_TAG) instanceof String[])found.add((TextView)child);
             }
-            if(found.size()==entries.size()) {
-                boolean matches=true;
-                for(int i=0;i<entries.size();i++) {
-                    Object item=entries.get(i);
-                    if(!(item instanceof String[]) || ((String[])item).length!=2
-                        || !((String[])item)[0].equals(found.get(i).getTag())) { matches=false;break; }
-                }
-                if(matches) return found;
-            }
+            if(!found.isEmpty())return found;
         }
         if(view instanceof ViewGroup) {
             ViewGroup group=(ViewGroup)view;
@@ -2623,6 +2623,7 @@ final class Chat implements Agent.Listener {
 
     /** The one rendering of each entry kind, used live and when rebuilding from a handoff. */
     private TextView entry(String kind, String text) {
+        String originalText=text;
         if("user".equals(kind))text=NativeTraceRenderer.visibleUser(text);
         String storedKind=kind;if(kind.startsWith("work_"))kind=kind.substring(5);
         TextView v;
@@ -2635,7 +2636,7 @@ final class Chat implements Agent.Listener {
         final String complete=text==null?"":text;
         final String preview=activity?toolPreview(complete,3):HistoryPreview.text(complete);
         v.setText(isAssistantKind(kind)?RichText.render(HistoryPreview.text(complete)):preview);
-        v.setTag(storedKind);
+        v.setTag(storedKind);v.setTag(ENTRY_SOURCE_TAG,new String[]{storedKind,originalText});
         if(isAssistantKind(kind) || "user".equals(kind)) styleProse(v,"user".equals(kind));
         bindToolDetails(v,kind,complete,true);
         return v;
