@@ -1,7 +1,7 @@
 {
   "source_commit": "a81ee1bbff4733008ee32b139ee1f6fdc896a6b9",
   "tracked_files": 1480,
-  "java_files": 265,
+  "java_files": 268,
   "mapping": {
     "com/": "hot/src/com/",
     "native/": "native/"
@@ -11,12 +11,15 @@
   "additional_working_source": {
     "Chat.java": "0312b059295d0106540e069cd5f1bbf0adff10377cea99a53f140b319197f755",
     "TranscriptRowIdentity.java": "5539395c5d54f99901ea7057b83c3338509ecf658a0236c0fd5c60ff5c520750",
-    "NativeHomePanel.java": "9d9dd6d8523bf51eef55730fd75887264db86242529edbdb29063ae4e0f1787b",
+    "NativeHomePanel.java": "b97914015a90094bcbbdfd11c8d642bb9227b6ec92d26bc8ebf029f988a5029b",
     "NativeAppCatalog.java": "b706fd1566fc614e3df79d47e6cc120d732ff6b91ed8199ce94eabcf663cc5fa",
     "NativeIconLoader.java": "be8205cdeab5b4c4118304b8a2b658762e36cc7dc42ebc02944cf9dc55873764",
     "WindowFrameRecorder.java": "f3c57bbc1713bc2ff4a551cfea518b20551eb24e7016194906033fec9f9dd0d7",
-    "MediaPanel.java": "65cac0646e07162c40b8ab02863c720070f164800a02520b4c202d2dee120d2b",
-    "MusicSourcePolicy.java": "d9ab2c5028701f17f1d446eed8ad237ba35a1afa16105d6afdf4b9a429bab14e"
+    "MediaPanel.java": "d7bc311e155c69eb26e8319f94810a7af9d3bbecfbad14f8aee12ba2fe145974",
+    "MusicSourcePolicy.java": "d9ab2c5028701f17f1d446eed8ad237ba35a1afa16105d6afdf4b9a429bab14e",
+    "NativeMusicView.java": "d7bdb70fa79e52dc50cb3abe6366d373a492e61e9cd8f02d3bb6517416b35d30",
+    "NativeMusicCheck.java": "776724796b348724dd593458c279fa860cde48c82aba3436054df33feba76c64",
+    "NativeAppReference.java": "4ecfa5cb10af47ede1ea17e3615adc355c6bdb8b7072d6c81b7fdce0e29c20b7"
   },
-  "followup": "Catalog cache, recycled app rows, first-frame trace initialization, input timing correction and explicit HTTPS Music player route; targeted Java8 and9 Music source-policy checks passed. Native activation/visual Music playback verification remains pending."
+  "followup": "Production Music bridge preparation passed with no audio; mixing path implemented, internal Music controller verified without external activity. Shared keyboard overlap repair compiled, native geometry/visual activation check pending."
 }

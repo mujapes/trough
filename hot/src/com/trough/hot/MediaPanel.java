@@ -33,6 +33,8 @@ final class MediaPanel {
         InvocationHandler created=new Session(context.getApplicationContext());root.setTag(TAG,created);return created;
     }
     static void openMusic(Activity activity,View root,String source,String title){call(owner(activity,root),"openMusic",source,title);}
+    static void prepareMusic(Activity activity,View root,String source,String title){call(owner(activity,root),"openMusic",source,title,Boolean.FALSE);}
+    static void releaseMusic(View root){Object saved=root.getTag(TAG);if(saved instanceof InvocationHandler)call((InvocationHandler)saved,"dispose");root.setTag(TAG,null);}
     static void controlMusic(Activity activity,View root,String operation,int value){call(owner(activity,root),"musicControl",operation,Integer.valueOf(value));}
     static void show(Activity activity,View root) { if(activity!=null) call(owner(activity,root),"show",activity); }
     static void attach(Activity activity,View root) {
@@ -57,12 +59,13 @@ final class MediaPanel {
         final ExecutorService io=Executors.newSingleThreadExecutor();final AudioManager audio;
         volatile MediaPlayer player;Activity activity;AlertDialog dialog;
         TextView titleView,timeView;Button play;SeekBar seek;SurfaceView surface;
-        String uri="",title="Choose audio or video",error="";boolean ready,playing,video,seeking;int duration;
+        String uri="",title="Choose audio or video",error="";boolean ready,playing,video,seeking,mixAudio;int duration;
         final Runnable tick=new Runnable() { public void run() { paint();if(dialog!=null) main.postDelayed(this,500); }};
         Session(Context context) { this.context=context;audio=(AudioManager)context.getSystemService(Context.AUDIO_SERVICE); }
         public Object invoke(Object proxy,Method method,Object[] args) {
             String op=(String)args[0];
-            if("openMusic".equals(op))open(Uri.parse((String)args[1]),(String)args[2],true);
+            if("openMusic".equals(op))open(Uri.parse((String)args[1]),(String)args[2],true,args.length<4||!Boolean.FALSE.equals(args[3]));
+            else if("dispose".equals(op)){main.removeCallbacks(tick);pause();final MediaPlayer previous=player;player=null;ready=false;if(dialog!=null){dialog.dismiss();dialog=null;}io.execute(new Runnable(){public void run(){if(previous!=null)previous.release();}});io.shutdown();}
             else if("musicControl".equals(op)){String action=(String)args[1];int value=((Number)args[2]).intValue();if("toggle".equals(action)){if(playing)pause();else start();}else if("pause".equals(action))pause();else if("seek".equals(action)&&ready&&player!=null)player.seekTo(Math.max(0,Math.min(duration,value)));}
             else if("show".equals(op)) show((Activity)args[1]);
             else if("attach".equals(op)) { activity=(Activity)args[1];if(activity==null && dialog!=null) dialog.dismiss(); }
@@ -72,7 +75,7 @@ final class MediaPanel {
                     try { context.getContentResolver().takePersistableUriPermission(chosen,result.getFlags()&Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch(SecurityException ignored) {}
                     show(activity);open(chosen,chosen.getLastPathSegment());
                 }
-            } else if("state".equals(op)) return Json.map("ready",ready,"playing",playing,"video",video,"title",title,
+            } else if("state".equals(op)) return Json.map("protocol",2,"https_music_supported",true,"audio_mix",mixAudio,"ready",ready,"playing",playing,"video",video,"title",title,
                 "position_ms",position(),"duration_ms",duration,"source",uri,"error",error,"session_identity",System.identityHashCode(this));
             return null;
         }
@@ -120,16 +123,17 @@ final class MediaPanel {
             Button b=new Button(c);b.setText(label);b.setAllCaps(false);b.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { action.run(); }});
             box.addView(b);return b;
         }
-        private void open(final Uri source,String label) { open(source,label,false); }
-        private void open(final Uri source,String label,boolean musicStream) {
+        private void open(final Uri source,String label) { open(source,label,false,true); }
+        private void open(final Uri source,String label,boolean musicStream,final boolean autoplay) {
             String scheme=source.getScheme();if(!MusicSourcePolicy.allowed(scheme,source.getHost(),musicStream)) { error=musicStream?"No playable HTTPS music stream":"Choose a local audio or video document";paint();return; }
+            if(musicStream)audio.abandonAudioFocus(this);mixAudio=musicStream;
             final MediaPlayer previous=player;player=null;ready=false;playing=false;duration=0;error="";uri=source.toString();title=label==null?"Local media":label;
             if(previous!=null) io.execute(new Runnable() { public void run() { previous.release(); }});
             final MediaPlayer next=new MediaPlayer();player=next;next.setAudioStreamType(AudioManager.STREAM_MUSIC);
             next.setOnPreparedListener(new MediaPlayer.OnPreparedListener() { public void onPrepared(MediaPlayer p) {
                 if(p!=player) return;ready=true;duration=p.getDuration();video=p.getVideoWidth()>0;
                 if(surface!=null) { surface.setVisibility(video?View.VISIBLE:View.GONE);if(surface.getHolder().getSurface().isValid()) p.setDisplay(surface.getHolder()); }
-                start();paint();
+                if(autoplay)start();paint();
             }});
             next.setOnCompletionListener(new MediaPlayer.OnCompletionListener() { public void onCompletion(MediaPlayer p) { if(p==player) { playing=false;audio.abandonAudioFocus(Session.this);paint(); } }});
             next.setOnErrorListener(new MediaPlayer.OnErrorListener() { public boolean onError(MediaPlayer p,int what,int extra) {
@@ -150,11 +154,12 @@ final class MediaPanel {
         private int position() { try { return ready && player!=null?player.getCurrentPosition():0; } catch(IllegalStateException ignored) { return 0; } }
         private void start() {
             if(!ready || player==null) return;
-            if(audio.requestAudioFocus(this,AudioManager.STREAM_MUSIC,AudioManager.AUDIOFOCUS_GAIN)!=AudioManager.AUDIOFOCUS_REQUEST_GRANTED) { error="Another app currently owns audio";return; }
+            if(!mixAudio&&audio.requestAudioFocus(this,AudioManager.STREAM_MUSIC,AudioManager.AUDIOFOCUS_GAIN)!=AudioManager.AUDIOFOCUS_REQUEST_GRANTED) { error="Another app currently owns audio";return; }
             try { player.start();playing=true;error=""; } catch(IllegalStateException failure) { error=failure.getMessage(); }
         }
         private void pause() { try { if(ready && player!=null) player.pause(); } catch(IllegalStateException ignored) {} playing=false;audio.abandonAudioFocus(this); }
         public void onAudioFocusChange(int change) {
+            if(mixAudio)return;
             if(change==AudioManager.AUDIOFOCUS_LOSS || change==AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) pause();
             else if(player!=null && ready) try { float level=change==AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK?.2f:1f;player.setVolume(level,level); } catch(IllegalStateException ignored) {}
             paint();
