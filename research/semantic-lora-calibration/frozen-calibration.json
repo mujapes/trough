@@ -1,0 +1,130 @@
+{
+  "scope": "cost calibration only, not training benchmark",
+  "train": [
+    {
+      "id": "const-false",
+      "request": "Return false.",
+      "program": [
+        "literal",
+        false
+      ],
+      "aligned": {
+        "literal": {
+          "value": false
+        }
+      },
+      "conventional": {
+        "op": "const",
+        "args": [
+          false
+        ]
+      }
+    },
+    {
+      "id": "read-enabled",
+      "request": "Return enabled.",
+      "program": [
+        "input",
+        "enabled"
+      ],
+      "aligned": {
+        "input": {
+          "name": "enabled"
+        }
+      },
+      "conventional": {
+        "op": "var",
+        "args": [
+          "enabled"
+        ]
+      }
+    },
+    {
+      "id": "not-blocked",
+      "request": "Return the opposite of blocked.",
+      "program": [
+        "not",
+        [
+          "input",
+          "blocked"
+        ]
+      ],
+      "aligned": {
+        "not": {
+          "condition": {
+            "input": {
+              "name": "blocked"
+            }
+          }
+        }
+      },
+      "conventional": {
+        "op": "not",
+        "args": [
+          {
+            "op": "var",
+            "args": [
+              "blocked"
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "heldout": [
+    {
+      "id": "role-forward",
+      "family": "role-composition",
+      "request": "Return true exactly when sender equals target and receiver differs from target."
+    },
+    {
+      "id": "role-reverse",
+      "family": "role-composition",
+      "request": "Return true exactly when receiver equals target and sender differs from target."
+    }
+  ],
+  "model": {
+    "id": "HuggingFaceTB/SmolLM2-360M-Instruct",
+    "sha": "a10cc1512eabd3dde888204e902eca88bddb4951",
+    "license": "apache-2.0",
+    "files": [
+      {
+        "name": "config.json",
+        "size": 846
+      },
+      {
+        "name": "generation_config.json",
+        "size": 132
+      },
+      {
+        "name": "model.safetensors",
+        "size": 723674912
+      },
+      {
+        "name": "tokenizer.json",
+        "size": 2104556
+      },
+      {
+        "name": "tokenizer_config.json",
+        "size": 3764
+      }
+    ]
+  },
+  "config": {
+    "steps": 3,
+    "threads": 2,
+    "rank": 4,
+    "alpha": 8,
+    "dropout": 0,
+    "target_modules": [
+      "q_proj",
+      "v_proj"
+    ],
+    "learning_rate": 0.0001,
+    "batch_size": 1,
+    "max_sequence_tokens": 256,
+    "seed": 0
+  },
+  "source_sha256": "5e28c2f3f0f642baad8a39156536ac42806792d539961c6f054589ca253c0cb1",
+  "guard": "Only3adapteroptimizersteps; no semantic evaluation or fulltraining. Knownprimitive exposure not a heldout accuracy result."
+}
