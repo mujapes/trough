@@ -1,0 +1,1171 @@
+{
+  "cases": [
+    {
+      "id": "literal",
+      "stage": "gate",
+      "request": "Return true regardless of inputs.",
+      "environments": [
+        {
+          "held": false,
+          "blocked": false,
+          "enabled": false
+        },
+        {
+          "held": false,
+          "blocked": false,
+          "enabled": true
+        },
+        {
+          "held": false,
+          "blocked": true,
+          "enabled": false
+        },
+        {
+          "held": false,
+          "blocked": true,
+          "enabled": true
+        },
+        {
+          "held": true,
+          "blocked": false,
+          "enabled": false
+        },
+        {
+          "held": true,
+          "blocked": false,
+          "enabled": true
+        },
+        {
+          "held": true,
+          "blocked": true,
+          "enabled": false
+        },
+        {
+          "held": true,
+          "blocked": true,
+          "enabled": true
+        }
+      ],
+      "expected": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "oracles": {
+        "aligned": {
+          "literal": {
+            "value": true
+          }
+        },
+        "conventional": {
+          "op": "const",
+          "args": [
+            true
+          ]
+        }
+      },
+      "prompts": {
+        "aligned": "Output only one executable JSON expression. Each expression is {operation:{named roles}}. Operations and roles: {\"literal\": [\"value\"], \"input\": [\"name\"], \"not\": [\"condition\"], \"equal\": [\"left\", \"right\"], \"all\": [\"conditions\"]} literal/const yields boolean; input/var reads input; not negates; equal/eq compares; all/and is conjunction. Nested expressions compose. Examples: [{\"request\": \"Return false.\", \"expression\": {\"literal\": {\"value\": false}}}, {\"request\": \"Return enabled.\", \"expression\": {\"input\": {\"name\": \"enabled\"}}}, {\"request\": \"Return the opposite of blocked.\", \"expression\": {\"not\": {\"condition\": {\"input\": {\"name\": \"blocked\"}}}}}]. Request: Return true regardless of inputs.",
+        "conventional": "Output only one executable JSON expression. Each expression is {\"op\":mnemonic,\"args\":[positional arguments]}. const(value),var(name),not(condition),eq(left,right),and(condition1,condition2[,condition3]). literal/const yields boolean; input/var reads input; not negates; equal/eq compares; all/and is conjunction. Nested expressions compose. Examples: [{\"request\": \"Return false.\", \"expression\": {\"op\": \"const\", \"args\": [false]}}, {\"request\": \"Return enabled.\", \"expression\": {\"op\": \"var\", \"args\": [\"enabled\"]}}, {\"request\": \"Return the opposite of blocked.\", \"expression\": {\"op\": \"not\", \"args\": [{\"op\": \"var\", \"args\": [\"blocked\"]}]}}]. Request: Return true regardless of inputs."
+      }
+    },
+    {
+      "id": "identity",
+      "stage": "gate",
+      "request": "Return the value of held.",
+      "environments": [
+        {
+          "held": false,
+          "blocked": false,
+          "enabled": false
+        },
+        {
+          "held": false,
+          "blocked": false,
+          "enabled": true
+        },
+        {
+          "held": false,
+          "blocked": true,
+          "enabled": false
+        },
+        {
+          "held": false,
+          "blocked": true,
+          "enabled": true
+        },
+        {
+          "held": true,
+          "blocked": false,
+          "enabled": false
+        },
+        {
+          "held": true,
+          "blocked": false,
+          "enabled": true
+        },
+        {
+          "held": true,
+          "blocked": true,
+          "enabled": false
+        },
+        {
+          "held": true,
+          "blocked": true,
+          "enabled": true
+        }
+      ],
+      "expected": [
+        false,
+        false,
+        false,
+        false,
+        true,
+        true,
+        true,
+        true
+      ],
+      "oracles": {
+        "aligned": {
+          "input": {
+            "name": "held"
+          }
+        },
+        "conventional": {
+          "op": "var",
+          "args": [
+            "held"
+          ]
+        }
+      },
+      "prompts": {
+        "aligned": "Output only one executable JSON expression. Each expression is {operation:{named roles}}. Operations and roles: {\"literal\": [\"value\"], \"input\": [\"name\"], \"not\": [\"condition\"], \"equal\": [\"left\", \"right\"], \"all\": [\"conditions\"]} literal/const yields boolean; input/var reads input; not negates; equal/eq compares; all/and is conjunction. Nested expressions compose. Examples: [{\"request\": \"Return false.\", \"expression\": {\"literal\": {\"value\": false}}}, {\"request\": \"Return enabled.\", \"expression\": {\"input\": {\"name\": \"enabled\"}}}, {\"request\": \"Return the opposite of blocked.\", \"expression\": {\"not\": {\"condition\": {\"input\": {\"name\": \"blocked\"}}}}}]. Request: Return the value of held.",
+        "conventional": "Output only one executable JSON expression. Each expression is {\"op\":mnemonic,\"args\":[positional arguments]}. const(value),var(name),not(condition),eq(left,right),and(condition1,condition2[,condition3]). literal/const yields boolean; input/var reads input; not negates; equal/eq compares; all/and is conjunction. Nested expressions compose. Examples: [{\"request\": \"Return false.\", \"expression\": {\"op\": \"const\", \"args\": [false]}}, {\"request\": \"Return enabled.\", \"expression\": {\"op\": \"var\", \"args\": [\"enabled\"]}}, {\"request\": \"Return the opposite of blocked.\", \"expression\": {\"op\": \"not\", \"args\": [{\"op\": \"var\", \"args\": [\"blocked\"]}]}}]. Request: Return the value of held."
+      }
+    },
+    {
+      "id": "negation",
+      "stage": "gate",
+      "request": "Return the opposite of held.",
+      "environments": [
+        {
+          "held": false,
+          "blocked": false,
+          "enabled": false
+        },
+        {
+          "held": false,
+          "blocked": false,
+          "enabled": true
+        },
+        {
+          "held": false,
+          "blocked": true,
+          "enabled": false
+        },
+        {
+          "held": false,
+          "blocked": true,
+          "enabled": true
+        },
+        {
+          "held": true,
+          "blocked": false,
+          "enabled": false
+        },
+        {
+          "held": true,
+          "blocked": false,
+          "enabled": true
+        },
+        {
+          "held": true,
+          "blocked": true,
+          "enabled": false
+        },
+        {
+          "held": true,
+          "blocked": true,
+          "enabled": true
+        }
+      ],
+      "expected": [
+        true,
+        true,
+        true,
+        true,
+        false,
+        false,
+        false,
+        false
+      ],
+      "oracles": {
+        "aligned": {
+          "not": {
+            "condition": {
+              "input": {
+                "name": "held"
+              }
+            }
+          }
+        },
+        "conventional": {
+          "op": "not",
+          "args": [
+            {
+              "op": "var",
+              "args": [
+                "held"
+              ]
+            }
+          ]
+        }
+      },
+      "prompts": {
+        "aligned": "Output only one executable JSON expression. Each expression is {operation:{named roles}}. Operations and roles: {\"literal\": [\"value\"], \"input\": [\"name\"], \"not\": [\"condition\"], \"equal\": [\"left\", \"right\"], \"all\": [\"conditions\"]} literal/const yields boolean; input/var reads input; not negates; equal/eq compares; all/and is conjunction. Nested expressions compose. Examples: [{\"request\": \"Return false.\", \"expression\": {\"literal\": {\"value\": false}}}, {\"request\": \"Return enabled.\", \"expression\": {\"input\": {\"name\": \"enabled\"}}}, {\"request\": \"Return the opposite of blocked.\", \"expression\": {\"not\": {\"condition\": {\"input\": {\"name\": \"blocked\"}}}}}]. Request: Return the opposite of held.",
+        "conventional": "Output only one executable JSON expression. Each expression is {\"op\":mnemonic,\"args\":[positional arguments]}. const(value),var(name),not(condition),eq(left,right),and(condition1,condition2[,condition3]). literal/const yields boolean; input/var reads input; not negates; equal/eq compares; all/and is conjunction. Nested expressions compose. Examples: [{\"request\": \"Return false.\", \"expression\": {\"op\": \"const\", \"args\": [false]}}, {\"request\": \"Return enabled.\", \"expression\": {\"op\": \"var\", \"args\": [\"enabled\"]}}, {\"request\": \"Return the opposite of blocked.\", \"expression\": {\"op\": \"not\", \"args\": [{\"op\": \"var\", \"args\": [\"blocked\"]}]}}]. Request: Return the opposite of held."
+      }
+    },
+    {
+      "id": "gating",
+      "stage": "compose",
+      "request": "Return true exactly when held and not blocked.",
+      "environments": [
+        {
+          "held": false,
+          "blocked": false,
+          "enabled": false
+        },
+        {
+          "held": false,
+          "blocked": false,
+          "enabled": true
+        },
+        {
+          "held": false,
+          "blocked": true,
+          "enabled": false
+        },
+        {
+          "held": false,
+          "blocked": true,
+          "enabled": true
+        },
+        {
+          "held": true,
+          "blocked": false,
+          "enabled": false
+        },
+        {
+          "held": true,
+          "blocked": false,
+          "enabled": true
+        },
+        {
+          "held": true,
+          "blocked": true,
+          "enabled": false
+        },
+        {
+          "held": true,
+          "blocked": true,
+          "enabled": true
+        }
+      ],
+      "expected": [
+        false,
+        false,
+        false,
+        false,
+        true,
+        true,
+        false,
+        false
+      ],
+      "oracles": {
+        "aligned": {
+          "all": {
+            "conditions": [
+              {
+                "input": {
+                  "name": "held"
+                }
+              },
+              {
+                "not": {
+                  "condition": {
+                    "input": {
+                      "name": "blocked"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "conventional": {
+          "op": "and",
+          "args": [
+            {
+              "op": "var",
+              "args": [
+                "held"
+              ]
+            },
+            {
+              "op": "not",
+              "args": [
+                {
+                  "op": "var",
+                  "args": [
+                    "blocked"
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "prompts": {
+        "aligned": "Output only one executable JSON expression. Each expression is {operation:{named roles}}. Operations and roles: {\"literal\": [\"value\"], \"input\": [\"name\"], \"not\": [\"condition\"], \"equal\": [\"left\", \"right\"], \"all\": [\"conditions\"]} literal/const yields boolean; input/var reads input; not negates; equal/eq compares; all/and is conjunction. Nested expressions compose. Examples: [{\"request\": \"Return false.\", \"expression\": {\"literal\": {\"value\": false}}}, {\"request\": \"Return enabled.\", \"expression\": {\"input\": {\"name\": \"enabled\"}}}, {\"request\": \"Return the opposite of blocked.\", \"expression\": {\"not\": {\"condition\": {\"input\": {\"name\": \"blocked\"}}}}}]. Request: Return true exactly when held and not blocked.",
+        "conventional": "Output only one executable JSON expression. Each expression is {\"op\":mnemonic,\"args\":[positional arguments]}. const(value),var(name),not(condition),eq(left,right),and(condition1,condition2[,condition3]). literal/const yields boolean; input/var reads input; not negates; equal/eq compares; all/and is conjunction. Nested expressions compose. Examples: [{\"request\": \"Return false.\", \"expression\": {\"op\": \"const\", \"args\": [false]}}, {\"request\": \"Return enabled.\", \"expression\": {\"op\": \"var\", \"args\": [\"enabled\"]}}, {\"request\": \"Return the opposite of blocked.\", \"expression\": {\"op\": \"not\", \"args\": [{\"op\": \"var\", \"args\": [\"blocked\"]}]}}]. Request: Return true exactly when held and not blocked."
+      }
+    },
+    {
+      "id": "role-forward",
+      "stage": "compose",
+      "request": "Return true exactly when sender equals target and receiver differs from target.",
+      "environments": [
+        {
+          "sender": "A",
+          "receiver": "A",
+          "target": "A"
+        },
+        {
+          "sender": "A",
+          "receiver": "A",
+          "target": "B"
+        },
+        {
+          "sender": "A",
+          "receiver": "A",
+          "target": "C"
+        },
+        {
+          "sender": "A",
+          "receiver": "B",
+          "target": "A"
+        },
+        {
+          "sender": "A",
+          "receiver": "B",
+          "target": "B"
+        },
+        {
+          "sender": "A",
+          "receiver": "B",
+          "target": "C"
+        },
+        {
+          "sender": "A",
+          "receiver": "C",
+          "target": "A"
+        },
+        {
+          "sender": "A",
+          "receiver": "C",
+          "target": "B"
+        },
+        {
+          "sender": "A",
+          "receiver": "C",
+          "target": "C"
+        },
+        {
+          "sender": "B",
+          "receiver": "A",
+          "target": "A"
+        },
+        {
+          "sender": "B",
+          "receiver": "A",
+          "target": "B"
+        },
+        {
+          "sender": "B",
+          "receiver": "A",
+          "target": "C"
+        },
+        {
+          "sender": "B",
+          "receiver": "B",
+          "target": "A"
+        },
+        {
+          "sender": "B",
+          "receiver": "B",
+          "target": "B"
+        },
+        {
+          "sender": "B",
+          "receiver": "B",
+          "target": "C"
+        },
+        {
+          "sender": "B",
+          "receiver": "C",
+          "target": "A"
+        },
+        {
+          "sender": "B",
+          "receiver": "C",
+          "target": "B"
+        },
+        {
+          "sender": "B",
+          "receiver": "C",
+          "target": "C"
+        },
+        {
+          "sender": "C",
+          "receiver": "A",
+          "target": "A"
+        },
+        {
+          "sender": "C",
+          "receiver": "A",
+          "target": "B"
+        },
+        {
+          "sender": "C",
+          "receiver": "A",
+          "target": "C"
+        },
+        {
+          "sender": "C",
+          "receiver": "B",
+          "target": "A"
+        },
+        {
+          "sender": "C",
+          "receiver": "B",
+          "target": "B"
+        },
+        {
+          "sender": "C",
+          "receiver": "B",
+          "target": "C"
+        },
+        {
+          "sender": "C",
+          "receiver": "C",
+          "target": "A"
+        },
+        {
+          "sender": "C",
+          "receiver": "C",
+          "target": "B"
+        },
+        {
+          "sender": "C",
+          "receiver": "C",
+          "target": "C"
+        }
+      ],
+      "expected": [
+        false,
+        false,
+        false,
+        true,
+        false,
+        false,
+        true,
+        false,
+        false,
+        false,
+        true,
+        false,
+        false,
+        false,
+        false,
+        false,
+        true,
+        false,
+        false,
+        false,
+        true,
+        false,
+        false,
+        true,
+        false,
+        false,
+        false
+      ],
+      "oracles": {
+        "aligned": {
+          "all": {
+            "conditions": [
+              {
+                "equal": {
+                  "left": {
+                    "input": {
+                      "name": "sender"
+                    }
+                  },
+                  "right": {
+                    "input": {
+                      "name": "target"
+                    }
+                  }
+                }
+              },
+              {
+                "not": {
+                  "condition": {
+                    "equal": {
+                      "left": {
+                        "input": {
+                          "name": "receiver"
+                        }
+                      },
+                      "right": {
+                        "input": {
+                          "name": "target"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "conventional": {
+          "op": "and",
+          "args": [
+            {
+              "op": "eq",
+              "args": [
+                {
+                  "op": "var",
+                  "args": [
+                    "sender"
+                  ]
+                },
+                {
+                  "op": "var",
+                  "args": [
+                    "target"
+                  ]
+                }
+              ]
+            },
+            {
+              "op": "not",
+              "args": [
+                {
+                  "op": "eq",
+                  "args": [
+                    {
+                      "op": "var",
+                      "args": [
+                        "receiver"
+                      ]
+                    },
+                    {
+                      "op": "var",
+                      "args": [
+                        "target"
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "prompts": {
+        "aligned": "Output only one executable JSON expression. Each expression is {operation:{named roles}}. Operations and roles: {\"literal\": [\"value\"], \"input\": [\"name\"], \"not\": [\"condition\"], \"equal\": [\"left\", \"right\"], \"all\": [\"conditions\"]} literal/const yields boolean; input/var reads input; not negates; equal/eq compares; all/and is conjunction. Nested expressions compose. Examples: [{\"request\": \"Return false.\", \"expression\": {\"literal\": {\"value\": false}}}, {\"request\": \"Return enabled.\", \"expression\": {\"input\": {\"name\": \"enabled\"}}}, {\"request\": \"Return the opposite of blocked.\", \"expression\": {\"not\": {\"condition\": {\"input\": {\"name\": \"blocked\"}}}}}]. Request: Return true exactly when sender equals target and receiver differs from target.",
+        "conventional": "Output only one executable JSON expression. Each expression is {\"op\":mnemonic,\"args\":[positional arguments]}. const(value),var(name),not(condition),eq(left,right),and(condition1,condition2[,condition3]). literal/const yields boolean; input/var reads input; not negates; equal/eq compares; all/and is conjunction. Nested expressions compose. Examples: [{\"request\": \"Return false.\", \"expression\": {\"op\": \"const\", \"args\": [false]}}, {\"request\": \"Return enabled.\", \"expression\": {\"op\": \"var\", \"args\": [\"enabled\"]}}, {\"request\": \"Return the opposite of blocked.\", \"expression\": {\"op\": \"not\", \"args\": [{\"op\": \"var\", \"args\": [\"blocked\"]}]}}]. Request: Return true exactly when sender equals target and receiver differs from target."
+      }
+    },
+    {
+      "id": "role-reverse",
+      "stage": "compose",
+      "request": "Return true exactly when receiver equals target and sender differs from target.",
+      "environments": [
+        {
+          "sender": "A",
+          "receiver": "A",
+          "target": "A"
+        },
+        {
+          "sender": "A",
+          "receiver": "A",
+          "target": "B"
+        },
+        {
+          "sender": "A",
+          "receiver": "A",
+          "target": "C"
+        },
+        {
+          "sender": "A",
+          "receiver": "B",
+          "target": "A"
+        },
+        {
+          "sender": "A",
+          "receiver": "B",
+          "target": "B"
+        },
+        {
+          "sender": "A",
+          "receiver": "B",
+          "target": "C"
+        },
+        {
+          "sender": "A",
+          "receiver": "C",
+          "target": "A"
+        },
+        {
+          "sender": "A",
+          "receiver": "C",
+          "target": "B"
+        },
+        {
+          "sender": "A",
+          "receiver": "C",
+          "target": "C"
+        },
+        {
+          "sender": "B",
+          "receiver": "A",
+          "target": "A"
+        },
+        {
+          "sender": "B",
+          "receiver": "A",
+          "target": "B"
+        },
+        {
+          "sender": "B",
+          "receiver": "A",
+          "target": "C"
+        },
+        {
+          "sender": "B",
+          "receiver": "B",
+          "target": "A"
+        },
+        {
+          "sender": "B",
+          "receiver": "B",
+          "target": "B"
+        },
+        {
+          "sender": "B",
+          "receiver": "B",
+          "target": "C"
+        },
+        {
+          "sender": "B",
+          "receiver": "C",
+          "target": "A"
+        },
+        {
+          "sender": "B",
+          "receiver": "C",
+          "target": "B"
+        },
+        {
+          "sender": "B",
+          "receiver": "C",
+          "target": "C"
+        },
+        {
+          "sender": "C",
+          "receiver": "A",
+          "target": "A"
+        },
+        {
+          "sender": "C",
+          "receiver": "A",
+          "target": "B"
+        },
+        {
+          "sender": "C",
+          "receiver": "A",
+          "target": "C"
+        },
+        {
+          "sender": "C",
+          "receiver": "B",
+          "target": "A"
+        },
+        {
+          "sender": "C",
+          "receiver": "B",
+          "target": "B"
+        },
+        {
+          "sender": "C",
+          "receiver": "B",
+          "target": "C"
+        },
+        {
+          "sender": "C",
+          "receiver": "C",
+          "target": "A"
+        },
+        {
+          "sender": "C",
+          "receiver": "C",
+          "target": "B"
+        },
+        {
+          "sender": "C",
+          "receiver": "C",
+          "target": "C"
+        }
+      ],
+      "expected": [
+        false,
+        false,
+        false,
+        false,
+        true,
+        false,
+        false,
+        false,
+        true,
+        true,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        true,
+        true,
+        false,
+        false,
+        false,
+        true,
+        false,
+        false,
+        false,
+        false
+      ],
+      "oracles": {
+        "aligned": {
+          "all": {
+            "conditions": [
+              {
+                "equal": {
+                  "left": {
+                    "input": {
+                      "name": "receiver"
+                    }
+                  },
+                  "right": {
+                    "input": {
+                      "name": "target"
+                    }
+                  }
+                }
+              },
+              {
+                "not": {
+                  "condition": {
+                    "equal": {
+                      "left": {
+                        "input": {
+                          "name": "sender"
+                        }
+                      },
+                      "right": {
+                        "input": {
+                          "name": "target"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "conventional": {
+          "op": "and",
+          "args": [
+            {
+              "op": "eq",
+              "args": [
+                {
+                  "op": "var",
+                  "args": [
+                    "receiver"
+                  ]
+                },
+                {
+                  "op": "var",
+                  "args": [
+                    "target"
+                  ]
+                }
+              ]
+            },
+            {
+              "op": "not",
+              "args": [
+                {
+                  "op": "eq",
+                  "args": [
+                    {
+                      "op": "var",
+                      "args": [
+                        "sender"
+                      ]
+                    },
+                    {
+                      "op": "var",
+                      "args": [
+                        "target"
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "prompts": {
+        "aligned": "Output only one executable JSON expression. Each expression is {operation:{named roles}}. Operations and roles: {\"literal\": [\"value\"], \"input\": [\"name\"], \"not\": [\"condition\"], \"equal\": [\"left\", \"right\"], \"all\": [\"conditions\"]} literal/const yields boolean; input/var reads input; not negates; equal/eq compares; all/and is conjunction. Nested expressions compose. Examples: [{\"request\": \"Return false.\", \"expression\": {\"literal\": {\"value\": false}}}, {\"request\": \"Return enabled.\", \"expression\": {\"input\": {\"name\": \"enabled\"}}}, {\"request\": \"Return the opposite of blocked.\", \"expression\": {\"not\": {\"condition\": {\"input\": {\"name\": \"blocked\"}}}}}]. Request: Return true exactly when receiver equals target and sender differs from target.",
+        "conventional": "Output only one executable JSON expression. Each expression is {\"op\":mnemonic,\"args\":[positional arguments]}. const(value),var(name),not(condition),eq(left,right),and(condition1,condition2[,condition3]). literal/const yields boolean; input/var reads input; not negates; equal/eq compares; all/and is conjunction. Nested expressions compose. Examples: [{\"request\": \"Return false.\", \"expression\": {\"op\": \"const\", \"args\": [false]}}, {\"request\": \"Return enabled.\", \"expression\": {\"op\": \"var\", \"args\": [\"enabled\"]}}, {\"request\": \"Return the opposite of blocked.\", \"expression\": {\"op\": \"not\", \"args\": [{\"op\": \"var\", \"args\": [\"blocked\"]}]}}]. Request: Return true exactly when receiver equals target and sender differs from target."
+      }
+    }
+  ],
+  "schemas": {
+    "aligned": {
+      "$ref": "#/definitions/Expr",
+      "definitions": {
+        "Expr": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "literal": {
+                  "type": "object",
+                  "properties": {
+                    "value": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "value"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "literal"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "input": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "enum": [
+                        "held",
+                        "blocked",
+                        "enabled",
+                        "sender",
+                        "receiver",
+                        "target",
+                        "first",
+                        "second",
+                        "third"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "input"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "not": {
+                  "type": "object",
+                  "properties": {
+                    "condition": {
+                      "$ref": "#/definitions/Expr"
+                    }
+                  },
+                  "required": [
+                    "condition"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "not"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "equal": {
+                  "type": "object",
+                  "properties": {
+                    "left": {
+                      "$ref": "#/definitions/Expr"
+                    },
+                    "right": {
+                      "$ref": "#/definitions/Expr"
+                    }
+                  },
+                  "required": [
+                    "left",
+                    "right"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "equal"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "all": {
+                  "type": "object",
+                  "properties": {
+                    "conditions": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/definitions/Expr"
+                      },
+                      "minItems": 2,
+                      "maxItems": 3
+                    }
+                  },
+                  "required": [
+                    "conditions"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "all"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      }
+    },
+    "conventional": {
+      "$ref": "#/definitions/Expr",
+      "definitions": {
+        "Expr": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "op": {
+                  "type": "string",
+                  "enum": [
+                    "const"
+                  ]
+                },
+                "args": {
+                  "type": "array",
+                  "items": {
+                    "type": "boolean"
+                  },
+                  "minItems": 1,
+                  "maxItems": 1
+                }
+              },
+              "required": [
+                "op",
+                "args"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "op": {
+                  "type": "string",
+                  "enum": [
+                    "var"
+                  ]
+                },
+                "args": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "held",
+                      "blocked",
+                      "enabled",
+                      "sender",
+                      "receiver",
+                      "target",
+                      "first",
+                      "second",
+                      "third"
+                    ]
+                  },
+                  "minItems": 1,
+                  "maxItems": 1
+                }
+              },
+              "required": [
+                "op",
+                "args"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "op": {
+                  "type": "string",
+                  "enum": [
+                    "not"
+                  ]
+                },
+                "args": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/definitions/Expr"
+                  },
+                  "minItems": 1,
+                  "maxItems": 1
+                }
+              },
+              "required": [
+                "op",
+                "args"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "op": {
+                  "type": "string",
+                  "enum": [
+                    "eq"
+                  ]
+                },
+                "args": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/definitions/Expr"
+                  },
+                  "minItems": 2,
+                  "maxItems": 2
+                }
+              },
+              "required": [
+                "op",
+                "args"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "op": {
+                  "type": "string",
+                  "enum": [
+                    "and"
+                  ]
+                },
+                "args": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/definitions/Expr"
+                  },
+                  "minItems": 2,
+                  "maxItems": 3
+                }
+              },
+              "required": [
+                "op",
+                "args"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      }
+    }
+  },
+  "model": {
+    "id": "Qwen/Qwen2.5-0.5B-Instruct",
+    "sha": "7ae557604adf67be50417f59c2c2f167def9a775",
+    "license": "apache-2.0",
+    "files": [
+      {
+        "name": "config.json",
+        "size": 659
+      },
+      {
+        "name": "generation_config.json",
+        "size": 242
+      },
+      {
+        "name": "model.safetensors",
+        "size": 988097824
+      },
+      {
+        "name": "tokenizer.json",
+        "size": 7031645
+      },
+      {
+        "name": "tokenizer_config.json",
+        "size": 7305
+      }
+    ]
+  },
+  "scorer_sha256": "fe9e8e813e6e3e4c36fa91db889ca25ccb35f26602a21daa6781515a18376ac8",
+  "generation": {
+    "do_sample": false,
+    "max_gate_tokens": 128,
+    "max_compose_tokens": 256,
+    "seed": 0,
+    "cpu_threads": 2
+  },
+  "gate": "Both arms must have3/3format-valid AND exact semantics before any compose inference. No retries/corrections.",
+  "preflight": "Both arm oracle interpreter checks done; JSONSchema + LMFE character acceptance verified on runner BEFORE loading model."
+}
