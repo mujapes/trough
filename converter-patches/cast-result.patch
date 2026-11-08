@@ -1,0 +1,194 @@
+diff --git a/src/lower.rs b/src/lower.rs
+index 401801a..0760a4b 100644
+--- a/src/lower.rs
++++ b/src/lower.rs
+@@ -36510,6 +36510,7 @@ fn lower_call_expr_variant_with_refinements(
+     ctx: LowerCtx,
+     refinements: &ExprRefinements,
+ ) -> RustExpr {
++    profile_cast_boundary("call", expr, env, None, ctx);
+     if let Some((value, _)) = lower_iterator_stream_factory(expr, env, ctx) {
+         return value;
+     }
+@@ -38413,19 +38414,48 @@ fn lower_new_expr_variant_with_refinements(
+ 
+ // Keep large variant-local temporaries off unrelated recursive expression frames.
+ #[inline(never)]
++// Opt-in bounded diagnostics for a cast disappearing across receiver/slot paths.
++fn profile_cast_boundary(stage: &str, expr: &Expr, env: &ShapeEnv, slot: Option<&Slot>, ctx: LowerCtx) {
++    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
++    static COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
++    if !*ENABLED.get_or_init(|| std::env::var_os("NEW_JAVA2RUST_PROFILE_CASTS").is_some()) { return; }
++    let cast = match expr {
++        Expr::Cast { .. } => expr,
++        Expr::Call { receiver: Some(receiver), .. } if matches!(receiver.as_ref(), Expr::Cast { .. }) => receiver.as_ref(),
++        _ => return,
++    };
++    if COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed) >= 64 { return; }
++    if let Expr::Cast { ty, expr: source } = cast {
++        let actual = infer_expr_shape_with_context(source, env, ctx.expr_shape_context());
++        let plan = plan_cast_conversion_from_actual(actual.clone(), ty, ctx.expr_shape_context());
++        eprintln!("new_java2rust_cast_profile\t{stage}\towner={:?}\tsource={:?}\ttarget={:?}\tslot={:?}\tplan={:?}", ctx.current_type, actual, ty, slot, plan);
++    }
++}
++
++fn profile_cast_result(stage: &str, value: RustExpr) -> RustExpr {
++    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
++    static COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
++    if *ENABLED.get_or_init(|| std::env::var_os("NEW_JAVA2RUST_PROFILE_CASTS").is_some())
++        && COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 64 {
++        eprintln!("new_java2rust_cast_result\t{stage}\tshape={:?}\tvalue={}", value.recorded_slot_shape(), crate::emit::emit_expr(&value));
++    }
++    value
++}
++
+ fn lower_cast_expr_variant_with_refinements(
+     expr: &Expr,
+     env: &ShapeEnv,
+     ctx: LowerCtx,
+     refinements: &ExprRefinements,
+ ) -> RustExpr {
++    profile_cast_boundary("cast", expr, env, None, ctx);
+     if let Some(value) = lower_native_enum_cast(expr, env, ctx) {
+-        return value;
++        return profile_cast_result("native_enum", value);
+     }
+     match expr {
+         Expr::Cast { ty, expr } => {
+             if matches!(expr.as_ref(), Expr::Literal(Literal::Null)) {
+-                return typed_none_for_java_type(ty, ctx.facts);
++                return profile_cast_result("null", typed_none_for_java_type(ty, ctx.facts));
+             }
+             if expr_is_current_self_reference(expr)
+                 && let Some(upcast_gap) = unsupported_current_self_exception_upcast_expr(ty, ctx)
+@@ -38436,7 +38466,7 @@ fn lower_cast_expr_variant_with_refinements(
+                 return this_expr();
+             }
+             if java_type_is_erased_object_name(ty) {
+-                return lower_expr_with_refinements(expr, env, ctx, refinements);
++                return profile_cast_result("erased_or_generic", lower_expr_with_refinements(expr, env, ctx, refinements));
+             }
+             if let Expr::Var(local_name) = expr.as_ref()
+                 && refinements
+@@ -38567,7 +38597,7 @@ fn lower_cast_expr_variant_with_refinements(
+                 ctx,
+                 refinements,
+             ) {
+-                return downcast;
++                return profile_cast_result("reference_or_type_param", downcast);
+             }
+             if let Some(downcast) = lower_boxed_source_interface_cast_to_type_param(
+                 ty,
+@@ -38577,10 +38607,10 @@ fn lower_cast_expr_variant_with_refinements(
+                 ctx,
+                 refinements,
+             ) {
+-                return downcast;
++                return profile_cast_result("reference_or_type_param", downcast);
+             }
+             if cast_target_erases_slot_generic_detail(ty, &inner_shape.java_ty) {
+-                return lower_expr_with_refinements(expr, env, ctx, refinements);
++                return profile_cast_result("erased_or_generic", lower_expr_with_refinements(expr, env, ctx, refinements));
+             }
+             // A primitive cast consumes a Java scalar, not an intermediate
+             // checked-arithmetic Result. Reuse the value-slot path also used
+@@ -38622,19 +38652,20 @@ fn lower_cast_expr_variant_with_refinements(
+             if let Some(unsupported) =
+                 unsupported_source_hierarchy_cast_expr_for_plan(&plan, lowered.clone(), env, ctx)
+             {
+-                return unsupported;
++                return profile_cast_result("unsupported_hierarchy", unsupported);
+             }
+             if let Some(supported) =
+                 erased_object_source_hierarchy_cast_expr_for_plan(&plan, ty, lowered.clone(), ctx)
+             {
+-                return supported;
++                return profile_cast_result("hierarchy_or_capability", supported);
+             }
+             if let Some(supported) =
+                 external_capability_cast_expr_for_plan(&plan, ty, expr, env, ctx)
+             {
+-                return supported;
++                return profile_cast_result("hierarchy_or_capability", supported);
+             }
+-            apply_cast_conversion(lowered, &plan)
++            if std::env::var_os("NEW_JAVA2RUST_PROFILE_CASTS").is_some() { eprintln!("new_java2rust_cast_selected_plan\t{:?}", plan); }
++            profile_cast_result("ordinary_conversion", apply_cast_conversion(lowered, &plan))
+         }
+         _ => unreachable!("expression variant dispatcher mismatch"),
+     }
+@@ -82050,6 +82081,7 @@ fn lower_expr_for_slot_with_refinements(
+     ctx: LowerCtx,
+     refinements: &ExprRefinements,
+ ) -> RustExpr {
++    profile_cast_boundary("slot", expr, env, Some(&slot), ctx);
+     if let Some(bound) = anonymous_enclosing_call_with_explicit_receiver(expr, env, ctx) {
+         return lower_expr_for_slot_with_refinements(&bound, env, slot, ctx, refinements);
+     }
+@@ -96695,6 +96727,7 @@ fn lower_concrete_cast_source_for_slot(
+     ctx: LowerCtx,
+     refinements: &ExprRefinements,
+ ) -> Option<RustExpr> {
++    profile_cast_boundary("concrete_slot", expr, env, Some(slot), ctx);
+     let Expr::Cast { ty, expr: inner } = expr else {
+         return None;
+     };
+diff --git a/src/signature.rs b/src/signature.rs
+index 6841bf3..708dc1a 100644
+--- a/src/signature.rs
++++ b/src/signature.rs
+@@ -25968,6 +25968,32 @@ class NativeAllocationFlow {
+         assert!(return_constraints.contains(&nullable));
+     }
+ 
++    #[test]
++    fn native_bodyless_return_contract_preserves_nullable_and_nonnull() {
++        let parsed = crate::parser::parse_java_source(
++            "class Provider { native Object find(); native int count(); Object actual() { return new Object(); } }",
++        );
++        let resolved = crate::resolve::resolve_program(&parsed.program, parsed.diagnostics);
++        let owner = &resolved.program.types[0];
++        let find = owner.members.iter().find_map(|member| match member {
++            Member::Method(method) if method.name == "find" => Some(method), _ => None,
++        }).unwrap();
++        for (contract, expected) in [("maybe-null", NullabilityState::MaybeNull), ("non-null", NullabilityState::DefinitelyNonNull)] {
++            let parsed = crate::external_facts::parse_external_facts(&format!(
++                "external-api find Provider unknown unknown {contract} args=0 return=Object\n"
++            ));
++            let constraints = method_return_shape_constraints(owner, find, &UsageFacts::default(), parsed.facts());
++            assert_eq!(constraints, vec![SignatureConstraint::RequiredStorageNullability(expected)]);
++        }
++        let constraints = method_return_shape_constraints(owner, find, &UsageFacts::default(), &FactSet::default());
++        assert_eq!(constraints, vec![SignatureConstraint::RequiredStorageNullability(NullabilityState::MaybeNull)]);
++        let count = owner.members.iter().find_map(|member| match member {
++            Member::Method(method) if method.name == "count" => Some(method), _ => None,
++        }).unwrap();
++        assert!(!method_return_shape_constraints(owner, count, &UsageFacts::default(), &FactSet::default())
++            .contains(&SignatureConstraint::RequiredStorageNullability(NullabilityState::MaybeNull)));
++    }
++
+     #[test]
+     fn map_entry_accessor_returned_from_source_helper_stays_nullable() {
+         let parsed = crate::parser::parse_java_source(
+@@ -37313,6 +37339,21 @@ fn method_return_shape_constraints_with_declared_source_types(
+     facts: &FactSet,
+     declared_source_types: &HashSet<String>,
+ ) -> Vec<SignatureConstraint> {
++    // A native declaration supplies no body proving a non-null reference.
++    // Keep its producer slot nullable unless an explicit ABI contract says otherwise.
++    if method.body.is_none()
++        && method.modifiers.contains(&Modifier::Native)
++        && method_return_type_param_name(method).is_none()
++        && matches!(method.return_type, JavaType::String | JavaType::Array(_) | JavaType::Named { .. })
++    {
++        let state = facts.external_api_effect_for_receiver_with_arity(
++            Some(&ty.name), &method.name, Some(method.params.len()),
++        ).filter(|effect| external_effect_return_nullability_is_signature_evidence(effect)
++            && effect.return_nullability != NullabilityState::Unknown)
++         .map(|effect| effect.return_nullability)
++         .unwrap_or(NullabilityState::MaybeNull);
++        return vec![SignatureConstraint::RequiredStorageNullability(state)];
++    }
+     if method.body.is_none()
+         && !method.modifiers.contains(&Modifier::Abstract)
+         && method_return_type_param_name(method).is_none()
