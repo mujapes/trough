@@ -1,0 +1,81 @@
+diff --git a/src/lower.rs b/src/lower.rs
+index 401801a..183ae2f 100644
+--- a/src/lower.rs
++++ b/src/lower.rs
+@@ -97124,13 +97124,12 @@ fn cast_inner_can_flow_through_concrete_slot(
+         return true;
+     }
+     match actual_ty {
++        // An unknown variable/field may hold an incompatible runtime object.
++        // It needs the ordinary checked cast; the destination slot alone is
++        // not evidence that its current value already has the target type.
+         JavaType::Unknown(_) => matches!(
+             expr,
+-            Expr::Call { .. }
+-                | Expr::New { .. }
+-                | Expr::Ternary { .. }
+-                | Expr::Var(_)
+-                | Expr::FieldAccess(_, _)
++            Expr::Call { .. } | Expr::New { .. } | Expr::Ternary { .. }
+         ),
+         JavaType::Named { .. } => external_call_expr_result_shape(expr, env, ctx)
+             .is_some_and(|shape| same_concrete_java_type(&shape.java_ty, cast_ty)),
+diff --git a/src/signature.rs b/src/signature.rs
+index 6841bf3..708dc1a 100644
+--- a/src/signature.rs
++++ b/src/signature.rs
+@@ -25968,6 +25968,32 @@ class NativeAllocationFlow {
+         assert!(return_constraints.contains(&nullable));
+     }
+ 
++    #[test]
++    fn native_bodyless_return_contract_preserves_nullable_and_nonnull() {
++        let parsed = crate::parser::parse_java_source(
++            "class Provider { native Object find(); native int count(); Object actual() { return new Object(); } }",
++        );
++        let resolved = crate::resolve::resolve_program(&parsed.program, parsed.diagnostics);
++        let owner = &resolved.program.types[0];
++        let find = owner.members.iter().find_map(|member| match member {
++            Member::Method(method) if method.name == "find" => Some(method), _ => None,
++        }).unwrap();
++        for (contract, expected) in [("maybe-null", NullabilityState::MaybeNull), ("non-null", NullabilityState::DefinitelyNonNull)] {
++            let parsed = crate::external_facts::parse_external_facts(&format!(
++                "external-api find Provider unknown unknown {contract} args=0 return=Object\n"
++            ));
++            let constraints = method_return_shape_constraints(owner, find, &UsageFacts::default(), parsed.facts());
++            assert_eq!(constraints, vec![SignatureConstraint::RequiredStorageNullability(expected)]);
++        }
++        let constraints = method_return_shape_constraints(owner, find, &UsageFacts::default(), &FactSet::default());
++        assert_eq!(constraints, vec![SignatureConstraint::RequiredStorageNullability(NullabilityState::MaybeNull)]);
++        let count = owner.members.iter().find_map(|member| match member {
++            Member::Method(method) if method.name == "count" => Some(method), _ => None,
++        }).unwrap();
++        assert!(!method_return_shape_constraints(owner, count, &UsageFacts::default(), &FactSet::default())
++            .contains(&SignatureConstraint::RequiredStorageNullability(NullabilityState::MaybeNull)));
++    }
++
+     #[test]
+     fn map_entry_accessor_returned_from_source_helper_stays_nullable() {
+         let parsed = crate::parser::parse_java_source(
+@@ -37313,6 +37339,21 @@ fn method_return_shape_constraints_with_declared_source_types(
+     facts: &FactSet,
+     declared_source_types: &HashSet<String>,
+ ) -> Vec<SignatureConstraint> {
++    // A native declaration supplies no body proving a non-null reference.
++    // Keep its producer slot nullable unless an explicit ABI contract says otherwise.
++    if method.body.is_none()
++        && method.modifiers.contains(&Modifier::Native)
++        && method_return_type_param_name(method).is_none()
++        && matches!(method.return_type, JavaType::String | JavaType::Array(_) | JavaType::Named { .. })
++    {
++        let state = facts.external_api_effect_for_receiver_with_arity(
++            Some(&ty.name), &method.name, Some(method.params.len()),
++        ).filter(|effect| external_effect_return_nullability_is_signature_evidence(effect)
++            && effect.return_nullability != NullabilityState::Unknown)
++         .map(|effect| effect.return_nullability)
++         .unwrap_or(NullabilityState::MaybeNull);
++        return vec![SignatureConstraint::RequiredStorageNullability(state)];
++    }
+     if method.body.is_none()
+         && !method.modifiers.contains(&Modifier::Abstract)
+         && method_return_type_param_name(method).is_none()
