@@ -1,0 +1,784 @@
+diff --git a/src/aliasing.rs b/src/aliasing.rs
+index a62170e..630d61b 100644
+--- a/src/aliasing.rs
++++ b/src/aliasing.rs
+@@ -325,6 +325,21 @@ fn source_map_entry_alias_mutation_is_represented(
+     placement.shared() && placement.interior_mutable() && !placement.sync()
+ }
+ 
++fn native_throwable_suppressed_alias_is_represented(alias: &ObservableAlias, facts: &FactSet) -> bool {
++    if !matches!(alias.mutation(), MutationKind::MutatingCall { method } if matches!(method.as_str(), "addSuppressed" | "add_suppressed")) {
++        return false;
++    }
++    let effective = crate::effective_facts::EffectiveFacts::new(facts);
++    let native = |ty: &JavaType| {
++        let ty = crate::types::optional_element_type(ty).unwrap_or_else(|| ty.clone());
++        matches!(ty, JavaType::Named { ref name, .. }
++            if (!name.contains('.') || name.starts_with("java."))
++            && crate::stdlib::is_known_throwable_carrier_type(name)
++            && effective.allows_platform_hierarchy_fallback(name))
++    };
++    native(alias.aliased_ty()) && alias.original_ty.as_ref().is_some_and(native)
++}
++
+ fn direct_local_alias_mutation_is_represented(alias: &ObservableAlias, facts: &FactSet) -> bool {
+     if !matches!(
+         alias.mutation(),
+@@ -332,6 +347,11 @@ fn direct_local_alias_mutation_is_represented(alias: &ObservableAlias, facts: &F
+     ) {
+         return false;
+     }
++    // JavaException clones retain allocation identity and share suppressed state.
++    // This proves only the mapped addSuppressed mutation, not arbitrary fields/APIs.
++    if native_throwable_suppressed_alias_is_represented(alias, facts) {
++        return true;
++    }
+     let effective = crate::effective_facts::EffectiveFacts::new(facts);
+     if effective.native_shared_reference_carrier(alias.aliased_ty())
+         && alias.original_ty.as_ref().is_some_and(|original| {
+@@ -1681,6 +1701,27 @@ mod tests {
+     use crate::facts::{ExternalApiEffectFact, ExternalApiRole, FactProvenance, NullabilityState};
+     use crate::parser::parse_java_source;
+ 
++    #[test]
++    fn native_throwable_suppressed_alias_requires_proven_carrier_and_mutation() {
++        let alias = |name: &str, mutation| ObservableAlias::new(
++            "Probe.run".into(), "value".into(), "alias".into(), "alias".into(), "value".into(),
++            crate::parser::parse_hierarchy_type(name), Some(crate::parser::parse_hierarchy_type(name)), false, mutation);
++        let mutation = || MutationKind::MutatingCall { method: "addSuppressed".into() };
++        for name in ["Exception", "java.lang.Exception", "IOException"] {
++            assert!(native_throwable_suppressed_alias_is_represented(&alias(name, mutation()), &FactSet::default()));
++        }
++        for name in ["Object", "Cell", "other.Exception"] {
++            assert!(!native_throwable_suppressed_alias_is_represented(&alias(name, mutation()), &FactSet::default()));
++        }
++        assert!(!native_throwable_suppressed_alias_is_represented(&alias("Exception", MutationKind::FieldWrite { field: "value".into() }), &FactSet::default()));
++        assert!(!native_throwable_suppressed_alias_is_represented(&alias("Exception", MutationKind::MutatingCall { method: "initCause".into() }), &FactSet::default()));
++        let parsed = parse_java_source("class Exception { int value; }");
++        let resolved = crate::resolve::resolve_program(&parsed.program, parsed.diagnostics);
++        let semantic = crate::semantic_analysis::analyze_program(&resolved.program, &resolved.facts, &FactSet::default());
++        assert!(!native_throwable_suppressed_alias_is_represented(&alias("Exception", mutation()), &semantic.facts));
++        assert!(native_throwable_suppressed_alias_is_represented(&alias("java.lang.Exception", mutation()), &semantic.facts));
++    }
++
+     #[test]
+     fn stored_reference_alias_does_not_alias_the_containing_object() {
+         let aliases = aliases_in(
+diff --git a/src/coercion.rs b/src/coercion.rs
+index 70121ff..de4930d 100644
+--- a/src/coercion.rs
++++ b/src/coercion.rs
+@@ -17954,7 +17954,10 @@ fn apply_erased_object_downcast(
+     }
+     let target_type = normalize_emitted_java_type_name(target_type);
+     if !plausible_rust_nominal_type_name(&target_type) {
+-        return expr;
++        return crate::unsupported::compile_error_expr_consuming(
++            &expr,
++            &format!("unsupported Java checked cast: invalid nominal Rust target {target_type}"),
++        );
+     }
+     match invalid_cast {
+         // Parenthesised: `.` binds tighter than unary `*`, so an appended field
+@@ -18136,13 +18139,15 @@ fn plausible_rust_nominal_type_name(target_type: &str) -> bool {
+         .map(|(_, inner)| inner.trim_end_matches('>'))
+         .unwrap_or(target_type);
+     let innermost = innermost.rsplit("::").next().unwrap_or(innermost);
+-    matches!(
+-        innermost,
+-        "bool" | "i8" | "i16" | "char" | "i32" | "i64" | "f32" | "f64"
+-    ) || innermost
+-        .chars()
+-        .next()
+-        .is_some_and(|ch| ch == '_' || ch.is_ascii_uppercase())
++    // Java permits lowercase class names, which are common in obfuscated APKs.
++    // Naming style is not evidence that a checked cast can be omitted.
++    let identifier = innermost.strip_prefix("r#").unwrap_or(innermost);
++    if matches!(identifier, "dyn" | "impl" | "self" | "Self" | "super" | "crate") {
++        return false;
++    }
++    let mut chars = identifier.chars();
++    chars.next().is_some_and(|ch| ch == '_' || ch.is_ascii_alphabetic())
++        && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+ }
+ 
+ fn apply_to_owned_sequence(expr: RustExpr, policy: &CloneRecoveryPolicy) -> RustExpr {
+@@ -18506,6 +18511,10 @@ mod nominal_downcast_target_tests {
+             "crate::Foo",
+             "_Anon",
+             "i32",
++            "cd",
++            "crate::defpackage::cd",
++            "std::rc::Rc<cd>",
++            "r#type",
+         ] {
+             assert!(
+                 plausible_rust_nominal_type_name(target),
+@@ -18516,7 +18525,7 @@ mod nominal_downcast_target_tests {
+ 
+     #[test]
+     fn non_nominal_targets_are_still_rejected() {
+-        for target in ["", "dyn", "&str", "(i32, i32)", "std::rc::Rc<dyn>"] {
++        for target in ["", "dyn", "&str", "(i32, i32)", "std::rc::Rc<dyn>", "123bad", "cd()", "self"] {
+             assert!(
+                 !plausible_rust_nominal_type_name(target),
+                 "expected a non-nominal target: {target}"
+diff --git a/src/java_exception.rs b/src/java_exception.rs
+index 985bd49..a5b987d 100644
+--- a/src/java_exception.rs
++++ b/src/java_exception.rs
+@@ -1,15 +1,24 @@
+ // Java exception state and logical message API. The producer selects the
+ // text alias and explicit formatter adapter; no scalar projection lives here.
+-#[derive(Clone, PartialEq, Eq)]
++#[derive(Clone)]
+ pub struct JavaException {
++    allocation_identity: std::sync::Arc<()>,
+     class_name: &'static str,
+     binary_name: &'static str,
+     message: Option<JavaExceptionText>,
+     cause: Option<std::boxed::Box<JavaException>>,
+-    suppressed: Vec<JavaException>,
++    suppressed: std::sync::Arc<std::sync::Mutex<Vec<JavaException>>>,
+     null_callback_receiver: bool,
+ }
+ 
++// Throwable inherits Object reference equality; equal text is not equal allocation.
++impl PartialEq for JavaException {
++    fn eq(&self, other: &Self) -> bool {
++        std::sync::Arc::ptr_eq(&self.allocation_identity, &other.allocation_identity)
++    }
++}
++impl Eq for JavaException {}
++
+ impl JavaAppendValue for JavaException {
+     fn into_java_append_string(self) -> JavaUtf16 {
+         JavaTextView::java_text_view(&self.to_string()).into_owned()
+@@ -32,7 +41,7 @@ impl std::fmt::Debug for JavaException {
+             .field("text", &format_args!("{}", self))
+             .field("message", &self.message)
+             .field("cause", &self.cause)
+-            .field("suppressed", &self.suppressed)
++            .field("suppressed", &*self.suppressed.lock().expect("Java suppressed exceptions mutex poisoned"))
+             .field("null_callback_receiver", &self.null_callback_receiver)
+             .finish()
+     }
+@@ -49,11 +58,12 @@ impl JavaException {
+         cause: Option<JavaException>,
+     ) -> JavaException {
+         JavaException {
++            allocation_identity: std::sync::Arc::new(()),
+             class_name,
+             binary_name: java_exception_runtime_name(class_name),
+             message,
+             cause: cause.map(std::boxed::Box::new),
+-            suppressed: Vec::new(),
++            suppressed: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+             null_callback_receiver: false,
+         }
+     }
+@@ -138,11 +148,12 @@ impl JavaException {
+         cause: JavaException,
+     ) -> JavaException {
+         JavaException {
++            allocation_identity: std::sync::Arc::new(()),
+             class_name,
+             binary_name: java_exception_runtime_name(class_name),
+             message: Some(message.into()),
+             cause: Some(std::boxed::Box::new(cause)),
+-            suppressed: Vec::new(),
++            suppressed: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+             null_callback_receiver: false,
+         }
+     }
+@@ -201,11 +212,11 @@ impl JavaException {
+     }
+ 
+     pub fn add_suppressed(&mut self, exception: JavaException) {
+-        self.suppressed.push(exception);
++        self.suppressed.lock().expect("Java suppressed exceptions mutex poisoned").push(exception);
+     }
+ 
+     pub fn get_suppressed(&self) -> Vec<Option<JavaException>> {
+-        self.suppressed.iter().cloned().map(Some).collect()
++        self.suppressed.lock().expect("Java suppressed exceptions mutex poisoned").iter().cloned().map(Some).collect()
+     }
+ 
+     pub fn get_class(&self) -> JavaClass<()> {
+diff --git a/src/lower.rs b/src/lower.rs
+index 401801a..0b06a51 100644
+--- a/src/lower.rs
++++ b/src/lower.rs
+@@ -2834,6 +2834,43 @@ fn static_storage_access_name_for_name(
+     static_storage_access_name_for_owner(owner, semantic_name, env, ctx)
+ }
+ 
++// Interface instance methods have a trait implementor as Self, whereas their
++// static fields belong to the declaring interface's single process-wide owner.
++fn interface_uses_static_carrier(ty: &TypeDecl, ctx: LowerCtx) -> bool {
++    ty.kind == TypeKind::Interface && !source_type_lowers_as_erased_object_alias(ty, ctx)
++}
++
++fn interface_static_carrier_name(ty: &TypeDecl) -> String {
++    format!("__JavaStatics{}", crate::java_naming::rust_name_for_java_named_type(&ty.name))
++}
++
++fn lower_interface_static_members(
++    file: &mut RustFile, program: &Program, ty: &TypeDecl, ctx: LowerCtx,
++) {
++    if !interface_uses_static_carrier(ty, ctx) {
++        return;
++    }
++    let owner = interface_static_carrier_name(ty);
++    file.items.push(RustItem::Raw(format!("pub struct {owner};")));
++    for item in static_storage_items_for_type(ty, ctx) {
++        file.items.push(RustItem::Raw(item));
++    }
++    let mut functions = ty.members.iter().filter_map(|member| match member {
++        Member::Method(method) if method.modifiers.contains(&Modifier::Static) =>
++            Some(lower_method(program, ty, method, ctx)),
++        _ => None,
++    }).collect::<Vec<_>>();
++    functions.extend(static_storage_accessor_functions_for_type(ty, ctx));
++    let associated_consts = crate::item_assembly::associated_consts_for_type(
++        ty, &associated_const_value_overrides_for_type(ty, ctx), ctx.support_local_type_program,
++    );
++    if !functions.is_empty() || !associated_consts.is_empty() {
++        file.items.push(RustItem::Impl(RustImpl {
++            target: owner, trait_name: None, associated_consts, functions,
++        }));
++    }
++}
++
+ /// The Rust type name to qualify with, or `None` to use `Self`.
+ fn static_storage_owner_qualifier(name: &str, env: &ShapeEnv, ctx: LowerCtx) -> Option<String> {
+     let current = ctx.current_type?;
+@@ -2842,7 +2879,8 @@ fn static_storage_owner_qualifier(name: &str, env: &ShapeEnv, ctx: LowerCtx) ->
+         lexical_source_field_decl(semantic_name, ctx)
+         && field.modifiers.contains(&Modifier::Static)
+     {
+-        return (!declared_on_current || ctx.current_constructor.is_some())
++        return (!declared_on_current || ctx.current_constructor.is_some()
++            || interface_uses_static_carrier(owner_ty, ctx))
+             .then(|| source_static_owner_use_name(owner_ty, ctx));
+     }
+     if SourceContextOwnerKey::new(current)
+@@ -3198,6 +3236,7 @@ fn lower_type(
+     }
+     if let Some(item) = raw_interface_trait_item_with_default_methods(ty, program, ctx) {
+         file.items.push(RustItem::Raw(item));
++        lower_interface_static_members(file, program, ty, ctx);
+         return;
+     }
+ 
+@@ -3220,6 +3259,7 @@ fn lower_type(
+             file.items.push(RustItem::Raw(bound_item));
+         }
+         file.items.push(RustItem::Raw(item));
++        lower_interface_static_members(file, program, ty, ctx);
+         let erased_static_functions = erased_source_static_free_functions(program, ty, ctx);
+         if !erased_static_functions.is_empty() {
+             file.items
+@@ -4740,42 +4780,8 @@ fn raw_interface_trait_item_with_default_methods(
+             ctx,
+         ));
+     }
+-    // Static interface utilities are not inherited virtual contracts.
+-    for member in &ty.members {
+-        if let Member::Method(method) = member
+-            && method.modifiers.contains(&Modifier::Static)
+-            && method.body.is_some()
+-        {
+-            let signature = trait_method_signature_with_receiver_and_return_shape(
+-                ty,
+-                method,
+-                ctx.signatures,
+-                ctx.facts,
+-                trait_method_exception_plan(ty, method, program, ctx.exceptions),
+-                trait_method_receiver_plan(
+-                    ty,
+-                    method,
+-                    program,
+-                    ctx.signatures,
+-                    ctx.representations,
+-                ),
+-                trait_method_return_shape_plan(ty, method, program, ctx.signatures),
+-                program,
+-                ctx.representations,
+-            );
+-            methods.push(interface_default_trait_method_item(
+-                ty,
+-                ty,
+-                method,
+-                method,
+-                &HashMap::new(),
+-                &signature,
+-                true,
+-                program,
+-                ctx,
+-            ));
+-        }
+-    }
++    // Static utilities are emitted on the dedicated source static carrier;
++    // adding them to this trait would make its Java instance view non-object-safe.
+     Some(
+         crate::representation_lowering::source_interface_trait_item_with_surface(
+             ty,
+@@ -15013,6 +15019,16 @@ fn lower_delegated_constructor_trailing_stmt(
+                 return vec![stmt];
+             }
+             let java_self_replacement = constructor_self_replacement(ctx);
++            if let Some(lowered) = lower_discarded_object_get_class(
++                expr, env, ctx, &ExprRefinements::default(),
++            ) {
++                let lowered = apply_result_propagation_policy(
++                    lowered, expr, env, ctx, returns_result,
++                );
++                return vec![expr_stmt(replace_self_receiver_with_replacement(
++                    lowered, &java_self_replacement,
++                ))];
++            }
+             // Constructor trailing expressions are still ordinary Java
+             // expression statements.  Route them through the same statement
+             // planner as method bodies so native statement contracts (notably
+@@ -19288,7 +19304,11 @@ fn lower_stmt(
+             }
+         }
+         Stmt::Expr(expr) => {
+-            if source_null_assertion_call_expr_stmt_is_noop(expr, env, ctx) {
++            if let Some(lowered) = lower_discarded_object_get_class(expr, env, ctx, refinements) {
++                out.push(expr_stmt(apply_result_propagation_policy(
++                    lowered, expr, env, ctx, wrap_returns_in_ok,
++                )));
++            } else if source_null_assertion_call_expr_stmt_is_noop(expr, env, ctx) {
+                 return;
+             } else if let Some(stmt) =
+                 lower_unsupported_collection_view_mutation_expr_stmt(expr, env, ctx, refinements)
+@@ -38768,7 +38788,9 @@ fn lower_lexical_static_constant(name: &str, ctx: LowerCtx) -> Option<RustExpr>
+             return None;
+         }
+         let member = static_const_reference_name_for_type(owner_ty, &field.name);
+-        let value = if declared_on_current_type && ctx.current_constructor.is_none() {
++        let value = if declared_on_current_type && ctx.current_constructor.is_none()
++            && !interface_uses_static_carrier(owner_ty, ctx)
++        {
+             self_associated_path_projection(&member)
+         } else {
+             owner_associated_path_projection(&source_static_owner_use_name(owner_ty, ctx), &member)
+@@ -53243,6 +53265,16 @@ fn lower_constructor_argument_for_shape(
+     shape: &RustSlotShape,
+     ctx: LowerCtx,
+ ) -> RustExpr {
++    // An escaping bare `this` must cross an owned Object constructor slot
++    // through the same allocation-preserving conversion as assignment/return.
++    // Generic argument lowering otherwise forwards self or a RefMut guard.
++    if matches!(arg, Expr::This)
++        && shape.ownership == OwnershipShape::Owned
++        && matches!(shape.dispatch, DispatchShape::ErasedObject)
++        && let Some(value) = lower_current_self_cast_for_slot(arg, &argument_slot(shape.clone()), ctx)
++    {
++        return value;
++    }
+     if let Some(callback) = lower_native_sam_value_argument(arg, env, shape, ctx) {
+         return callback;
+     }
+@@ -70506,6 +70538,12 @@ fn catalog_emitted_source_static_owner(
+                 .map(|rust_owner| (target_owner, rust_owner))
+         })
+         .map(|(java_owner, rust_owner)| {
++            if let Some(owner_ty) = find_preferred_emitted_context_type_by_key(ctx, java_owner)
++                .or_else(|| SourceContextOwnerKey::new(java_owner).find_emitted_context_type(ctx))
++                && interface_uses_static_carrier(owner_ty, ctx)
++            {
++                return interface_static_carrier_name(owner_ty);
++            }
+             // Keep the catalog's Java identity through rendering. A local
+             // declaration lookup can be absent in a narrowed lowering frame;
+             // that does not erase the already-planned owner binders.
+@@ -70541,6 +70579,9 @@ fn catalog_emitted_source_static_owner(
+ }
+ 
+ fn source_static_owner_use_name(ty: &TypeDecl, ctx: LowerCtx) -> String {
++    if interface_uses_static_carrier(ty, ctx) {
++        return interface_static_carrier_name(ty);
++    }
+     if ctx
+         .representations
+         .raw_generic_arguments_for(&ty.name)
+@@ -112466,6 +112507,33 @@ fn source_method_returned_field_name(
+     returned_field_name_from_expr(expr).map(str::to_string)
+ }
+ 
++/// Object.getClass is final: when its value is discarded, only receiver
++/// evaluation and its null check are observable. Reuse the fully lowered
++/// receiver so side effects and catchable NPEs are retained exactly once.
++/// Borrow it rather than moving an owned local that Java still permits using.
++fn lower_discarded_object_get_class(
++    expr: &Expr,
++    env: &ShapeEnv,
++    ctx: LowerCtx,
++    refinements: &ExprRefinements,
++) -> Option<RustExpr> {
++    let Expr::Call { receiver: Some(_), name, args, .. } = expr else {
++        return None;
++    };
++    // A user-defined Java get_class method is unrelated to final getClass.
++    if name != "getClass" || !args.is_empty() {
++        return None;
++    }
++    let lowered = lower_expr_with_refinements(expr, env, ctx, refinements);
++    let RustExpr::MethodCall { receiver, method, args } = lowered.into_unshaped() else {
++        return None;
++    };
++    if method != "get_class" || !args.is_empty() {
++        return None;
++    }
++    Some(force_shared_borrow_projection(*receiver))
++}
++
+ fn source_null_assertion_call_expr_stmt_is_noop(
+     expr: &Expr,
+     env: &ShapeEnv,
+@@ -117815,6 +117883,14 @@ mod tests {
+     use crate::rust_ir::RustExprShape;
+     use crate::slot_shape::RustSlotShape;
+ 
++    #[test]
++    fn constructor_owned_erased_this_uses_retained_allocation_handle() {
++        let translated = crate::translate_source(include_str!("../tests/differential/EscapingThisCapture.java"));
++        assert!(!translated.rust.contains("CaptureHolder::new(__java_self.borrow_mut())"), "{}", translated.rust);
++        assert!(!translated.rust.contains("CaptureHolder::new(self)"), "{}", translated.rust);
++        assert!(translated.rust.contains("CaptureHolder::new(Box::new(std::clone::Clone::clone(&__java_self)) as Box<dyn std::any::Any>)"), "{}", translated.rust);
++    }
++
+     #[test]
+     fn deferred_plain_arraycopy_places_reject_later_mutations_and_calls() {
+         let mut env = ShapeEnv::new();
+diff --git a/src/operator_lowering.rs b/src/operator_lowering.rs
+index d67ecf7..73e96bc 100644
+--- a/src/operator_lowering.rs
++++ b/src/operator_lowering.rs
+@@ -772,7 +772,7 @@ fn plan_canonical_equality_comparison(
+     }
+     match (left.optional_element_type(), right.optional_element_type()) {
+         (Some(left_element), Some(right_element))
+-            if java_types_match_for_equality(&left_element, &right_element) =>
++            if java_types_match_for_equality(&left_element, &right_element, facts) =>
+         {
+             if source == EqualityComparisonSource::EqualsCall
+                 && let Some(custom_element) =
+@@ -797,11 +797,11 @@ fn plan_canonical_equality_comparison(
+             }
+         }
+         (Some(left_element), None)
+-            if java_types_match_for_equality(&left_element, &right.java_ty) =>
++            if java_types_match_for_equality(&left_element, &right.java_ty, facts) =>
+         {
+             EqualityComparisonPlan::LeftOptionalByRef
+         }
+-        _ if java_types_match_for_equality(&left.java_ty, &right.java_ty)
++        _ if java_types_match_for_equality(&left.java_ty, &right.java_ty, facts)
+             && left.ownership == OwnershipShape::SharedBorrow
+             && right.ownership != OwnershipShape::SharedBorrow =>
+         {
+@@ -811,7 +811,7 @@ fn plan_canonical_equality_comparison(
+     }
+ }
+ 
+-fn java_types_match_for_equality(left: &JavaType, right: &JavaType) -> bool {
++fn java_types_match_for_equality(left: &JavaType, right: &JavaType, facts: &FactSet) -> bool {
+     if left == right {
+         return true;
+     }
+@@ -821,8 +821,19 @@ fn java_types_match_for_equality(left: &JavaType, right: &JavaType) -> bool {
+     let Some(right_name) = equality_java_type_name(right) else {
+         return false;
+     };
+-    crate::stdlib::canonical_external_receiver_type_key(left_name)
+-        == crate::stdlib::canonical_external_receiver_type_key(right_name)
++    // Native Throwable and its JDK subclasses have the SAME JavaException
++    // carrier. Optional projection must compare those carriers, not require
++    // nominally identical Java types (e.g. Throwable[] element vs Exception).
++    // Source-owned lookalikes/overrides must retain their own representation.
++    let effective = crate::effective_facts::EffectiveFacts::new(facts);
++    let native_throwable = |name: &str| {
++        (!name.contains('.') || name.starts_with("java."))
++            && crate::stdlib::is_known_throwable_carrier_type(name)
++            && effective.allows_platform_hierarchy_fallback(name)
++    };
++    (native_throwable(left_name) && native_throwable(right_name))
++        || crate::stdlib::canonical_external_receiver_type_key(left_name)
++            == crate::stdlib::canonical_external_receiver_type_key(right_name)
+ }
+ 
+ fn equality_java_type_name(java_ty: &JavaType) -> Option<&str> {
+@@ -1473,6 +1484,21 @@ mod equality_symmetry_tests {
+     /// maintains this law rather than deriving from it. Asserting the law is
+     /// what turns "someone remembered to add the mirror arm" into something
+     /// checked — the same reason `src/output_markers.rs` exists one level up.
++    #[test]
++    fn native_throwable_optional_comparison_preserves_physical_carrier() {
++        let left = shape(crate::types::optional_java_type(named("Throwable")), OwnershipShape::Owned, ViewShape::Native);
++        let right = shape(named("Exception"), OwnershipShape::Owned, ViewShape::Native);
++        let facts = FactSet::default();
++        assert_eq!(plan_equality_comparison_with_facts(&left, &right, &facts), EqualityComparisonPlan::LeftOptionalByRef);
++        assert_eq!(plan_equality_comparison_with_facts(&right, &left, &facts), EqualityComparisonPlan::RightOptionalByRef);
++        let unrelated = shape(named("other.Exception"), OwnershipShape::Owned, ViewShape::Native);
++        assert_eq!(plan_equality_comparison_with_facts(&left, &unrelated, &facts), EqualityComparisonPlan::Direct);
++        let parsed = crate::parser::parse_java_source("class Exception { int value; }");
++        let resolved = crate::resolve::resolve_program(&parsed.program, parsed.diagnostics);
++        let semantic = crate::semantic_analysis::analyze_program(&resolved.program, &resolved.facts, &FactSet::default());
++        assert_eq!(plan_equality_comparison_with_facts(&left, &right, &semantic.facts), EqualityComparisonPlan::Direct);
++    }
++
+     #[test]
+     fn equality_planning_is_symmetric_under_operand_swap() {
+         let shapes = representative_shapes();
+diff --git a/src/signature.rs b/src/signature.rs
+index 6841bf3..bf0cab9 100644
+--- a/src/signature.rs
++++ b/src/signature.rs
+@@ -20400,6 +20400,12 @@ impl<'a> SourceReturnNullabilityContext<'a> {
+         let receiver_ty = receiver
+             .as_deref()
+             .and_then(|receiver| self.java_type_for_expr(receiver));
++        // An external static owner may have no source declaration or binding.
++        // Preserve its qualified name for producer facts, but never reinterpret
++        // a local/parameter with the same spelling as a static type owner.
++        let static_owner = receiver.as_deref().and_then(static_initializer_receiver_java_name)
++            .filter(|owner| !self.binding_types.contains_key(owner.split('.').next().unwrap_or(owner)))
++            .map(|owner| crate::stdlib::canonical_external_receiver_type_key(&owner));
+         let receiver_key = resolved
+             .as_ref()
+             .map(|call| call.declaring_type.as_str())
+@@ -20407,7 +20413,8 @@ impl<'a> SourceReturnNullabilityContext<'a> {
+                 receiver_ty
+                     .as_ref()
+                     .and_then(java_type_name_for_signature_dispatch)
+-            });
++            })
++            .or(static_owner.as_deref());
+         if receiver_key.as_ref().is_some_and(|name| {
+             EffectiveFacts::new(self.facts).parsed_source_controls_native_carrier(
+                 &JavaType::Named {
+@@ -21910,6 +21917,7 @@ fn collect_binding_nullability_states_by_binding_from_stmt(
+             if let (Some(binding), Some(initializer)) = (binding, initializer)
+                 && let Some(state) = source_expr_nullability_state(initializer).or_else(|| {
+                     ctx.and_then(|ctx| ctx.field_nullability_for_expr(initializer, scopes))
++                        .or_else(|| ctx.and_then(|ctx| ctx.external_call_nullability_state(initializer)))
+                 })
+             {
+                 merge_binding_nullability_state_by_id(states, binding, state);
+@@ -21919,6 +21927,7 @@ fn collect_binding_nullability_states_by_binding_from_stmt(
+                 && let Some(state) =
+                     source_return_direct_nullability_state(initializer).or_else(|| {
+                         ctx.and_then(|ctx| ctx.field_nullability_for_expr(initializer, scopes))
++                        .or_else(|| ctx.and_then(|ctx| ctx.external_call_nullability_state(initializer)))
+                     })
+             {
+                 merge_binding_nullability_state_by_id(return_states, binding, state);
+@@ -21939,7 +21948,8 @@ fn collect_binding_nullability_states_by_binding_from_stmt(
+             if let Expr::Var(name) = target
+                 && let Some(binding) = scoped_binding(scopes, name).cloned()
+                 && let Some(state) = source_expr_nullability_state(value)
+-                    .or_else(|| ctx.and_then(|ctx| ctx.field_nullability_for_expr(value, scopes)))
++                    .or_else(|| ctx.and_then(|ctx| ctx.field_nullability_for_expr(value, scopes))
++                        .or_else(|| ctx.and_then(|ctx| ctx.external_call_nullability_state(value))))
+             {
+                 merge_binding_nullability_state_by_id(states, &binding, state);
+                 merge_binding_nullability_state_by_id(return_states, &binding, state);
+@@ -21947,7 +21957,8 @@ fn collect_binding_nullability_states_by_binding_from_stmt(
+             if let Expr::Var(name) = target
+                 && let Some(binding) = scoped_binding(scopes, name).cloned()
+                 && let Some(state) = source_return_direct_nullability_state(value)
+-                    .or_else(|| ctx.and_then(|ctx| ctx.field_nullability_for_expr(value, scopes)))
++                    .or_else(|| ctx.and_then(|ctx| ctx.field_nullability_for_expr(value, scopes))
++                        .or_else(|| ctx.and_then(|ctx| ctx.external_call_nullability_state(value))))
+             {
+                 merge_binding_nullability_state_by_id(return_states, &binding, state);
+             }
+@@ -25968,6 +25979,55 @@ class NativeAllocationFlow {
+         assert!(return_constraints.contains(&nullable));
+     }
+ 
++    #[test]
++    fn external_static_return_owner_preserves_nullable_contract_without_source_type() {
++        let parsed = crate::parser::parse_java_source(
++            "class Caller { Value direct() { return provider.find(); } Value local() { Value v = provider.find(); return v; } Value assigned() { Value v; v = provider.find(); return v; } Value qualified() { return dep.provider.find(); } Value present() { return provider.present(); } Value unknown() { return missing.find(); } Value shadow(Object provider) { return provider.find(); } }",
++        );
++        let resolved = crate::resolve::resolve_program(&parsed.program, parsed.diagnostics);
++        let facts = crate::external_facts::parse_external_facts(
++            "external-api find provider getter read-only maybe-null args=0 return=Value\nexternal-api find dep.provider getter read-only maybe-null args=0 return=Value\nexternal-api present provider getter read-only non-null args=0 return=Value\n",
++        );
++        let owner = &resolved.program.types[0];
++        for member in &owner.members {
++            let Member::Method(method) = member else { continue; };
++            let constraints = typed_source_method_return_nullability_constraints(owner, method, facts.facts());
++            let nullable = SignatureConstraint::RequiredStorageNullability(NullabilityState::MaybeNull);
++            match method.name.as_str() {
++                "direct" | "local" | "assigned" | "qualified" => assert!(constraints.contains(&nullable), "{}: {:?}",method.name,constraints),
++                "present" => assert!(constraints.contains(&SignatureConstraint::RequiredStorageNullability(NullabilityState::DefinitelyNonNull))),
++                "unknown" | "shadow" => assert!(!constraints.contains(&nullable), "{}: {:?}",method.name,constraints),
++                _ => unreachable!(),
++            }
++        }
++    }
++
++    #[test]
++    fn native_bodyless_return_contract_preserves_nullable_and_nonnull() {
++        let parsed = crate::parser::parse_java_source(
++            "class Provider { native Object find(); native int count(); Object actual() { return new Object(); } }",
++        );
++        let resolved = crate::resolve::resolve_program(&parsed.program, parsed.diagnostics);
++        let owner = &resolved.program.types[0];
++        let find = owner.members.iter().find_map(|member| match member {
++            Member::Method(method) if method.name == "find" => Some(method), _ => None,
++        }).unwrap();
++        for (contract, expected) in [("maybe-null", NullabilityState::MaybeNull), ("non-null", NullabilityState::DefinitelyNonNull)] {
++            let parsed = crate::external_facts::parse_external_facts(&format!(
++                "external-api find Provider unknown unknown {contract} args=0 return=Object\n"
++            ));
++            let constraints = method_return_shape_constraints(owner, find, &UsageFacts::default(), parsed.facts());
++            assert_eq!(constraints, vec![SignatureConstraint::RequiredStorageNullability(expected)]);
++        }
++        let constraints = method_return_shape_constraints(owner, find, &UsageFacts::default(), &FactSet::default());
++        assert_eq!(constraints, vec![SignatureConstraint::RequiredStorageNullability(NullabilityState::MaybeNull)]);
++        let count = owner.members.iter().find_map(|member| match member {
++            Member::Method(method) if method.name == "count" => Some(method), _ => None,
++        }).unwrap();
++        assert!(!method_return_shape_constraints(owner, count, &UsageFacts::default(), &FactSet::default())
++            .contains(&SignatureConstraint::RequiredStorageNullability(NullabilityState::MaybeNull)));
++    }
++
+     #[test]
+     fn map_entry_accessor_returned_from_source_helper_stays_nullable() {
+         let parsed = crate::parser::parse_java_source(
+@@ -28942,6 +29002,19 @@ class PublicMapLookup {
+         }
+     }
+ 
++    #[test]
++    fn local_storage_nullable_contract_wins_over_guarded_non_null_use() {
++        let non_null = SignatureConstraint::RequiredStorageNullability(NullabilityState::DefinitelyNonNull);
++        let nullable = SignatureConstraint::RequiredStorageNullability(NullabilityState::MaybeNull);
++        let null = SignatureConstraint::RequiredStorageNullability(NullabilityState::DefinitelyNull);
++        assert!(local_storage_proves_non_null(&[non_null.clone()]));
++        assert!(!local_storage_proves_non_null(&[]));
++        assert!(!local_storage_proves_non_null(&[nullable.clone()]));
++        assert!(!local_storage_proves_non_null(&[non_null.clone(), nullable.clone()]));
++        assert!(!local_storage_proves_non_null(&[nullable, non_null.clone()]));
++        assert!(!local_storage_proves_non_null(&[non_null, null]));
++    }
++
+     #[test]
+     fn guarded_iterator_next_keeps_its_non_null_result_after_saturation() {
+         let parsed = crate::parser::parse_java_source(include_str!(
+@@ -34232,8 +34305,10 @@ fn local_plan(
+     type_param_scope: TypeParamScope<'_>,
+ ) -> LocalPlan {
+     let effective_facts = EffectiveFacts::new(facts);
+-    let mut constraints =
+-        local_constraints_without_stale_nullable_call_result(initializer, constraints).into_owned();
++    // Local storage must honor the joined nullability contract. A guarded
++    // use may add DefinitelyNonNull for one read; it cannot erase MaybeNull
++    // supplied by the initializer or another assignment.
++    let mut constraints = constraints.to_vec();
+     normalize_declared_object_representation_local_constraints(
+         &java_ty,
+         representations,
+@@ -34323,7 +34398,7 @@ fn local_plan(
+         shape,
+         signature_constraints_require_mutable_binding(&constraints),
+     )
+-    .with_proven_non_null(signature_constraints_prove_non_null_storage(&constraints))
++    .with_proven_non_null(local_storage_proves_non_null(&constraints))
+ }
+ 
+ fn normalize_declared_object_representation_local_constraints(
+@@ -34374,30 +34449,9 @@ fn normalize_declared_object_representation_local_constraints(
+     });
+ }
+ 
+-fn local_constraints_without_stale_nullable_call_result<'a>(
+-    initializer: Option<&Expr>,
+-    constraints: &'a [SignatureConstraint],
+-) -> std::borrow::Cow<'a, [SignatureConstraint]> {
+-    let Some(Expr::Call { .. }) = initializer else {
+-        return std::borrow::Cow::Borrowed(constraints);
+-    };
+-    if !signature_constraints_prove_non_null_storage(constraints) {
+-        return std::borrow::Cow::Borrowed(constraints);
+-    }
+-    std::borrow::Cow::Owned(
+-        constraints
+-            .iter()
+-            .filter(|constraint| {
+-                !matches!(
+-                    constraint,
+-                    SignatureConstraint::RequiredStorageNullability(
+-                        NullabilityState::MaybeNull | NullabilityState::DefinitelyNull
+-                    )
+-                )
+-            })
+-            .cloned()
+-            .collect(),
+-    )
++fn local_storage_proves_non_null(constraints: &[SignatureConstraint]) -> bool {
++    !constraints_require_nullable_storage(constraints)
++        && signature_constraints_prove_non_null_storage(constraints)
+ }
+ 
+ fn declared_typed_initializer_should_anchor_local_type(
+@@ -37313,6 +37367,21 @@ fn method_return_shape_constraints_with_declared_source_types(
+     facts: &FactSet,
+     declared_source_types: &HashSet<String>,
+ ) -> Vec<SignatureConstraint> {
++    // A native declaration supplies no body proving a non-null reference.
++    // Keep its producer slot nullable unless an explicit ABI contract says otherwise.
++    if method.body.is_none()
++        && method.modifiers.contains(&Modifier::Native)
++        && method_return_type_param_name(method).is_none()
++        && matches!(method.return_type, JavaType::String | JavaType::Array(_) | JavaType::Named { .. })
++    {
++        let state = facts.external_api_effect_for_receiver_with_arity(
++            Some(&ty.name), &method.name, Some(method.params.len()),
++        ).filter(|effect| external_effect_return_nullability_is_signature_evidence(effect)
++            && effect.return_nullability != NullabilityState::Unknown)
++         .map(|effect| effect.return_nullability)
++         .unwrap_or(NullabilityState::MaybeNull);
++        return vec![SignatureConstraint::RequiredStorageNullability(state)];
++    }
+     if method.body.is_none()
+         && !method.modifiers.contains(&Modifier::Abstract)
+         && method_return_type_param_name(method).is_none()
+diff --git a/tests/differential/ThrowableAllocationIdentity.java b/tests/differential/ThrowableAllocationIdentity.java
+new file mode 100644
+--- /dev/null
++++ b/tests/differential/ThrowableAllocationIdentity.java
+@@ -0,0 +1,6 @@
++class ThrowableAllocationIdentity {
++ static boolean alias() { Exception value = new Exception("same"); Exception alias = value; return value == alias; }
++ static boolean distinct() { Exception first = new Exception("same"); Exception second = new Exception("same"); return first != second; }
++ static boolean sharedSuppressed() { Exception value = new Exception("root"); Exception alias = value; Exception child = new Exception("child"); alias.addSuppressed(child); return value.getSuppressed().length == 1 && value.getSuppressed()[0] == child; }
++ static boolean separateSuppressed() { Exception first = new Exception("same"); Exception second = new Exception("same"); first.addSuppressed(new Exception("child")); return second.getSuppressed().length == 0; }
++}
+diff --git a/tests/differential/EscapingThisCapture.java b/tests/differential/EscapingThisCapture.java
+new file mode 100644
+--- /dev/null
++++ b/tests/differential/EscapingThisCapture.java
+@@ -0,0 +1,15 @@
++// Synthetic ownership regression matching original new ret(this,0) erased capture.
++class CapturedOwner {
++ int value;
++ CaptureHolder capture() { return new CaptureHolder(this); }
++}
++class CaptureHolder {
++ final Object captured;
++ CaptureHolder(Object captured) { this.captured = captured; }
++ CapturedOwner owner() { return (CapturedOwner) captured; }
++}
++class EscapingThisProbe {
++ static boolean viaThis() { CapturedOwner owner = new CapturedOwner(); CaptureHolder saved = owner.capture(); owner.value = 7; return saved.owner() == owner && saved.owner().value == 7; }
++ static boolean explicitOwner() { CapturedOwner owner = new CapturedOwner(); CaptureHolder saved = new CaptureHolder(owner); owner.value = 9; return saved.owner() == owner && saved.owner().value == 9; }
++ public static void main(String[] args) { System.out.println(viaThis()); System.out.println(explicitOwner()); }
++}
