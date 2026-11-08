@@ -1,0 +1,88 @@
+name: Static native return ARM build
+on:
+  push:
+    branches: [build/java2rust-exception-identity-v2-20261108]
+permissions:
+  contents: read
+concurrency:
+  group: java2rust-exception-identity-v2-one-shot
+  cancel-in-progress: false
+jobs:
+  optimized-converter:
+    if: github.event.repository.private == false
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    env:
+      RUSTC_BOOTSTRAP: '1'
+      RUSTFLAGS: '-Zcrate-attr=feature(let_chains,if_let_guard)'
+      CARGO_PROFILE_RELEASE_OPT_LEVEL: '1'
+      CARGO_PROFILE_RELEASE_DEBUG: '0'
+      CARGO_PROFILE_RELEASE_STRIP: symbols
+    steps:
+      - name: Fetch pinned public converter only
+        run: |
+          git init converter
+          git -C converter remote add origin https://github.com/henriksson-lab/java2rust.git
+          git -C converter fetch --depth 1 origin e9389f528e49e3bbb126dfb962f57acc862bc5ba
+          git -C converter checkout --detach FETCH_HEAD
+          test "$(git -C converter rev-parse HEAD)" = e9389f528e49e3bbb126dfb962f57acc862bc5ba
+      - name: Apply public converter patch only
+        run: |
+          curl --fail --location --max-time 30 "https://raw.githubusercontent.com/mujapes/trough/${GITHUB_SHA}/converter-patches/exception-identity-v2.patch" -o translator.patch
+          git -C converter apply --check ../translator.patch
+          git -C converter apply ../translator.patch
+          sha256sum translator.patch > patch-sha256.txt
+      - name: Install matching compiler
+        run: rustup toolchain install 1.85.1 --profile minimal
+      - name: Check nullable return contracts
+        run: |
+          cd converter
+          cargo +1.85.1 test --locked --jobs 2 --lib external_static_return_owner_preserves_nullable_contract_without_source_type
+      - name: Check protected storage contracts
+        run: |
+          cd converter
+          cargo +1.85.1 test --locked --jobs 2 --lib returned_local_initializer_call_nullability_clears_visible_reassignment
+          cargo +1.85.1 test --locked --jobs 2 --lib native_bodyless_return_contract_preserves_nullable_and_nonnull
+          cargo +1.85.1 test --locked --jobs 2 --lib local_storage_nullable_contract_wins_over_guarded_non_null_use
+      - name: Check exception lowering contracts
+        run: |
+          cd converter
+          cargo +1.85.1 test --locked --jobs 2 --lib exception_lowering::tests
+      - name: Check alias rejection and shared throwable classification
+        run: |
+          cd converter
+          cargo +1.85.1 test --locked --jobs 2 --lib aliasing::tests
+      - name: Build optimized native ARM converter
+        run: |
+          cd converter
+          cargo +1.85.1 build --release --locked --jobs 2
+      - name: Execute freshly generated exception identity regression
+        run: |
+          cd converter
+          target/release/new-java2rust tests/differential/ThrowableAllocationIdentity.java > exception-generated.rs
+          cat > exception-main.rs <<'RUST'
+          include!("exception-generated.rs");
+          trait BoolResult { fn checked(self)->bool; }
+          impl BoolResult for bool { fn checked(self)->bool{self} }
+          impl BoolResult for Result<bool,JavaException> { fn checked(self)->bool{self.unwrap()} }
+          fn main(){assert!(ThrowableAllocationIdentity::alias().checked());assert!(ThrowableAllocationIdentity::distinct().checked());assert!(ThrowableAllocationIdentity::shared_suppressed().checked());assert!(ThrowableAllocationIdentity::separate_suppressed().checked());println!("four exception identity/alias checks PASS");}
+          RUST
+          rustc +1.85.1 --edition 2021 -Awarnings exception-main.rs -o exception-check
+          ./exception-check > ../exception-runtime-trace.txt
+      - name: Record binary provenance
+        run: |
+          mkdir artifact
+          cp converter/target/release/new-java2rust artifact/
+          cp translator.patch patch-sha256.txt exception-runtime-trace.txt artifact/
+          git -C converter rev-parse HEAD > artifact/source-commit.txt
+          rustc +1.85.1 --version > artifact/compiler.txt
+          file artifact/new-java2rust > artifact/binary-format.txt
+          ldd artifact/new-java2rust > artifact/dependencies.txt
+          sha256sum artifact/new-java2rust > artifact/SHA256SUMS
+      - name: Return bounded build output
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: java2rust-exception-identity-v2-arm64
+          path: artifact/
+          retention-days: 1
+          if-no-files-found: error
