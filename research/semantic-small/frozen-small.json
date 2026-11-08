@@ -1,0 +1,1451 @@
+{
+  "cases": [
+    {
+      "id": "negation",
+      "prompts": {
+        "conventional": "Use a Python expression limited to variable names, literals, ==, !=, not, and, *, and X if C else Y. Translate the request into one expression. Output ONLY the expression without Markdown or explanation. Inputs: energy, held. Request: Return energy unless held; while held return zero.",
+        "aligned": "Use a JSON object expression with exactly one operation key and these roles: {\"value\": [\"literal\"], \"input\": [\"name\"], \"equals\": [\"left\", \"right\"], \"differs\": [\"left\", \"right\"], \"not\": [\"condition\"], \"all\": [\"conditions\"], \"times\": [\"left\", \"right\"], \"when\": [\"condition\", \"then\", \"otherwise\"]}. value wraps literal; input reads name; equals/differs compare; not negates; all is conjunction; times multiplies; when selects then if condition true, otherwise otherwise. Translate the request into one expression. Output ONLY the expression without Markdown or explanation. Inputs: energy, held. Request: Return energy unless held; while held return zero."
+      },
+      "inputs": [
+        {
+          "energy": 0,
+          "held": false
+        },
+        {
+          "energy": 0,
+          "held": true
+        },
+        {
+          "energy": 0.4,
+          "held": false
+        },
+        {
+          "energy": 0.4,
+          "held": true
+        },
+        {
+          "energy": 1,
+          "held": false
+        },
+        {
+          "energy": 1,
+          "held": true
+        }
+      ],
+      "expected": [
+        0,
+        0,
+        0.4,
+        0,
+        1,
+        0
+      ],
+      "oracle_python": "0 if held else energy",
+      "oracle_aligned": {
+        "when": {
+          "condition": {
+            "input": {
+              "name": "held"
+            }
+          },
+          "then": {
+            "value": {
+              "literal": 0
+            }
+          },
+          "otherwise": {
+            "input": {
+              "name": "energy"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "negation-role",
+      "prompts": {
+        "conventional": "Use a Python expression limited to variable names, literals, ==, !=, not, and, *, and X if C else Y. Translate the request into one expression. Output ONLY the expression without Markdown or explanation. Inputs: blocked, energy, held. Request: Return energy only while held, unless blocked.",
+        "aligned": "Use a JSON object expression with exactly one operation key and these roles: {\"value\": [\"literal\"], \"input\": [\"name\"], \"equals\": [\"left\", \"right\"], \"differs\": [\"left\", \"right\"], \"not\": [\"condition\"], \"all\": [\"conditions\"], \"times\": [\"left\", \"right\"], \"when\": [\"condition\", \"then\", \"otherwise\"]}. value wraps literal; input reads name; equals/differs compare; not negates; all is conjunction; times multiplies; when selects then if condition true, otherwise otherwise. Translate the request into one expression. Output ONLY the expression without Markdown or explanation. Inputs: blocked, energy, held. Request: Return energy only while held, unless blocked."
+      },
+      "inputs": [
+        {
+          "blocked": false,
+          "energy": 0,
+          "held": false
+        },
+        {
+          "blocked": false,
+          "energy": 0,
+          "held": true
+        },
+        {
+          "blocked": false,
+          "energy": 0.4,
+          "held": false
+        },
+        {
+          "blocked": false,
+          "energy": 0.4,
+          "held": true
+        },
+        {
+          "blocked": false,
+          "energy": 1,
+          "held": false
+        },
+        {
+          "blocked": false,
+          "energy": 1,
+          "held": true
+        },
+        {
+          "blocked": true,
+          "energy": 0,
+          "held": false
+        },
+        {
+          "blocked": true,
+          "energy": 0,
+          "held": true
+        },
+        {
+          "blocked": true,
+          "energy": 0.4,
+          "held": false
+        },
+        {
+          "blocked": true,
+          "energy": 0.4,
+          "held": true
+        },
+        {
+          "blocked": true,
+          "energy": 1,
+          "held": false
+        },
+        {
+          "blocked": true,
+          "energy": 1,
+          "held": true
+        }
+      ],
+      "expected": [
+        0,
+        0,
+        0,
+        0.4,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "oracle_python": "energy if held and not blocked else 0",
+      "oracle_aligned": {
+        "when": {
+          "condition": {
+            "all": {
+              "conditions": [
+                {
+                  "input": {
+                    "name": "held"
+                  }
+                },
+                {
+                  "not": {
+                    "condition": {
+                      "input": {
+                        "name": "blocked"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "then": {
+            "input": {
+              "name": "energy"
+            }
+          },
+          "otherwise": {
+            "value": {
+              "literal": 0
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "roles",
+      "prompts": {
+        "conventional": "Use a Python expression limited to variable names, literals, ==, !=, not, and, *, and X if C else Y. Translate the request into one expression. Output ONLY the expression without Markdown or explanation. Inputs: receiver, sender, target. Request: Return true when sender equals target and receiver does not equal target.",
+        "aligned": "Use a JSON object expression with exactly one operation key and these roles: {\"value\": [\"literal\"], \"input\": [\"name\"], \"equals\": [\"left\", \"right\"], \"differs\": [\"left\", \"right\"], \"not\": [\"condition\"], \"all\": [\"conditions\"], \"times\": [\"left\", \"right\"], \"when\": [\"condition\", \"then\", \"otherwise\"]}. value wraps literal; input reads name; equals/differs compare; not negates; all is conjunction; times multiplies; when selects then if condition true, otherwise otherwise. Translate the request into one expression. Output ONLY the expression without Markdown or explanation. Inputs: receiver, sender, target. Request: Return true when sender equals target and receiver does not equal target."
+      },
+      "inputs": [
+        {
+          "receiver": "A",
+          "sender": "A",
+          "target": "A"
+        },
+        {
+          "receiver": "A",
+          "sender": "A",
+          "target": "B"
+        },
+        {
+          "receiver": "A",
+          "sender": "B",
+          "target": "A"
+        },
+        {
+          "receiver": "A",
+          "sender": "B",
+          "target": "B"
+        },
+        {
+          "receiver": "B",
+          "sender": "A",
+          "target": "A"
+        },
+        {
+          "receiver": "B",
+          "sender": "A",
+          "target": "B"
+        },
+        {
+          "receiver": "B",
+          "sender": "B",
+          "target": "A"
+        },
+        {
+          "receiver": "B",
+          "sender": "B",
+          "target": "B"
+        }
+      ],
+      "expected": [
+        false,
+        false,
+        false,
+        true,
+        true,
+        false,
+        false,
+        false
+      ],
+      "oracle_python": "sender == target and receiver != target",
+      "oracle_aligned": {
+        "all": {
+          "conditions": [
+            {
+              "equals": {
+                "left": {
+                  "input": {
+                    "name": "sender"
+                  }
+                },
+                "right": {
+                  "input": {
+                    "name": "target"
+                  }
+                }
+              }
+            },
+            {
+              "differs": {
+                "left": {
+                  "input": {
+                    "name": "receiver"
+                  }
+                },
+                "right": {
+                  "input": {
+                    "name": "target"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "roles-reverse",
+      "prompts": {
+        "conventional": "Use a Python expression limited to variable names, literals, ==, !=, not, and, *, and X if C else Y. Translate the request into one expression. Output ONLY the expression without Markdown or explanation. Inputs: receiver, sender, target. Request: Return true when receiver equals target and sender does not equal target.",
+        "aligned": "Use a JSON object expression with exactly one operation key and these roles: {\"value\": [\"literal\"], \"input\": [\"name\"], \"equals\": [\"left\", \"right\"], \"differs\": [\"left\", \"right\"], \"not\": [\"condition\"], \"all\": [\"conditions\"], \"times\": [\"left\", \"right\"], \"when\": [\"condition\", \"then\", \"otherwise\"]}. value wraps literal; input reads name; equals/differs compare; not negates; all is conjunction; times multiplies; when selects then if condition true, otherwise otherwise. Translate the request into one expression. Output ONLY the expression without Markdown or explanation. Inputs: receiver, sender, target. Request: Return true when receiver equals target and sender does not equal target."
+      },
+      "inputs": [
+        {
+          "receiver": "A",
+          "sender": "A",
+          "target": "A"
+        },
+        {
+          "receiver": "A",
+          "sender": "A",
+          "target": "B"
+        },
+        {
+          "receiver": "A",
+          "sender": "B",
+          "target": "A"
+        },
+        {
+          "receiver": "A",
+          "sender": "B",
+          "target": "B"
+        },
+        {
+          "receiver": "B",
+          "sender": "A",
+          "target": "A"
+        },
+        {
+          "receiver": "B",
+          "sender": "A",
+          "target": "B"
+        },
+        {
+          "receiver": "B",
+          "sender": "B",
+          "target": "A"
+        },
+        {
+          "receiver": "B",
+          "sender": "B",
+          "target": "B"
+        }
+      ],
+      "expected": [
+        false,
+        false,
+        true,
+        false,
+        false,
+        true,
+        false,
+        false
+      ],
+      "oracle_python": "receiver == target and sender != target",
+      "oracle_aligned": {
+        "all": {
+          "conditions": [
+            {
+              "equals": {
+                "left": {
+                  "input": {
+                    "name": "receiver"
+                  }
+                },
+                "right": {
+                  "input": {
+                    "name": "target"
+                  }
+                }
+              }
+            },
+            {
+              "differs": {
+                "left": {
+                  "input": {
+                    "name": "sender"
+                  }
+                },
+                "right": {
+                  "input": {
+                    "name": "target"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "order",
+      "prompts": {
+        "conventional": "Use a Python expression limited to variable names, literals, ==, !=, not, and, *, and X if C else Y. Translate the request into one expression. Output ONLY the expression without Markdown or explanation. Inputs: first, second. Request: Return true exactly when first is release and second is press.",
+        "aligned": "Use a JSON object expression with exactly one operation key and these roles: {\"value\": [\"literal\"], \"input\": [\"name\"], \"equals\": [\"left\", \"right\"], \"differs\": [\"left\", \"right\"], \"not\": [\"condition\"], \"all\": [\"conditions\"], \"times\": [\"left\", \"right\"], \"when\": [\"condition\", \"then\", \"otherwise\"]}. value wraps literal; input reads name; equals/differs compare; not negates; all is conjunction; times multiplies; when selects then if condition true, otherwise otherwise. Translate the request into one expression. Output ONLY the expression without Markdown or explanation. Inputs: first, second. Request: Return true exactly when first is release and second is press."
+      },
+      "inputs": [
+        {
+          "first": "press",
+          "second": "press"
+        },
+        {
+          "first": "press",
+          "second": "release"
+        },
+        {
+          "first": "press",
+          "second": "other"
+        },
+        {
+          "first": "release",
+          "second": "press"
+        },
+        {
+          "first": "release",
+          "second": "release"
+        },
+        {
+          "first": "release",
+          "second": "other"
+        },
+        {
+          "first": "other",
+          "second": "press"
+        },
+        {
+          "first": "other",
+          "second": "release"
+        },
+        {
+          "first": "other",
+          "second": "other"
+        }
+      ],
+      "expected": [
+        false,
+        false,
+        false,
+        true,
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "oracle_python": "first == \"release\" and second == \"press\"",
+      "oracle_aligned": {
+        "all": {
+          "conditions": [
+            {
+              "equals": {
+                "left": {
+                  "input": {
+                    "name": "first"
+                  }
+                },
+                "right": {
+                  "value": {
+                    "literal": "release"
+                  }
+                }
+              }
+            },
+            {
+              "equals": {
+                "left": {
+                  "input": {
+                    "name": "second"
+                  }
+                },
+                "right": {
+                  "value": {
+                    "literal": "press"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "order-three",
+      "prompts": {
+        "conventional": "Use a Python expression limited to variable names, literals, ==, !=, not, and, *, and X if C else Y. Translate the request into one expression. Output ONLY the expression without Markdown or explanation. Inputs: first, second, third. Request: Return true exactly when first is press, second is release, and third is press.",
+        "aligned": "Use a JSON object expression with exactly one operation key and these roles: {\"value\": [\"literal\"], \"input\": [\"name\"], \"equals\": [\"left\", \"right\"], \"differs\": [\"left\", \"right\"], \"not\": [\"condition\"], \"all\": [\"conditions\"], \"times\": [\"left\", \"right\"], \"when\": [\"condition\", \"then\", \"otherwise\"]}. value wraps literal; input reads name; equals/differs compare; not negates; all is conjunction; times multiplies; when selects then if condition true, otherwise otherwise. Translate the request into one expression. Output ONLY the expression without Markdown or explanation. Inputs: first, second, third. Request: Return true exactly when first is press, second is release, and third is press."
+      },
+      "inputs": [
+        {
+          "first": "press",
+          "second": "press",
+          "third": "press"
+        },
+        {
+          "first": "press",
+          "second": "press",
+          "third": "release"
+        },
+        {
+          "first": "press",
+          "second": "press",
+          "third": "other"
+        },
+        {
+          "first": "press",
+          "second": "release",
+          "third": "press"
+        },
+        {
+          "first": "press",
+          "second": "release",
+          "third": "release"
+        },
+        {
+          "first": "press",
+          "second": "release",
+          "third": "other"
+        },
+        {
+          "first": "press",
+          "second": "other",
+          "third": "press"
+        },
+        {
+          "first": "press",
+          "second": "other",
+          "third": "release"
+        },
+        {
+          "first": "press",
+          "second": "other",
+          "third": "other"
+        },
+        {
+          "first": "release",
+          "second": "press",
+          "third": "press"
+        },
+        {
+          "first": "release",
+          "second": "press",
+          "third": "release"
+        },
+        {
+          "first": "release",
+          "second": "press",
+          "third": "other"
+        },
+        {
+          "first": "release",
+          "second": "release",
+          "third": "press"
+        },
+        {
+          "first": "release",
+          "second": "release",
+          "third": "release"
+        },
+        {
+          "first": "release",
+          "second": "release",
+          "third": "other"
+        },
+        {
+          "first": "release",
+          "second": "other",
+          "third": "press"
+        },
+        {
+          "first": "release",
+          "second": "other",
+          "third": "release"
+        },
+        {
+          "first": "release",
+          "second": "other",
+          "third": "other"
+        },
+        {
+          "first": "other",
+          "second": "press",
+          "third": "press"
+        },
+        {
+          "first": "other",
+          "second": "press",
+          "third": "release"
+        },
+        {
+          "first": "other",
+          "second": "press",
+          "third": "other"
+        },
+        {
+          "first": "other",
+          "second": "release",
+          "third": "press"
+        },
+        {
+          "first": "other",
+          "second": "release",
+          "third": "release"
+        },
+        {
+          "first": "other",
+          "second": "release",
+          "third": "other"
+        },
+        {
+          "first": "other",
+          "second": "other",
+          "third": "press"
+        },
+        {
+          "first": "other",
+          "second": "other",
+          "third": "release"
+        },
+        {
+          "first": "other",
+          "second": "other",
+          "third": "other"
+        }
+      ],
+      "expected": [
+        false,
+        false,
+        false,
+        true,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "oracle_python": "first == \"press\" and second == \"release\" and third == \"press\"",
+      "oracle_aligned": {
+        "all": {
+          "conditions": [
+            {
+              "equals": {
+                "left": {
+                  "input": {
+                    "name": "first"
+                  }
+                },
+                "right": {
+                  "value": {
+                    "literal": "press"
+                  }
+                }
+              }
+            },
+            {
+              "equals": {
+                "left": {
+                  "input": {
+                    "name": "second"
+                  }
+                },
+                "right": {
+                  "value": {
+                    "literal": "release"
+                  }
+                }
+              }
+            },
+            {
+              "equals": {
+                "left": {
+                  "input": {
+                    "name": "third"
+                  }
+                },
+                "right": {
+                  "value": {
+                    "literal": "press"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "identity",
+      "prompts": {
+        "conventional": "Use a Python expression limited to variable names, literals, ==, !=, not, and, *, and X if C else Y. Translate the request into one expression. Output ONLY the expression without Markdown or explanation. Inputs: held, label. Request: Return true unless label is exactly GLOW, but only while held.",
+        "aligned": "Use a JSON object expression with exactly one operation key and these roles: {\"value\": [\"literal\"], \"input\": [\"name\"], \"equals\": [\"left\", \"right\"], \"differs\": [\"left\", \"right\"], \"not\": [\"condition\"], \"all\": [\"conditions\"], \"times\": [\"left\", \"right\"], \"when\": [\"condition\", \"then\", \"otherwise\"]}. value wraps literal; input reads name; equals/differs compare; not negates; all is conjunction; times multiplies; when selects then if condition true, otherwise otherwise. Translate the request into one expression. Output ONLY the expression without Markdown or explanation. Inputs: held, label. Request: Return true unless label is exactly GLOW, but only while held."
+      },
+      "inputs": [
+        {
+          "held": false,
+          "label": "GLOW"
+        },
+        {
+          "held": false,
+          "label": "MOON"
+        },
+        {
+          "held": false,
+          "label": "glow"
+        },
+        {
+          "held": false,
+          "label": ""
+        },
+        {
+          "held": true,
+          "label": "GLOW"
+        },
+        {
+          "held": true,
+          "label": "MOON"
+        },
+        {
+          "held": true,
+          "label": "glow"
+        },
+        {
+          "held": true,
+          "label": ""
+        }
+      ],
+      "expected": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        true,
+        true,
+        true
+      ],
+      "oracle_python": "label != \"GLOW\" and held",
+      "oracle_aligned": {
+        "all": {
+          "conditions": [
+            {
+              "differs": {
+                "left": {
+                  "input": {
+                    "name": "label"
+                  }
+                },
+                "right": {
+                  "value": {
+                    "literal": "GLOW"
+                  }
+                }
+              }
+            },
+            {
+              "input": {
+                "name": "held"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "composition",
+      "prompts": {
+        "conventional": "Use a Python expression limited to variable names, literals, ==, !=, not, and, *, and X if C else Y. Translate the request into one expression. Output ONLY the expression without Markdown or explanation. Inputs: blocked, energy, first, sender, target. Request: If sender equals target and first is release, return half the energy unless blocked; otherwise return zero.",
+        "aligned": "Use a JSON object expression with exactly one operation key and these roles: {\"value\": [\"literal\"], \"input\": [\"name\"], \"equals\": [\"left\", \"right\"], \"differs\": [\"left\", \"right\"], \"not\": [\"condition\"], \"all\": [\"conditions\"], \"times\": [\"left\", \"right\"], \"when\": [\"condition\", \"then\", \"otherwise\"]}. value wraps literal; input reads name; equals/differs compare; not negates; all is conjunction; times multiplies; when selects then if condition true, otherwise otherwise. Translate the request into one expression. Output ONLY the expression without Markdown or explanation. Inputs: blocked, energy, first, sender, target. Request: If sender equals target and first is release, return half the energy unless blocked; otherwise return zero."
+      },
+      "inputs": [
+        {
+          "blocked": false,
+          "energy": 0,
+          "first": "press",
+          "sender": "A",
+          "target": "A"
+        },
+        {
+          "blocked": false,
+          "energy": 0,
+          "first": "press",
+          "sender": "A",
+          "target": "B"
+        },
+        {
+          "blocked": false,
+          "energy": 0,
+          "first": "press",
+          "sender": "B",
+          "target": "A"
+        },
+        {
+          "blocked": false,
+          "energy": 0,
+          "first": "press",
+          "sender": "B",
+          "target": "B"
+        },
+        {
+          "blocked": false,
+          "energy": 0,
+          "first": "release",
+          "sender": "A",
+          "target": "A"
+        },
+        {
+          "blocked": false,
+          "energy": 0,
+          "first": "release",
+          "sender": "A",
+          "target": "B"
+        },
+        {
+          "blocked": false,
+          "energy": 0,
+          "first": "release",
+          "sender": "B",
+          "target": "A"
+        },
+        {
+          "blocked": false,
+          "energy": 0,
+          "first": "release",
+          "sender": "B",
+          "target": "B"
+        },
+        {
+          "blocked": false,
+          "energy": 0,
+          "first": "other",
+          "sender": "A",
+          "target": "A"
+        },
+        {
+          "blocked": false,
+          "energy": 0,
+          "first": "other",
+          "sender": "A",
+          "target": "B"
+        },
+        {
+          "blocked": false,
+          "energy": 0,
+          "first": "other",
+          "sender": "B",
+          "target": "A"
+        },
+        {
+          "blocked": false,
+          "energy": 0,
+          "first": "other",
+          "sender": "B",
+          "target": "B"
+        },
+        {
+          "blocked": false,
+          "energy": 0.4,
+          "first": "press",
+          "sender": "A",
+          "target": "A"
+        },
+        {
+          "blocked": false,
+          "energy": 0.4,
+          "first": "press",
+          "sender": "A",
+          "target": "B"
+        },
+        {
+          "blocked": false,
+          "energy": 0.4,
+          "first": "press",
+          "sender": "B",
+          "target": "A"
+        },
+        {
+          "blocked": false,
+          "energy": 0.4,
+          "first": "press",
+          "sender": "B",
+          "target": "B"
+        },
+        {
+          "blocked": false,
+          "energy": 0.4,
+          "first": "release",
+          "sender": "A",
+          "target": "A"
+        },
+        {
+          "blocked": false,
+          "energy": 0.4,
+          "first": "release",
+          "sender": "A",
+          "target": "B"
+        },
+        {
+          "blocked": false,
+          "energy": 0.4,
+          "first": "release",
+          "sender": "B",
+          "target": "A"
+        },
+        {
+          "blocked": false,
+          "energy": 0.4,
+          "first": "release",
+          "sender": "B",
+          "target": "B"
+        },
+        {
+          "blocked": false,
+          "energy": 0.4,
+          "first": "other",
+          "sender": "A",
+          "target": "A"
+        },
+        {
+          "blocked": false,
+          "energy": 0.4,
+          "first": "other",
+          "sender": "A",
+          "target": "B"
+        },
+        {
+          "blocked": false,
+          "energy": 0.4,
+          "first": "other",
+          "sender": "B",
+          "target": "A"
+        },
+        {
+          "blocked": false,
+          "energy": 0.4,
+          "first": "other",
+          "sender": "B",
+          "target": "B"
+        },
+        {
+          "blocked": false,
+          "energy": 1,
+          "first": "press",
+          "sender": "A",
+          "target": "A"
+        },
+        {
+          "blocked": false,
+          "energy": 1,
+          "first": "press",
+          "sender": "A",
+          "target": "B"
+        },
+        {
+          "blocked": false,
+          "energy": 1,
+          "first": "press",
+          "sender": "B",
+          "target": "A"
+        },
+        {
+          "blocked": false,
+          "energy": 1,
+          "first": "press",
+          "sender": "B",
+          "target": "B"
+        },
+        {
+          "blocked": false,
+          "energy": 1,
+          "first": "release",
+          "sender": "A",
+          "target": "A"
+        },
+        {
+          "blocked": false,
+          "energy": 1,
+          "first": "release",
+          "sender": "A",
+          "target": "B"
+        },
+        {
+          "blocked": false,
+          "energy": 1,
+          "first": "release",
+          "sender": "B",
+          "target": "A"
+        },
+        {
+          "blocked": false,
+          "energy": 1,
+          "first": "release",
+          "sender": "B",
+          "target": "B"
+        },
+        {
+          "blocked": false,
+          "energy": 1,
+          "first": "other",
+          "sender": "A",
+          "target": "A"
+        },
+        {
+          "blocked": false,
+          "energy": 1,
+          "first": "other",
+          "sender": "A",
+          "target": "B"
+        },
+        {
+          "blocked": false,
+          "energy": 1,
+          "first": "other",
+          "sender": "B",
+          "target": "A"
+        },
+        {
+          "blocked": false,
+          "energy": 1,
+          "first": "other",
+          "sender": "B",
+          "target": "B"
+        },
+        {
+          "blocked": true,
+          "energy": 0,
+          "first": "press",
+          "sender": "A",
+          "target": "A"
+        },
+        {
+          "blocked": true,
+          "energy": 0,
+          "first": "press",
+          "sender": "A",
+          "target": "B"
+        },
+        {
+          "blocked": true,
+          "energy": 0,
+          "first": "press",
+          "sender": "B",
+          "target": "A"
+        },
+        {
+          "blocked": true,
+          "energy": 0,
+          "first": "press",
+          "sender": "B",
+          "target": "B"
+        },
+        {
+          "blocked": true,
+          "energy": 0,
+          "first": "release",
+          "sender": "A",
+          "target": "A"
+        },
+        {
+          "blocked": true,
+          "energy": 0,
+          "first": "release",
+          "sender": "A",
+          "target": "B"
+        },
+        {
+          "blocked": true,
+          "energy": 0,
+          "first": "release",
+          "sender": "B",
+          "target": "A"
+        },
+        {
+          "blocked": true,
+          "energy": 0,
+          "first": "release",
+          "sender": "B",
+          "target": "B"
+        },
+        {
+          "blocked": true,
+          "energy": 0,
+          "first": "other",
+          "sender": "A",
+          "target": "A"
+        },
+        {
+          "blocked": true,
+          "energy": 0,
+          "first": "other",
+          "sender": "A",
+          "target": "B"
+        },
+        {
+          "blocked": true,
+          "energy": 0,
+          "first": "other",
+          "sender": "B",
+          "target": "A"
+        },
+        {
+          "blocked": true,
+          "energy": 0,
+          "first": "other",
+          "sender": "B",
+          "target": "B"
+        },
+        {
+          "blocked": true,
+          "energy": 0.4,
+          "first": "press",
+          "sender": "A",
+          "target": "A"
+        },
+        {
+          "blocked": true,
+          "energy": 0.4,
+          "first": "press",
+          "sender": "A",
+          "target": "B"
+        },
+        {
+          "blocked": true,
+          "energy": 0.4,
+          "first": "press",
+          "sender": "B",
+          "target": "A"
+        },
+        {
+          "blocked": true,
+          "energy": 0.4,
+          "first": "press",
+          "sender": "B",
+          "target": "B"
+        },
+        {
+          "blocked": true,
+          "energy": 0.4,
+          "first": "release",
+          "sender": "A",
+          "target": "A"
+        },
+        {
+          "blocked": true,
+          "energy": 0.4,
+          "first": "release",
+          "sender": "A",
+          "target": "B"
+        },
+        {
+          "blocked": true,
+          "energy": 0.4,
+          "first": "release",
+          "sender": "B",
+          "target": "A"
+        },
+        {
+          "blocked": true,
+          "energy": 0.4,
+          "first": "release",
+          "sender": "B",
+          "target": "B"
+        },
+        {
+          "blocked": true,
+          "energy": 0.4,
+          "first": "other",
+          "sender": "A",
+          "target": "A"
+        },
+        {
+          "blocked": true,
+          "energy": 0.4,
+          "first": "other",
+          "sender": "A",
+          "target": "B"
+        },
+        {
+          "blocked": true,
+          "energy": 0.4,
+          "first": "other",
+          "sender": "B",
+          "target": "A"
+        },
+        {
+          "blocked": true,
+          "energy": 0.4,
+          "first": "other",
+          "sender": "B",
+          "target": "B"
+        },
+        {
+          "blocked": true,
+          "energy": 1,
+          "first": "press",
+          "sender": "A",
+          "target": "A"
+        },
+        {
+          "blocked": true,
+          "energy": 1,
+          "first": "press",
+          "sender": "A",
+          "target": "B"
+        },
+        {
+          "blocked": true,
+          "energy": 1,
+          "first": "press",
+          "sender": "B",
+          "target": "A"
+        },
+        {
+          "blocked": true,
+          "energy": 1,
+          "first": "press",
+          "sender": "B",
+          "target": "B"
+        },
+        {
+          "blocked": true,
+          "energy": 1,
+          "first": "release",
+          "sender": "A",
+          "target": "A"
+        },
+        {
+          "blocked": true,
+          "energy": 1,
+          "first": "release",
+          "sender": "A",
+          "target": "B"
+        },
+        {
+          "blocked": true,
+          "energy": 1,
+          "first": "release",
+          "sender": "B",
+          "target": "A"
+        },
+        {
+          "blocked": true,
+          "energy": 1,
+          "first": "release",
+          "sender": "B",
+          "target": "B"
+        },
+        {
+          "blocked": true,
+          "energy": 1,
+          "first": "other",
+          "sender": "A",
+          "target": "A"
+        },
+        {
+          "blocked": true,
+          "energy": 1,
+          "first": "other",
+          "sender": "A",
+          "target": "B"
+        },
+        {
+          "blocked": true,
+          "energy": 1,
+          "first": "other",
+          "sender": "B",
+          "target": "A"
+        },
+        {
+          "blocked": true,
+          "energy": 1,
+          "first": "other",
+          "sender": "B",
+          "target": "B"
+        }
+      ],
+      "expected": [
+        0,
+        0,
+        0,
+        0,
+        0.0,
+        0,
+        0,
+        0.0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0.2,
+        0,
+        0,
+        0.2,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0.5,
+        0,
+        0,
+        0.5,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "oracle_python": "energy * 0.5 if sender == target and first == \"release\" and not blocked else 0",
+      "oracle_aligned": {
+        "when": {
+          "condition": {
+            "all": {
+              "conditions": [
+                {
+                  "equals": {
+                    "left": {
+                      "input": {
+                        "name": "sender"
+                      }
+                    },
+                    "right": {
+                      "input": {
+                        "name": "target"
+                      }
+                    }
+                  }
+                },
+                {
+                  "equals": {
+                    "left": {
+                      "input": {
+                        "name": "first"
+                      }
+                    },
+                    "right": {
+                      "value": {
+                        "literal": "release"
+                      }
+                    }
+                  }
+                },
+                {
+                  "not": {
+                    "condition": {
+                      "input": {
+                        "name": "blocked"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "then": {
+            "times": {
+              "left": {
+                "input": {
+                  "name": "energy"
+                }
+              },
+              "right": {
+                "value": {
+                  "literal": 0.5
+                }
+              }
+            }
+          },
+          "otherwise": {
+            "value": {
+              "literal": 0
+            }
+          }
+        }
+      }
+    }
+  ],
+  "preflight_both_encodings_passed": true,
+  "source_sha256": "03c9e86e8b617a235a57ee2c234d4cd7f2974ad1187e242611eca172857fde67",
+  "model": {
+    "id": "HuggingFaceTB/SmolLM2-360M-Instruct",
+    "sha": "a10cc1512eabd3dde888204e902eca88bddb4951",
+    "license": "apache-2.0",
+    "files": [
+      {
+        "name": "config.json",
+        "size": 846
+      },
+      {
+        "name": "generation_config.json",
+        "size": 132
+      },
+      {
+        "name": "model.safetensors",
+        "size": 723674912
+      },
+      {
+        "name": "tokenizer.json",
+        "size": 2104556
+      },
+      {
+        "name": "tokenizer_config.json",
+        "size": 3764
+      }
+    ]
+  },
+  "generation": {
+    "do_sample": false,
+    "max_new_tokens": 192,
+    "cpu_threads": 2,
+    "seed": 0
+  },
+  "design": "Fixed paired toy development test; strict parser validation, NOT constrained token generation; no examples/corrections; Python familiar syntax versus semantic role records; syntax/length and pretraining-code familiarity confounded."
+}

@@ -1,0 +1,27 @@
+{
+  "id": "HuggingFaceTB/SmolLM2-360M-Instruct",
+  "sha": "a10cc1512eabd3dde888204e902eca88bddb4951",
+  "license": "apache-2.0",
+  "files": [
+    {
+      "name": "config.json",
+      "size": 846
+    },
+    {
+      "name": "generation_config.json",
+      "size": 132
+    },
+    {
+      "name": "model.safetensors",
+      "size": 723674912
+    },
+    {
+      "name": "tokenizer.json",
+      "size": 2104556
+    },
+    {
+      "name": "tokenizer_config.json",
+      "size": 3764
+    }
+  ]
+}
