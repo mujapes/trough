@@ -1,0 +1,194 @@
+diff --git a/src/coercion.rs b/src/coercion.rs
+index 70121ff..de4930d 100644
+--- a/src/coercion.rs
++++ b/src/coercion.rs
+@@ -17954,7 +17954,10 @@ fn apply_erased_object_downcast(
+     }
+     let target_type = normalize_emitted_java_type_name(target_type);
+     if !plausible_rust_nominal_type_name(&target_type) {
+-        return expr;
++        return crate::unsupported::compile_error_expr_consuming(
++            &expr,
++            &format!("unsupported Java checked cast: invalid nominal Rust target {target_type}"),
++        );
+     }
+     match invalid_cast {
+         // Parenthesised: `.` binds tighter than unary `*`, so an appended field
+@@ -18136,13 +18139,15 @@ fn plausible_rust_nominal_type_name(target_type: &str) -> bool {
+         .map(|(_, inner)| inner.trim_end_matches('>'))
+         .unwrap_or(target_type);
+     let innermost = innermost.rsplit("::").next().unwrap_or(innermost);
+-    matches!(
+-        innermost,
+-        "bool" | "i8" | "i16" | "char" | "i32" | "i64" | "f32" | "f64"
+-    ) || innermost
+-        .chars()
+-        .next()
+-        .is_some_and(|ch| ch == '_' || ch.is_ascii_uppercase())
++    // Java permits lowercase class names, which are common in obfuscated APKs.
++    // Naming style is not evidence that a checked cast can be omitted.
++    let identifier = innermost.strip_prefix("r#").unwrap_or(innermost);
++    if matches!(identifier, "dyn" | "impl" | "self" | "Self" | "super" | "crate") {
++        return false;
++    }
++    let mut chars = identifier.chars();
++    chars.next().is_some_and(|ch| ch == '_' || ch.is_ascii_alphabetic())
++        && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+ }
+ 
+ fn apply_to_owned_sequence(expr: RustExpr, policy: &CloneRecoveryPolicy) -> RustExpr {
+@@ -18506,6 +18511,10 @@ mod nominal_downcast_target_tests {
+             "crate::Foo",
+             "_Anon",
+             "i32",
++            "cd",
++            "crate::defpackage::cd",
++            "std::rc::Rc<cd>",
++            "r#type",
+         ] {
+             assert!(
+                 plausible_rust_nominal_type_name(target),
+@@ -18516,7 +18525,7 @@ mod nominal_downcast_target_tests {
+ 
+     #[test]
+     fn non_nominal_targets_are_still_rejected() {
+-        for target in ["", "dyn", "&str", "(i32, i32)", "std::rc::Rc<dyn>"] {
++        for target in ["", "dyn", "&str", "(i32, i32)", "std::rc::Rc<dyn>", "123bad", "cd()", "self"] {
+             assert!(
+                 !plausible_rust_nominal_type_name(target),
+                 "expected a non-nominal target: {target}"
+diff --git a/src/signature.rs b/src/signature.rs
+index 6841bf3..633c7d9 100644
+--- a/src/signature.rs
++++ b/src/signature.rs
+@@ -25968,6 +25968,32 @@ class NativeAllocationFlow {
+         assert!(return_constraints.contains(&nullable));
+     }
+ 
++    #[test]
++    fn native_bodyless_return_contract_preserves_nullable_and_nonnull() {
++        let parsed = crate::parser::parse_java_source(
++            "class Provider { native Object find(); native int count(); Object actual() { return new Object(); } }",
++        );
++        let resolved = crate::resolve::resolve_program(&parsed.program, parsed.diagnostics);
++        let owner = &resolved.program.types[0];
++        let find = owner.members.iter().find_map(|member| match member {
++            Member::Method(method) if method.name == "find" => Some(method), _ => None,
++        }).unwrap();
++        for (contract, expected) in [("maybe-null", NullabilityState::MaybeNull), ("non-null", NullabilityState::DefinitelyNonNull)] {
++            let parsed = crate::external_facts::parse_external_facts(&format!(
++                "external-api find Provider unknown unknown {contract} args=0 return=Object\n"
++            ));
++            let constraints = method_return_shape_constraints(owner, find, &UsageFacts::default(), parsed.facts());
++            assert_eq!(constraints, vec![SignatureConstraint::RequiredStorageNullability(expected)]);
++        }
++        let constraints = method_return_shape_constraints(owner, find, &UsageFacts::default(), &FactSet::default());
++        assert_eq!(constraints, vec![SignatureConstraint::RequiredStorageNullability(NullabilityState::MaybeNull)]);
++        let count = owner.members.iter().find_map(|member| match member {
++            Member::Method(method) if method.name == "count" => Some(method), _ => None,
++        }).unwrap();
++        assert!(!method_return_shape_constraints(owner, count, &UsageFacts::default(), &FactSet::default())
++            .contains(&SignatureConstraint::RequiredStorageNullability(NullabilityState::MaybeNull)));
++    }
++
+     #[test]
+     fn map_entry_accessor_returned_from_source_helper_stays_nullable() {
+         let parsed = crate::parser::parse_java_source(
+@@ -28942,6 +28968,19 @@ class PublicMapLookup {
+         }
+     }
+ 
++    #[test]
++    fn local_storage_nullable_contract_wins_over_guarded_non_null_use() {
++        let non_null = SignatureConstraint::RequiredStorageNullability(NullabilityState::DefinitelyNonNull);
++        let nullable = SignatureConstraint::RequiredStorageNullability(NullabilityState::MaybeNull);
++        let null = SignatureConstraint::RequiredStorageNullability(NullabilityState::DefinitelyNull);
++        assert!(local_storage_proves_non_null(&[non_null.clone()]));
++        assert!(!local_storage_proves_non_null(&[]));
++        assert!(!local_storage_proves_non_null(&[nullable.clone()]));
++        assert!(!local_storage_proves_non_null(&[non_null.clone(), nullable.clone()]));
++        assert!(!local_storage_proves_non_null(&[nullable, non_null.clone()]));
++        assert!(!local_storage_proves_non_null(&[non_null, null]));
++    }
++
+     #[test]
+     fn guarded_iterator_next_keeps_its_non_null_result_after_saturation() {
+         let parsed = crate::parser::parse_java_source(include_str!(
+@@ -34232,8 +34271,10 @@ fn local_plan(
+     type_param_scope: TypeParamScope<'_>,
+ ) -> LocalPlan {
+     let effective_facts = EffectiveFacts::new(facts);
+-    let mut constraints =
+-        local_constraints_without_stale_nullable_call_result(initializer, constraints).into_owned();
++    // Local storage must honor the joined nullability contract. A guarded
++    // use may add DefinitelyNonNull for one read; it cannot erase MaybeNull
++    // supplied by the initializer or another assignment.
++    let mut constraints = constraints.to_vec();
+     normalize_declared_object_representation_local_constraints(
+         &java_ty,
+         representations,
+@@ -34323,7 +34364,7 @@ fn local_plan(
+         shape,
+         signature_constraints_require_mutable_binding(&constraints),
+     )
+-    .with_proven_non_null(signature_constraints_prove_non_null_storage(&constraints))
++    .with_proven_non_null(local_storage_proves_non_null(&constraints))
+ }
+ 
+ fn normalize_declared_object_representation_local_constraints(
+@@ -34374,30 +34415,9 @@ fn normalize_declared_object_representation_local_constraints(
+     });
+ }
+ 
+-fn local_constraints_without_stale_nullable_call_result<'a>(
+-    initializer: Option<&Expr>,
+-    constraints: &'a [SignatureConstraint],
+-) -> std::borrow::Cow<'a, [SignatureConstraint]> {
+-    let Some(Expr::Call { .. }) = initializer else {
+-        return std::borrow::Cow::Borrowed(constraints);
+-    };
+-    if !signature_constraints_prove_non_null_storage(constraints) {
+-        return std::borrow::Cow::Borrowed(constraints);
+-    }
+-    std::borrow::Cow::Owned(
+-        constraints
+-            .iter()
+-            .filter(|constraint| {
+-                !matches!(
+-                    constraint,
+-                    SignatureConstraint::RequiredStorageNullability(
+-                        NullabilityState::MaybeNull | NullabilityState::DefinitelyNull
+-                    )
+-                )
+-            })
+-            .cloned()
+-            .collect(),
+-    )
++fn local_storage_proves_non_null(constraints: &[SignatureConstraint]) -> bool {
++    !constraints_require_nullable_storage(constraints)
++        && signature_constraints_prove_non_null_storage(constraints)
+ }
+ 
+ fn declared_typed_initializer_should_anchor_local_type(
+@@ -37313,6 +37333,21 @@ fn method_return_shape_constraints_with_declared_source_types(
+     facts: &FactSet,
+     declared_source_types: &HashSet<String>,
+ ) -> Vec<SignatureConstraint> {
++    // A native declaration supplies no body proving a non-null reference.
++    // Keep its producer slot nullable unless an explicit ABI contract says otherwise.
++    if method.body.is_none()
++        && method.modifiers.contains(&Modifier::Native)
++        && method_return_type_param_name(method).is_none()
++        && matches!(method.return_type, JavaType::String | JavaType::Array(_) | JavaType::Named { .. })
++    {
++        let state = facts.external_api_effect_for_receiver_with_arity(
++            Some(&ty.name), &method.name, Some(method.params.len()),
++        ).filter(|effect| external_effect_return_nullability_is_signature_evidence(effect)
++            && effect.return_nullability != NullabilityState::Unknown)
++         .map(|effect| effect.return_nullability)
++         .unwrap_or(NullabilityState::MaybeNull);
++        return vec![SignatureConstraint::RequiredStorageNullability(state)];
++    }
+     if method.body.is_none()
+         && !method.modifiers.contains(&Modifier::Abstract)
+         && method_return_type_param_name(method).is_none()
