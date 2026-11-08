@@ -1,0 +1,1061 @@
+{
+  "model": {
+    "id": "HuggingFaceTB/SmolLM2-360M-Instruct",
+    "sha": "a10cc1512eabd3dde888204e902eca88bddb4951",
+    "license": "apache-2.0",
+    "files": [
+      {
+        "name": "config.json",
+        "size": 846
+      },
+      {
+        "name": "generation_config.json",
+        "size": 132
+      },
+      {
+        "name": "model.safetensors",
+        "size": 723674912
+      },
+      {
+        "name": "tokenizer.json",
+        "size": 2104556
+      },
+      {
+        "name": "tokenizer_config.json",
+        "size": 3764
+      }
+    ]
+  },
+  "train": [
+    {
+      "id": "false",
+      "request": "Emit the boolean false.",
+      "program": [
+        "literal",
+        false
+      ]
+    },
+    {
+      "id": "enabled",
+      "request": "Read enabled without changing it.",
+      "program": [
+        "input",
+        "enabled"
+      ]
+    },
+    {
+      "id": "blocked",
+      "request": "Read blocked without changing it.",
+      "program": [
+        "input",
+        "blocked"
+      ]
+    },
+    {
+      "id": "not-enabled",
+      "request": "Negate the boolean enabled.",
+      "program": [
+        "not",
+        [
+          "input",
+          "enabled"
+        ]
+      ]
+    },
+    {
+      "id": "not-blocked",
+      "request": "Negate the boolean blocked.",
+      "program": [
+        "not",
+        [
+          "input",
+          "blocked"
+        ]
+      ]
+    },
+    {
+      "id": "eq-bool",
+      "request": "Compare enabled with blocked for equality.",
+      "program": [
+        "equal",
+        [
+          "input",
+          "enabled"
+        ],
+        [
+          "input",
+          "blocked"
+        ]
+      ]
+    },
+    {
+      "id": "eq-role",
+      "request": "Compare sender with target for equality.",
+      "program": [
+        "equal",
+        [
+          "input",
+          "sender"
+        ],
+        [
+          "input",
+          "target"
+        ]
+      ]
+    }
+  ],
+  "test": [
+    {
+      "id": "true",
+      "stage": "gate",
+      "request": "Emit the boolean true.",
+      "program": [
+        "literal",
+        true
+      ],
+      "environments": [
+        {
+          "held": false,
+          "blocked": false,
+          "enabled": false
+        },
+        {
+          "held": false,
+          "blocked": false,
+          "enabled": true
+        },
+        {
+          "held": false,
+          "blocked": true,
+          "enabled": false
+        },
+        {
+          "held": false,
+          "blocked": true,
+          "enabled": true
+        },
+        {
+          "held": true,
+          "blocked": false,
+          "enabled": false
+        },
+        {
+          "held": true,
+          "blocked": false,
+          "enabled": true
+        },
+        {
+          "held": true,
+          "blocked": true,
+          "enabled": false
+        },
+        {
+          "held": true,
+          "blocked": true,
+          "enabled": true
+        }
+      ],
+      "expected": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "id": "held",
+      "stage": "gate",
+      "request": "Read held without changing it.",
+      "program": [
+        "input",
+        "held"
+      ],
+      "environments": [
+        {
+          "held": false,
+          "blocked": false,
+          "enabled": false
+        },
+        {
+          "held": false,
+          "blocked": false,
+          "enabled": true
+        },
+        {
+          "held": false,
+          "blocked": true,
+          "enabled": false
+        },
+        {
+          "held": false,
+          "blocked": true,
+          "enabled": true
+        },
+        {
+          "held": true,
+          "blocked": false,
+          "enabled": false
+        },
+        {
+          "held": true,
+          "blocked": false,
+          "enabled": true
+        },
+        {
+          "held": true,
+          "blocked": true,
+          "enabled": false
+        },
+        {
+          "held": true,
+          "blocked": true,
+          "enabled": true
+        }
+      ],
+      "expected": [
+        false,
+        false,
+        false,
+        false,
+        true,
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "id": "not-held",
+      "stage": "gate",
+      "request": "Negate the boolean held.",
+      "program": [
+        "not",
+        [
+          "input",
+          "held"
+        ]
+      ],
+      "environments": [
+        {
+          "held": false,
+          "blocked": false,
+          "enabled": false
+        },
+        {
+          "held": false,
+          "blocked": false,
+          "enabled": true
+        },
+        {
+          "held": false,
+          "blocked": true,
+          "enabled": false
+        },
+        {
+          "held": false,
+          "blocked": true,
+          "enabled": true
+        },
+        {
+          "held": true,
+          "blocked": false,
+          "enabled": false
+        },
+        {
+          "held": true,
+          "blocked": false,
+          "enabled": true
+        },
+        {
+          "held": true,
+          "blocked": true,
+          "enabled": false
+        },
+        {
+          "held": true,
+          "blocked": true,
+          "enabled": true
+        }
+      ],
+      "expected": [
+        true,
+        true,
+        true,
+        true,
+        false,
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "id": "negated-conjunction",
+      "stage": "composition",
+      "request": "Accept exactly while held is true and blocked is false.",
+      "program": [
+        "all",
+        [
+          [
+            "input",
+            "held"
+          ],
+          [
+            "not",
+            [
+              "input",
+              "blocked"
+            ]
+          ]
+        ]
+      ],
+      "environments": [
+        {
+          "held": false,
+          "blocked": false,
+          "enabled": false
+        },
+        {
+          "held": false,
+          "blocked": false,
+          "enabled": true
+        },
+        {
+          "held": false,
+          "blocked": true,
+          "enabled": false
+        },
+        {
+          "held": false,
+          "blocked": true,
+          "enabled": true
+        },
+        {
+          "held": true,
+          "blocked": false,
+          "enabled": false
+        },
+        {
+          "held": true,
+          "blocked": false,
+          "enabled": true
+        },
+        {
+          "held": true,
+          "blocked": true,
+          "enabled": false
+        },
+        {
+          "held": true,
+          "blocked": true,
+          "enabled": true
+        }
+      ],
+      "expected": [
+        false,
+        false,
+        false,
+        false,
+        true,
+        true,
+        false,
+        false
+      ]
+    },
+    {
+      "id": "roles-forward",
+      "stage": "composition",
+      "request": "Accept only sender matching target together with receiver not matching target.",
+      "program": [
+        "all",
+        [
+          [
+            "equal",
+            [
+              "input",
+              "sender"
+            ],
+            [
+              "input",
+              "target"
+            ]
+          ],
+          [
+            "not",
+            [
+              "equal",
+              [
+                "input",
+                "receiver"
+              ],
+              [
+                "input",
+                "target"
+              ]
+            ]
+          ]
+        ]
+      ],
+      "environments": [
+        {
+          "sender": "A",
+          "receiver": "A",
+          "target": "A"
+        },
+        {
+          "sender": "A",
+          "receiver": "A",
+          "target": "B"
+        },
+        {
+          "sender": "A",
+          "receiver": "A",
+          "target": "C"
+        },
+        {
+          "sender": "A",
+          "receiver": "B",
+          "target": "A"
+        },
+        {
+          "sender": "A",
+          "receiver": "B",
+          "target": "B"
+        },
+        {
+          "sender": "A",
+          "receiver": "B",
+          "target": "C"
+        },
+        {
+          "sender": "A",
+          "receiver": "C",
+          "target": "A"
+        },
+        {
+          "sender": "A",
+          "receiver": "C",
+          "target": "B"
+        },
+        {
+          "sender": "A",
+          "receiver": "C",
+          "target": "C"
+        },
+        {
+          "sender": "B",
+          "receiver": "A",
+          "target": "A"
+        },
+        {
+          "sender": "B",
+          "receiver": "A",
+          "target": "B"
+        },
+        {
+          "sender": "B",
+          "receiver": "A",
+          "target": "C"
+        },
+        {
+          "sender": "B",
+          "receiver": "B",
+          "target": "A"
+        },
+        {
+          "sender": "B",
+          "receiver": "B",
+          "target": "B"
+        },
+        {
+          "sender": "B",
+          "receiver": "B",
+          "target": "C"
+        },
+        {
+          "sender": "B",
+          "receiver": "C",
+          "target": "A"
+        },
+        {
+          "sender": "B",
+          "receiver": "C",
+          "target": "B"
+        },
+        {
+          "sender": "B",
+          "receiver": "C",
+          "target": "C"
+        },
+        {
+          "sender": "C",
+          "receiver": "A",
+          "target": "A"
+        },
+        {
+          "sender": "C",
+          "receiver": "A",
+          "target": "B"
+        },
+        {
+          "sender": "C",
+          "receiver": "A",
+          "target": "C"
+        },
+        {
+          "sender": "C",
+          "receiver": "B",
+          "target": "A"
+        },
+        {
+          "sender": "C",
+          "receiver": "B",
+          "target": "B"
+        },
+        {
+          "sender": "C",
+          "receiver": "B",
+          "target": "C"
+        },
+        {
+          "sender": "C",
+          "receiver": "C",
+          "target": "A"
+        },
+        {
+          "sender": "C",
+          "receiver": "C",
+          "target": "B"
+        },
+        {
+          "sender": "C",
+          "receiver": "C",
+          "target": "C"
+        }
+      ],
+      "expected": [
+        false,
+        false,
+        false,
+        true,
+        false,
+        false,
+        true,
+        false,
+        false,
+        false,
+        true,
+        false,
+        false,
+        false,
+        false,
+        false,
+        true,
+        false,
+        false,
+        false,
+        true,
+        false,
+        false,
+        true,
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "id": "roles-reverse",
+      "stage": "composition",
+      "request": "Accept only receiver matching target together with sender not matching target.",
+      "program": [
+        "all",
+        [
+          [
+            "equal",
+            [
+              "input",
+              "receiver"
+            ],
+            [
+              "input",
+              "target"
+            ]
+          ],
+          [
+            "not",
+            [
+              "equal",
+              [
+                "input",
+                "sender"
+              ],
+              [
+                "input",
+                "target"
+              ]
+            ]
+          ]
+        ]
+      ],
+      "environments": [
+        {
+          "sender": "A",
+          "receiver": "A",
+          "target": "A"
+        },
+        {
+          "sender": "A",
+          "receiver": "A",
+          "target": "B"
+        },
+        {
+          "sender": "A",
+          "receiver": "A",
+          "target": "C"
+        },
+        {
+          "sender": "A",
+          "receiver": "B",
+          "target": "A"
+        },
+        {
+          "sender": "A",
+          "receiver": "B",
+          "target": "B"
+        },
+        {
+          "sender": "A",
+          "receiver": "B",
+          "target": "C"
+        },
+        {
+          "sender": "A",
+          "receiver": "C",
+          "target": "A"
+        },
+        {
+          "sender": "A",
+          "receiver": "C",
+          "target": "B"
+        },
+        {
+          "sender": "A",
+          "receiver": "C",
+          "target": "C"
+        },
+        {
+          "sender": "B",
+          "receiver": "A",
+          "target": "A"
+        },
+        {
+          "sender": "B",
+          "receiver": "A",
+          "target": "B"
+        },
+        {
+          "sender": "B",
+          "receiver": "A",
+          "target": "C"
+        },
+        {
+          "sender": "B",
+          "receiver": "B",
+          "target": "A"
+        },
+        {
+          "sender": "B",
+          "receiver": "B",
+          "target": "B"
+        },
+        {
+          "sender": "B",
+          "receiver": "B",
+          "target": "C"
+        },
+        {
+          "sender": "B",
+          "receiver": "C",
+          "target": "A"
+        },
+        {
+          "sender": "B",
+          "receiver": "C",
+          "target": "B"
+        },
+        {
+          "sender": "B",
+          "receiver": "C",
+          "target": "C"
+        },
+        {
+          "sender": "C",
+          "receiver": "A",
+          "target": "A"
+        },
+        {
+          "sender": "C",
+          "receiver": "A",
+          "target": "B"
+        },
+        {
+          "sender": "C",
+          "receiver": "A",
+          "target": "C"
+        },
+        {
+          "sender": "C",
+          "receiver": "B",
+          "target": "A"
+        },
+        {
+          "sender": "C",
+          "receiver": "B",
+          "target": "B"
+        },
+        {
+          "sender": "C",
+          "receiver": "B",
+          "target": "C"
+        },
+        {
+          "sender": "C",
+          "receiver": "C",
+          "target": "A"
+        },
+        {
+          "sender": "C",
+          "receiver": "C",
+          "target": "B"
+        },
+        {
+          "sender": "C",
+          "receiver": "C",
+          "target": "C"
+        }
+      ],
+      "expected": [
+        false,
+        false,
+        false,
+        false,
+        true,
+        false,
+        false,
+        false,
+        true,
+        true,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        true,
+        true,
+        false,
+        false,
+        false,
+        true,
+        false,
+        false,
+        false,
+        false
+      ]
+    }
+  ],
+  "schemas": {
+    "aligned": {
+      "$ref": "#/definitions/Expr",
+      "definitions": {
+        "Expr": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "literal": {
+                  "type": "object",
+                  "properties": {
+                    "value": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "value"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "literal"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "input": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "enum": [
+                        "held",
+                        "blocked",
+                        "enabled",
+                        "sender",
+                        "receiver",
+                        "target",
+                        "first",
+                        "second",
+                        "third"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "input"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "not": {
+                  "type": "object",
+                  "properties": {
+                    "condition": {
+                      "$ref": "#/definitions/Expr"
+                    }
+                  },
+                  "required": [
+                    "condition"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "not"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "equal": {
+                  "type": "object",
+                  "properties": {
+                    "left": {
+                      "$ref": "#/definitions/Expr"
+                    },
+                    "right": {
+                      "$ref": "#/definitions/Expr"
+                    }
+                  },
+                  "required": [
+                    "left",
+                    "right"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "equal"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "all": {
+                  "type": "object",
+                  "properties": {
+                    "conditions": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/definitions/Expr"
+                      },
+                      "minItems": 2,
+                      "maxItems": 3
+                    }
+                  },
+                  "required": [
+                    "conditions"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "all"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      }
+    },
+    "conventional": {
+      "$ref": "#/definitions/Expr",
+      "definitions": {
+        "Expr": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "op": {
+                  "type": "string",
+                  "enum": [
+                    "const"
+                  ]
+                },
+                "args": {
+                  "type": "array",
+                  "items": {
+                    "type": "boolean"
+                  },
+                  "minItems": 1,
+                  "maxItems": 1
+                }
+              },
+              "required": [
+                "op",
+                "args"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "op": {
+                  "type": "string",
+                  "enum": [
+                    "var"
+                  ]
+                },
+                "args": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "held",
+                      "blocked",
+                      "enabled",
+                      "sender",
+                      "receiver",
+                      "target",
+                      "first",
+                      "second",
+                      "third"
+                    ]
+                  },
+                  "minItems": 1,
+                  "maxItems": 1
+                }
+              },
+              "required": [
+                "op",
+                "args"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "op": {
+                  "type": "string",
+                  "enum": [
+                    "not"
+                  ]
+                },
+                "args": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/definitions/Expr"
+                  },
+                  "minItems": 1,
+                  "maxItems": 1
+                }
+              },
+              "required": [
+                "op",
+                "args"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "op": {
+                  "type": "string",
+                  "enum": [
+                    "eq"
+                  ]
+                },
+                "args": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/definitions/Expr"
+                  },
+                  "minItems": 2,
+                  "maxItems": 2
+                }
+              },
+              "required": [
+                "op",
+                "args"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "op": {
+                  "type": "string",
+                  "enum": [
+                    "and"
+                  ]
+                },
+                "args": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/definitions/Expr"
+                  },
+                  "minItems": 2,
+                  "maxItems": 3
+                }
+              },
+              "required": [
+                "op",
+                "args"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      }
+    }
+  },
+  "config": {
+    "seed": 0,
+    "threads": 2,
+    "supervised_tokens_per_arm": 256,
+    "max_updates_per_arm": 32,
+    "max_sequence_tokens": 384,
+    "rank": 4,
+    "alpha": 8,
+    "lr": 0.0001,
+    "gate_new_tokens": 128,
+    "composition_new_tokens": 256
+  },
+  "split": "All conjunction composition and role-reversal combination families withheld; held variable entirely absent from training. Same primitive operator schema/scaffold both arms. No testrequest or target supplied during training. Equality primitive is trained; conjunction primitive described but absent fromtrain. This tests tiny newcompositions not blind externalbenchmark.",
+  "source_sha256": "4224cde09cb7f88f552f5598dd6dcc6a2a056418d8a9f822325756ed0bb6cb5d",
+  "token_budget_rule": "256nonmasked targettokens perarm, fullprogram input retained; finalexample may have only prefix targetlabels active. Nevertruncateinput/target. Updatecounts may differ; report that optimizerstep confound. This is supervised-token matched not context-token matched."
+}
